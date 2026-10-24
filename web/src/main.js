@@ -294,7 +294,9 @@ function orderedSpots() {
       desc = true;
       const top = Object.entries(model.weights).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k);
       note = `Learned from your ${model.pos} 👍 and ${model.neg} 👎. You seem to like: ${top.map(nice).join(', ').toLowerCase()}. `
-        + 'To teach the whole-region ranking, download your ratings (bottom left) into config/ratings/ and re-run the scorer.';
+        + (SANDBOXED
+          ? 'To teach the whole-region ranking, copy your ratings (bottom left) and paste them back to Claude.'
+          : 'To teach the whole-region ranking, download your ratings (bottom left) into config/ratings/ and re-run the scorer.');
     } else {
       note = `Rate a few spots 👍 / 👎 (at least 2 good, 1 not) and this list sorts itself by your taste. So far: ${model.pos} 👍, ${model.neg} 👎.`;
     }
@@ -636,7 +638,7 @@ function aboutHtml() {
     <li>Airspace: ${esc(s.airspace || '')}.</li>
   </ul>
   <h3>Your ratings</h3>
-  <p>Kept in this browser only. <a href="#" data-export>Download them</a> to keep or feed back into the pipeline, or
+  <p>Kept in this browser only. <a href="#" data-export>${SANDBOXED ? 'Copy them' : 'Download them'}</a> to keep or feed back into the pipeline, or
   load a file: <input type="file" accept="application/json" data-import /></p>
   <p class="muted">Data: OpenStreetMap contributors (ODbL), Overture Maps, Meta/WRI canopy height, Environment Agency LiDAR (OGL),
   NATS UAS restriction zones, Open-Meteo. Built ${esc(state.meta.generated_at || '')}.</p>`;
