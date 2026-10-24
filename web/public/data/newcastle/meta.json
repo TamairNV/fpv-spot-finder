@@ -87,7 +87,7 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-24T01:28:29+00:00",
+  "generated_at": "2026-10-24T01:38:23+00:00",
   "sources": {
     "computed_at": "2026-10-24T01:06:58+00:00",
     "heights": "Meta 1 m canopy height model + Overture building heights",
@@ -99,7 +99,8 @@
       "durham-latest.osm.pbf",
       "northumberland-latest.osm.pbf",
       "tyne-and-wear-latest.osm.pbf"
-    ]
+    ],
+    "ratings": {}
   },
   "profiles": {
     "freestyle5": {
@@ -224,20 +225,20 @@
         "mix": 0.445,
         "vertical": 1.0,
         "relief": 0.057,
-        "bando": 1.0,
+        "bando": 0.0,
         "water": 0.0,
         "bridge": 0.94,
         "busy": 0.762,
         "hazard": 0.0,
         "wet": 0.0
       },
-      "score": 86,
+      "score": 78,
       "preview": {
         "file": "previews/396-362.png",
         "size": 160,
         "res": 2,
         "ground_min": 85.2,
-        "lidar": false,
+        "lidar": true,
         "center": [
           -1.64021,
           54.980647
@@ -282,7 +283,7 @@
         "size": 160,
         "res": 2,
         "ground_min": 55.5,
-        "lidar": false,
+        "lidar": true,
         "center": [
           -1.625434,
           54.973413

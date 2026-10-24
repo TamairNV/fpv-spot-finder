@@ -93,3 +93,12 @@ def test_lidar_encoding_matches_the_shared_pack():
     assert out["dtm2"].shape == (500, 500) and out["dtm2"][3, 3] == 100
     tall = lidar_wcs.encode(first + 100, last, dtm)
     assert tall["ndsm"][5, 5] == 254  # clipped at 63.5 m, 255 stays no-data
+
+
+def test_two_seeds_are_matched_separately():
+    p = scoring.PROFILES["cine85"]
+    comps = {k: np.zeros((30, 30)) for k in p.style_features}
+    comps["water"][5, 5] = 1.0  # one seed by the river
+    comps["architecture"][20, 20] = 1.0  # one among buildings
+    sim = scoring.similarity(comps, p, [[(5, 5)], [(20, 20)]], np.ones((30, 30), bool))
+    assert sim[5, 5] == sim.max() and sim[20, 20] == sim.max()

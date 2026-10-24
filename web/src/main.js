@@ -4,7 +4,7 @@ import './style.css';
 import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
-import { renderDetail } from './detail.js';
+import { renderDetail, nice } from './detail.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -235,7 +235,8 @@ function orderedSpots() {
       key = (f) => model.predict(f) * 0.7 + (f.properties.score / 100) * 0.3;
       desc = true;
       const top = Object.entries(model.weights).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k);
-      note = `Learned from your ${model.pos} 👍 and ${model.neg} 👎. You seem to like: ${top.join(', ')}.`;
+      note = `Learned from your ${model.pos} 👍 and ${model.neg} 👎. You seem to like: ${top.map(nice).join(', ').toLowerCase()}. `
+        + 'To teach the whole-region ranking, download your ratings (bottom left) into config/ratings/ and re-run the scorer.';
     } else {
       note = `Rate a few spots 👍 / 👎 (at least 2 good, 1 not) and this list sorts itself by your taste. So far: ${model.pos} 👍, ${model.neg} 👎.`;
     }
@@ -328,15 +329,19 @@ function seedsFor(profile) {
 function renderSeeds() {
   const box = $('#seeds-box');
   const seeds = seedsFor(state.profile);
+  const tools = el('div', { style: 'margin-top:8px;display:flex;gap:12px;flex-wrap:wrap' },
+    el('a', { href: `${BASE}/spots_${state.profile}.gpx`, download: `fpv-spots-${REGION}-${state.profile}.gpx` }, 'Spots as GPX'),
+    el('a', { href: '#', onclick: exportRatings }, 'Download my ratings'));
   if (!seeds.length) {
-    box.replaceChildren(el('div', {}, 'No seed spots for this drone. Add your favourite spots to config/seeds.toml and the ranking learns their style.'));
+    box.replaceChildren(el('div', {}, 'No seed spots for this drone. Add your favourite spots to config/seeds.toml and the ranking learns their style.'), tools);
     return;
   }
   box.replaceChildren(el('div', {}, el('b', {}, 'Your spots'), ' (the style the ranking looks for)'),
     ...seeds.map((s) => el('div', { style: 'margin-top:4px' },
       el('button', { onclick: () => openSeed(s) }, `★ ${s.name}`),
       ` scores ${s.score ?? '–'}`,
-      state.profile === 'freestyle5' && s.a3_frac < 0.6 ? el('span', { class: 'warn' }, ' · not A3-legal for the 5"') : null)));
+      state.profile === 'freestyle5' && s.a3_frac < 0.6 ? el('span', { class: 'warn' }, ' · not A3-legal for the 5"') : null)),
+    tools);
 }
 
 function drawSeeds() {
@@ -562,3 +567,7 @@ function aboutHtml() {
 }
 
 boot();
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}

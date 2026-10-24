@@ -294,6 +294,24 @@ def _heat_png(region: Region, final: np.ndarray, eligible: np.ndarray, path: Pat
     return corners
 
 
+def _gpx(feats: list[dict], title: str) -> str:
+    """Waypoints for the spots, for OS Maps, Google My Maps, Gaia, a GPS..."""
+    from xml.sax.saxutils import escape
+
+    pts = []
+    for f in feats:
+        p = f["properties"]
+        lon, lat = f["geometry"]["coordinates"]
+        desc = f"Score {p['score']}. " + "; ".join(p["drivers"]) + ". " + p["legal"]["summary"]
+        if p["legal"]["flags"]:
+            desc += " Warnings: " + "; ".join(p["legal"]["flags"])
+        pts.append(f'  <wpt lat="{lat}" lon="{lon}"><name>{escape(f"#{p["rank"]} {p["title"]}")}</name>'
+                   f'<desc>{escape(desc)}</desc><sym>Flag</sym></wpt>')
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="fpv-spot-finder" '
+            'xmlns="http://www.topografix.com/GPX/1/1">\n'
+            f"  <metadata><name>{escape(title)}</name></metadata>\n" + "\n".join(pts) + "\n</gpx>\n")
+
+
 def _drivers(comp_vals: dict[str, float], profile: scoring.Profile) -> list[str]:
     pos = [(k, comp_vals[k] * w) for k, w in profile.weights.items() if w > 0 and k in scoring.COMPONENT_TEXT]
     pos.sort(key=lambda kv: -kv[1])
@@ -415,6 +433,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
         (out / f"spots_{key}.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+        (out / f"spots_{key}.gpx").write_text(_gpx(feats, f"{profile.label} spots, {region.name}"))
         log.info("wrote %d %s spots", len(feats), key)
 
     seed_out = []

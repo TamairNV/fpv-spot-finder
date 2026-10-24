@@ -33,7 +33,9 @@ Two drone profiles out of the box:
 - **Can I fly here?**: tap anywhere on the map for a verdict for both drones, with reasons.
 - **Ratings**: 👍 / 👎 any spot. "My taste" re-ranks the list with a small model trained on your
   ratings; "More like this" finds spots similar to one you like. Ratings stay in your browser and can
-  be exported.
+  be exported and fed back into the pipeline.
+- **Works offline** once loaded (add it to your home screen), **GPX export** of the spots for OS Maps
+  or a GPS, and a share link for each spot.
 - Links out to Geograph (people's ground-level photos of that 1 km square, often the quickest way
   to judge a place), Street View, satellite and OS Maps.
 
@@ -95,6 +97,13 @@ python -m spotfinder features && python -m spotfinder score
 
 Squares without LiDAR fall back to the tree-height model, so a partial fetch is fine. Each spot card
 says which heights it used.
+
+### Teach it your taste
+
+In the app, 👍 / 👎 re-rank the list straight away ("My taste"). To make the whole region learn,
+not just the 250 listed spots: **Download my ratings** (bottom left), save the file as
+`config/ratings/<region>.json` and run `python -m spotfinder score`. Thumbs-up spots become extra
+seeds; places like your thumbs-down spots get pulled down.
 
 ### New region or new favourite spots
 

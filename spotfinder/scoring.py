@@ -180,20 +180,31 @@ def rule_score(c: dict[str, np.ndarray], p: Profile) -> np.ndarray:
     return np.clip(s / pos, 0, 1)
 
 
-def similarity(c: dict[str, np.ndarray], p: Profile, seed_cells: list[tuple[int, int]], valid: np.ndarray) -> np.ndarray | None:
-    """0..1, how close each cell's style features are to the seeds' (robust z-space)."""
-    if not seed_cells:
+def similarity(c: dict[str, np.ndarray], p: Profile, groups, valid: np.ndarray) -> np.ndarray | None:
+    """0..1, how close each cell's style is to the nearest seed (robust z-space).
+
+    `groups` is a list of seeds, each a list of (row, col) cells; a flat list of cells is one seed.
+    Each seed is compared on its own, so two different favourite spots don't blur into a third style."""
+    if not groups:
         return None
+    if isinstance(groups[0], tuple):
+        groups = [groups]
     feats = np.stack([c[k] for k in p.style_features], axis=-1)
     v = feats[valid]
     med = np.median(v, axis=0)
     iqr = np.subtract(*np.percentile(v, [90, 10], axis=0))
     iqr = np.where(iqr < 1e-6, 1.0, iqr)
     z = (feats - med) / iqr
-    seed = np.mean([z[r, cc] for r, cc in seed_cells], axis=0)
-    d = np.sqrt(((z - seed) ** 2).mean(axis=-1))
-    scale = np.median(d[valid])
-    return 1.0 / (1.0 + (d / max(scale, 1e-6)) ** 2)
+    best = None
+    for cells in groups:
+        if not cells:
+            continue
+        seed = np.mean([z[r, cc] for r, cc in cells], axis=0)
+        d = np.sqrt(((z - seed) ** 2).mean(axis=-1))
+        scale = np.median(d[valid])
+        sim = 1.0 / (1.0 + (d / max(scale, 1e-6)) ** 2)
+        best = sim if best is None else np.maximum(best, sim)
+    return best
 
 
 def pct_rank(a: np.ndarray, valid: np.ndarray) -> np.ndarray:

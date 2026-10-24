@@ -26,8 +26,11 @@ K = int(CELL / RES)  # 10 pixels per cell
 # owners and visitors, not derelict buildings.
 BANDO_HISTORIC = {"ruins", "fort", "mine", "mine_shaft", "monastery", "tower", "city_gate", "bunker",
                   "aircraft", "wreck", "lime_kiln", "kiln", "industrial"}
-# disused:amenity / disused:shop are closed pubs and shops, usually still standing and owned.
-NOT_BANDO_PREFIXED = {"disused:amenity", "disused:shop", "disused:name", "abandoned:name"}
+# Lifecycle-prefixed keys that mean a disused *structure*. A closed shop or car park
+# (disused:amenity=parking, disused:shop=...) isn't one.
+BANDO_PREFIXED = {f"{life}:{key}" for life in ("abandoned", "disused", "ruins")
+                  for key in ("building", "man_made", "industrial", "power", "military", "aeroway", "bridge")}
+BANDO_STRUCTURE_KEYS = {"building", "man_made", "industrial", "power", "military", "bridge"}
 LANDMARK_MAN_MADE = {"lighthouse", "water_tower", "chimney", "windmill", "tower", "obelisk"}
 HAZARD_MAN_MADE = {"mast", "communications_tower", "crane"}
 
@@ -50,9 +53,11 @@ def _cell_max(a: np.ndarray) -> np.ndarray:
 def _is_bando(t: dict) -> bool:
     if t.get("building") in osm.BUILDING_BANDO:
         return True
-    if t.get("abandoned") == "yes" or t.get("disused") == "yes" or t.get("ruins") == "yes":
+    if "yes" in (t.get("abandoned"), t.get("disused"), t.get("ruins")) and any(k in t for k in BANDO_STRUCTURE_KEYS):
         return True
-    if any(k.startswith(("abandoned:", "disused:", "ruins:")) and k not in NOT_BANDO_PREFIXED for k in t):
+    if any(k in BANDO_PREFIXED for k in t):
+        return True
+    if t.get("abandoned:landuse") in {"industrial", "quarry", "railway", "military"}:
         return True
     # brownfield is left out on purpose: in OSM it's mostly cleared land or building sites
     return t.get("historic") in BANDO_HISTORIC
@@ -120,7 +125,6 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
 
     bando_areas = areas[areas["tags"].map(_is_bando)]
     bando_nodes = nodes[nodes["tags"].map(_is_bando)]
-    old_rail = lines[lines["tags"].map(lambda t: t.get("railway") in {"abandoned", "disused"})]
 
     land = overture.load_layer(region, "land")
     cliffs = pd.concat([
@@ -155,7 +159,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
         "dist_water": dist_to(pd.concat([big_water.geometry, rivers.geometry])),
         "dist_bridge": dist_to(big_bridges),
         "dist_footbridge": dist_to(bridge_lines.geometry),
-        "dist_bando": dist_to(pd.concat([bando_areas.geometry, bando_nodes.geometry, old_rail.geometry])),
+        "dist_bando": dist_to(pd.concat([bando_areas.geometry, bando_nodes.geometry])),
         "dist_cliff": dist_to(cliffs),
         "dist_quarry": dist_to(quarry.geometry),
         "dist_landmark": dist_to(landmarks),

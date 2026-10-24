@@ -11,7 +11,7 @@ import numpy as np
 from scipy import ndimage
 
 from . import context, export, features, legal, rasterize, scoring
-from .config import Region, load_seeds
+from .config import CONFIG_DIR, Region, load_seeds
 from .heights import lidar_paths
 from .sources import canopy, osm, overture, terrain
 
@@ -71,12 +71,39 @@ def load_cells(region: Region) -> dict[str, np.ndarray]:
         return {k: z[k] for k in z.files}
 
 
+def load_ratings(region: Region) -> dict[str, tuple[list, list]]:
+    """Thumbs up/down exported from the app (config/ratings/<region>.json): {profile: (up cells, down cells)}."""
+    path = CONFIG_DIR / "ratings" / f"{region.key}.json"
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text()).get("ratings", {})
+    out: dict[str, tuple[list, list]] = {}
+    for k, r in data.items():
+        profile, _, spot = k.partition("/")
+        try:
+            rc = tuple(int(v) for v in spot.split("-"))
+        except ValueError:
+            continue  # seeds and other non-cell ids
+        if profile in scoring.PROFILES and len(rc) == 2 and r.get("v"):
+            out.setdefault(profile, ([], []))[0 if r["v"] > 0 else 1].append(rc)
+    log.info("ratings: %s", {k: (len(u), len(d)) for k, (u, d) in out.items()})
+    return out
+
+
 def score_and_export(region: Region, n_spots: int = 250, previews: int = 120) -> dict:
     cells = load_cells(region)
     meta = json.loads((region.out_dir / "cells_meta.json").read_text())
     seeds = load_seeds()
     results = {}
     land = (cells["water_frac"] < 0.6) & (cells["elev"] > -2)
+    rated = load_ratings(region)
+    H, W = land.shape
+
+    def _near(rc):  # a rated spot's own cell and its neighbours
+        r, c = rc
+        return [(i, j) for i in range(max(r - 1, 0), min(r + 2, H)) for j in range(max(c - 1, 0), min(c + 2, W))]
+
+    meta["ratings"] = {k: {"up": len(u), "down": len(d)} for k, (u, d) in rated.items()}
     for key, profile in scoring.PROFILES.items():
         comps = scoring.components(cells, profile)
         style = scoring.components(cells, profile, legal_only=False)
@@ -87,10 +114,13 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120) ->
         eligible = land & (cells[profile.legal_key] >= profile.legal_min) & ~keep_out
         if profile.legal_window_min:
             eligible &= scoring.win_mean(cells[profile.legal_key], profile.radius_cells) >= profile.legal_window_min
-        seed_cells = [export.cell_of(region, s.bng) for s in seeds if s.profile == key]
-        seed_cells = [rc for s, rc in zip([s for s in seeds if s.profile == key], seed_cells)
-                      for rc in export.cells_within(region, s.bng, s.radius_m)]
-        sim = scoring.similarity(style, profile, seed_cells, land)
+        groups = [export.cells_within(region, s.bng, s.radius_m) for s in seeds if s.profile == key]
+        up, down = rated.get(key, ([], []))
+        sim = scoring.similarity(style, profile, groups + [_near(rc) for rc in up], land)
+        if sim is not None and down:
+            # places like the ones you binned get pulled down
+            sim = np.clip(sim - 0.6 * scoring.similarity(style, profile, [_near(rc) for rc in down], land), 0, 1)
+        seed_cells = [rc for g in groups for rc in g]
         # Rules scaled so the best 0.1% of the region reads ~100; taste is already 0..1 (1 = just like the seeds).
         top = float(np.percentile(rule[eligible], 99.9)) if eligible.any() else 1.0
         rule_n = np.clip(rule / max(top, 1e-6), 0, 1)

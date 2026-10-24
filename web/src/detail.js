@@ -102,6 +102,21 @@ export function renderDetail(host, { spot, meta, profile, ratings, base, onRate,
       el('button', { class: `up${rating > 0 ? ' on' : ''}`, onclick: () => onRate(rating > 0 ? 0 : 1) }, '👍 Good spot'),
       el('button', { class: `down${rating < 0 ? ' on' : ''}`, onclick: () => onRate(rating < 0 ? 0 : -1) }, '👎 Not for me'),
       el('button', { class: 'like', onclick: onLike }, 'More like this')));
+    const url = `${location.origin}${location.pathname}${location.search}#${profile}/${p.id}`;
+    const share = el('a', {
+      href: url,
+      onclick: async (e) => {
+        e.preventDefault();
+        try {
+          if (navigator.share) await navigator.share({ title: `${p.title} (FPV spot)`, url });
+          else {
+            await navigator.clipboard.writeText(url);
+            share.textContent = 'Link copied';
+          }
+        } catch { /* share sheet closed */ }
+      },
+    }, 'Share this spot');
+    kids.push(el('div', { style: 'font-size:13px;margin:2px 0 4px' }, share));
   }
 
   const p3dHost = el('div');
