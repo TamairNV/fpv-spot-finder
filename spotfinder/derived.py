@@ -23,7 +23,8 @@ def add_derived(cells: dict[str, np.ndarray], region: Region) -> dict[str, np.nd
     out.update(gap_quality(region, cells["gaps"].shape))
     for k in ("dist_bando_site", "dist_road_busy"):
         out.setdefault(k, np.full(cells["gaps"].shape, 1e6, dtype="float32"))
-    for k in ("public_frac", "farm_frac", "treeline_m", "edge_w_m"):
+    for k in ("public_frac", "farm_frac", "treeline_m", "edge_w_m", "line5", "line5_m", "line5_n",
+              "linew", "linew_m", "linew_n"):
         out.setdefault(k, np.zeros(cells["gaps"].shape, dtype="float32"))
     return out
 

@@ -18,6 +18,7 @@ from scipy import ndimage
 from tqdm import tqdm
 
 from .config import Region
+from . import lines
 from .heights import HeightReader, Tile
 
 try:
@@ -38,6 +39,9 @@ GAP_MIN_W = 2.0
 GAP_MAX_W = 12.0
 GAP_MIN_FLANK = 5.0
 LONE_RING = 10.0
+ORBIT_R = 10.0       # an orbit needs this much clear air all round the crown...
+ORBIT_BLOCK_H = 3.0  # ...with nothing this tall in it (another tree, a bush, a wall)
+ORBIT_MAX_BLOCKED = 0.03
 THROUGH_R = 8     # metres out from a gap's middle that must be open on both sides to fly through it
 TREELINE_MIN_LEN = 40.0  # a tree belt this long and...
 TREELINE_MAX_W = 15.0    # ...this narrow is a tree line / hedgerow to skim
@@ -47,6 +51,7 @@ CELL_FEATURES = [
     "h_p90", "tree_h_p90", "bld_h_mean", "bld_h_max", "bld_h_std",
     "edge_tree_m", "edge_bld_m", "gaps", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max",
     "under_frac", "lidar_frac", "gaps_all", "treeline_m", "edge_w_m",
+    "line5", "line5_m", "line5_n", "linew", "linew_m", "linew_n",
 ]
 
 _reader: HeightReader | None = None
@@ -106,8 +111,10 @@ class TileResult:
     lone: list[tuple]
 
 
-def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list, list]:
-    ohm, trees = t.ohm, t.trees
+def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = False):
+    """Per-cell features, gaps and lone trees for one tile. With want_lines, also the flyable runs found
+    in it: {style name: (nodes, scores, paths)} in tile pixels."""
+    ohm, trees = leaf_on(t)
     tall = ohm >= TALL_M
     road = t.ways == 1
     rail = t.ways == 3
@@ -131,7 +138,7 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
         flank = g.mean(flank_src)
         tree_frac = g.mean(ndimage.grey_dilation((trees >= TALL_M).astype("float32"), size=(7, 7)))
         com = list(zip(*g.centre()))
-        through = _through(open_ | (ohm < OPEN_M), com, ohm.shape)
+        through = _through(ohm < OPEN_M, com, ohm.shape)  # leaf_on already filled the canopy speckle
         for a, w, f, (r, c), th, tf in zip(area, width, flank, com, through, tree_frac):
             if 3 <= a <= 400 and GAP_MIN_W <= w <= GAP_MAX_W and f >= GAP_MIN_FLANK:
                 gaps.append((r, c, float(w), float(f), float(a), bool(th), float(tf)))
@@ -148,6 +155,9 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
         ring_n = np.bincount(nearest[ring], minlength=tn + 1)[1:]
         ring_open = np.bincount(nearest[ring & open_], minlength=tn + 1)[1:]
         cand = (area >= 4) & (area <= 300) & (hmax >= 5) & (ring_n > 0) & (ring_open >= 0.8 * np.maximum(ring_n, 1))
+        # That ring only covers the ground closer to this crown than to any other, so a tree in a
+        # loose clump passes it. An orbit needs a full circle of clear air round the crown.
+        cand &= _orbit_clear(tlab, ohm, cand)
         if cand.any():
             cr, cc = tl.centre()
             for r, c, h, a in zip(cr[cand], cc[cand], hmax[cand], area[cand]):
@@ -247,7 +257,63 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
             cells["lone"][i, j] += 1
             cells["lone_h_max"][i, j] = max(cells["lone_h_max"][i, j], h)
             keep_lone.append((t.x0 + c + 0.5, t.y1 - r - 0.5, h, a))
-    return {k: v.astype("float32") for k, v in cells.items()}, keep_gaps, keep_lone
+    # --- Flyable lines: chain the obstacles into runs and keep the best run starting in each cell.
+    runs = {}
+    for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
+        nodes = lines.nodes_from(gaps, lone, treeline, style)
+        nb = lines.links(nodes, ohm, style)
+        scores, paths = lines.all_runs(nodes, nb)
+        runs[name] = (nodes, scores, paths)
+        for k in (name, name + "_m", name + "_n"):
+            cells[k] = np.zeros((grid_n, grid_n), dtype="float32")
+        for i in np.argsort(scores):  # best last, so it wins the cell
+            rr, cc = nodes[i, 0] - m, nodes[i, 1] - m
+            if 0 <= rr < size and 0 <= cc < size:
+                ci, cj = int(rr // n), int(cc // n)
+                cells[name][ci, cj] = scores[i]
+                cells[name + "_m"][ci, cj] = lines.path_length(nodes, paths[i])
+                cells[name + "_n"][ci, cj] = len(paths[i])
+    out = {k: v.astype("float32") for k, v in cells.items()}
+    if want_lines:
+        return out, keep_gaps, keep_lone, runs
+    return out, keep_gaps, keep_lone
+
+
+def leaf_on(t: Tile) -> tuple[np.ndarray, np.ndarray]:
+    """Summer canopy from winter LiDAR. Much of the EA survey was flown with no leaves on, so bushy
+    deciduous crowns come out speckled with 1-2 m holes that aren't there when you fly. Close the tree
+    canopy by a metre (fills those holes, not real gaps, which are 2 m+ wide) and give the filled
+    pixels the height of the crown round them. Only LiDAR pixels; the canopy model is already smooth."""
+    canopy = t.trees >= 3.0
+    if not t.lidar.any():
+        return t.ohm, t.trees
+    filled = ndimage.binary_closing(canopy, structure=np.ones((3, 3)), border_value=0) & ~canopy & t.lidar & ~t.bld
+    if not filled.any():
+        return t.ohm, t.trees
+    crown = ndimage.grey_closing(t.trees, size=(3, 3))
+    trees = np.where(filled, crown, t.trees)
+    return np.maximum(t.ohm, trees), trees
+
+
+def _orbit_clear(tlab: np.ndarray, ohm: np.ndarray, cand: np.ndarray) -> np.ndarray:
+    """For each candidate blob: is the band ORBIT_R m round its crown free of anything over ORBIT_BLOCK_H
+    (other trees, bushes, walls)? A 3 m max filter stops LiDAR speckle in a hedge reading as gaps."""
+    ok = np.zeros(len(cand), dtype=bool)
+    blocked_all = ndimage.maximum_filter(ohm, size=3) >= ORBIT_BLOCK_H
+    pad = int(ORBIT_R) + 2
+    h, w = ohm.shape
+    for i, sl in enumerate(ndimage.find_objects(tlab)):
+        if sl is None or not cand[i]:
+            continue
+        r0, r1 = max(sl[0].start - pad, 0), min(sl[0].stop + pad, h)
+        c0, c1 = max(sl[1].start - pad, 0), min(sl[1].stop + pad, w)
+        own = tlab[r0:r1, c0:c1] == i + 1
+        # the crown itself plus a metre of its own fringe, then the band round it
+        d = ndimage.distance_transform_edt(~own)
+        band = (d > 1.5) & (d <= ORBIT_R)
+        blocked = blocked_all[r0:r1, c0:c1] & band
+        ok[i] = blocked.sum() <= ORBIT_MAX_BLOCKED * max(band.sum(), 1)
+    return ok
 
 
 def _through(open_: np.ndarray, com, shape) -> np.ndarray:

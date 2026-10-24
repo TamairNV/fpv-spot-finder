@@ -208,3 +208,49 @@ def test_bando_labels_say_what_it_was():
     assert bandos._osm_url("x1") is None
     assert bandos.heritage({"historic": "ruins", "designation": "scheduled_monument"})
     assert not bandos.heritage({"building": "ruins"})
+
+
+def test_line_links_need_clear_air():
+    from spotfinder import lines
+
+    ohm = np.zeros((200, 200), "float32")
+    nodes = np.array([[100, 50, lines.LONE, 1.0, 6], [100, 90, lines.GAP, 1.0, 6], [100, 130, lines.LONE, 1.0, 6]])
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    assert nb[0] == [1] and sorted(nb[1]) == [0, 2]
+    ohm[80:120, 110] = 10  # a wall between the gap and the last tree
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    assert nb[1] == [0] and nb[2] == []
+
+
+def test_run_prefers_variety_and_flow():
+    from spotfinder import lines
+
+    ohm = np.zeros((300, 300), "float32")
+    # a straight run east: tree, gap, dive tree, gap; plus a skim node off at a hairpin angle
+    nodes = np.array([[150, 30, lines.LONE, 1.0, 6], [150, 70, lines.GAP, 1.0, 6], [150, 110, lines.DIVE, 1.0, 6],
+                      [150, 150, lines.GAP, 1.0, 6], [140, 60, lines.SKIM, 1.0, 6]])
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    score, path = lines.best_run(0, nodes, nb)
+    assert path[:4] == [0, 1, 2, 3]
+    assert score > sum(lines.VALUE[k] for k in (lines.LONE, lines.GAP, lines.DIVE, lines.GAP))
+
+
+def test_analyse_reports_line_cells():
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    for c in range(300, 700, 40):  # a row of separate trees across a field: orbit, gap, orbit...
+        ohm[500:508, c:c + 8] = 12
+    cells, _, _ = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert cells["line5"].max() > 4 and cells["line5_n"].max() >= 5
+
+
+def test_tree_in_a_loose_clump_is_not_an_orbit():
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    ohm[600:606, 300:306] = 12
+    ohm[600:606, 314:320] = 10  # a second tree 8 m away: the first passes its Voronoi ring, not an orbit
+    _, _, lone = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert len(lone) == 0
+    ohm[600:606, 314:320] = 2  # just a low bush: still a fine orbit
+    _, _, lone = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert len(lone) == 1
