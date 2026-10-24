@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> None:
         ("regions", "rewrite web/public/data/regions.json, the app's list of regions"),
         ("grid", "tile a whole country into 40 km regions (config/regions_grid.toml)"),
         ("queue", "work through many regions unattended; skips ones already done, so safe to rerun"),
+        ("eval", "grade the scoring against real spots in config/known_spots.toml (writes nothing to the app)"),
     ]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--region", default="newcastle", help="region key, comma-separated keys, or 'all'")
@@ -53,6 +54,8 @@ def main(argv: list[str] | None = None) -> None:
                            help="regions processed side by side, each in its own process; the map-data and "
                                 "scoring steps are mostly single-threaded, so this is what fills all the cores")
             p.add_argument("--shard", help=argparse.SUPPRESS)  # i/n: set by --jobs for each child
+        if name == "eval":
+            p.add_argument("--json", type=Path, help="also write every row (rank, components, raw distances) here")
         if name == "lidar":
             p.add_argument("--top", type=int, default=0,
                            help="only fetch the 1 km squares under the best N spots per profile (0 = whole region)")
@@ -108,6 +111,10 @@ def _run(args, region) -> None:
         pipeline.refresh_context(region)
     if args.cmd == "legal":
         pipeline.refresh_legal(region)
+    if args.cmd == "eval":
+        from . import evaluate
+
+        evaluate.run(region, json_out=args.json)
     if args.cmd in ("score", "run"):
         pipeline.score_and_export(region, n_spots=args.spots, previews=args.previews, strict=args.strict)
 

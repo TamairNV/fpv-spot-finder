@@ -131,6 +131,14 @@ not just the listed spots: **Download my ratings and notes** (bottom left), save
 `config/ratings/<region>.json` and run `python -m spotfinder score`. Thumbs-up spots become extra
 seeds; places like your thumbs-down spots get pulled down.
 
+### Check it against real spots
+
+`config/known_spots.toml` lists real places people fly around Newcastle (viaducts, beaches, bandos,
+quarries, landmarks), each with the drones it suits and why it's good. `python -m spotfinder eval`
+scores the region the same way `score` does, writes nothing to the app, and says for every one
+whether a listed spot lands on it, at what rank, and which parts of the score lifted or sank it
+(`--json out.json` for the full breakdown). Run it before and after a scoring change.
+
 ### New region or new favourite spots
 
 - Regions: add a box to `config/regions.toml` (British National Grid metres, whole km) and list the
