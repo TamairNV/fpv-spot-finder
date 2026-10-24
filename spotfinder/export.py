@@ -616,3 +616,12 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "classes": ["ground", "water", "road", "path", "tree", "building"]},
     }
     (out / "meta.json").write_text(json.dumps(site_meta, indent=2))
+    write_offline_list(out, site_meta["generated_at"])
+
+
+def write_offline_list(out: Path, generated_at: str) -> None:
+    """What the service worker fetches for offline use: everything but the 3D previews and GPX."""
+    files = sorted(p.relative_to(out).as_posix() for p in out.rglob("*")
+                   if p.is_file() and p.suffix != ".gpx" and p.name != "offline.json"
+                   and p.relative_to(out).parts[0] != "previews")
+    (out / "offline.json").write_text(json.dumps({"generated_at": generated_at, "files": files}, indent=0))

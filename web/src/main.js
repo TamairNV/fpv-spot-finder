@@ -27,24 +27,24 @@ function liteStyle() {
     version: 8,
     sources: {
       lite: {
-        type: 'geojson', data: abs(`${BASE}/basemap.json`), tolerance: 0.5,
+        type: 'vector', tiles: [`${abs(`${BASE}/tiles/`)}{z}/{x}/{y}.pbf`], minzoom: 8, maxzoom: 12, bounds: regionBounds(),
         attribution: '© OpenStreetMap contributors, Overture Maps',
       },
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#f2f2ee' } },
-      { id: 'lite-built', type: 'fill', source: 'lite', filter: k('built'), paint: { 'fill-color': '#e7e4de' } },
-      { id: 'lite-green', type: 'fill', source: 'lite', filter: k('green'), paint: { 'fill-color': '#e0eadb' } },
-      { id: 'lite-wood', type: 'fill', source: 'lite', filter: k('wood'), paint: { 'fill-color': '#d2e2c8' } },
-      { id: 'lite-water', type: 'fill', source: 'lite', filter: k('water'), paint: { 'fill-color': '#c2d8e8' } },
-      { id: 'lite-waterline', type: 'line', source: 'lite', filter: k('waterline'), paint: { 'line-color': '#c2d8e8', 'line-width': w(1, 5) } },
-      { id: 'lite-rail', type: 'line', source: 'lite', filter: k('rail'), paint: { 'line-color': '#a9a9a9', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
+      { id: 'lite-built', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('built'), paint: { 'fill-color': '#e7e4de' } },
+      { id: 'lite-green', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('green'), paint: { 'fill-color': '#e0eadb' } },
+      { id: 'lite-wood', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('wood'), paint: { 'fill-color': '#d2e2c8' } },
+      { id: 'lite-water', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('water'), paint: { 'fill-color': '#c2d8e8' } },
+      { id: 'lite-waterline', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('waterline'), paint: { 'line-color': '#c2d8e8', 'line-width': w(1, 5) } },
+      { id: 'lite-rail', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('rail'), paint: { 'line-color': '#a9a9a9', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
       {
-        id: 'lite-road-case', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        id: 'lite-road-case', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': '#d3cfc8', 'line-width': w(['match', ['get', 'r'], 1, 2.6, 2, 1.8, 1.2], ['match', ['get', 'r'], 1, 10, 2, 8, 6]) },
       },
       {
-        id: 'lite-road', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        id: 'lite-road', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': ['match', ['get', 'r'], 1, '#f7dca6', 2, '#fbefcf', '#ffffff'],
           'line-width': w(['match', ['get', 'r'], 1, 1.6, 2, 1, 0.6], ['match', ['get', 'r'], 1, 8, 2, 6, 4.5]),
@@ -82,12 +82,20 @@ let map, lookup, ratings, checkPopup;
 let liteActive = false;
 let placeLabels = [];
 
+// The basemap tiles stop at the region's edge; asking for ones outside would only 404.
+function regionBounds() {
+  const lons = state.meta.region.corners.map((c) => c[0]), lats = state.meta.region.corners.map((c) => c[1]);
+  return [Math.min(...lons) - 0.01, Math.min(...lats) - 0.01, Math.max(...lons) + 0.01, Math.max(...lats) + 0.01];
+}
+
 const profiles = () => Object.keys(state.meta.profiles);
 const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.category || '');
 
 // ---------------------------------------------------------------- boot
 
 async function boot() {
+  // The last-used drone's spots download alongside meta.json rather than after it.
+  const early = fetch(`${BASE}/spots_${state.profile}.geojson`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const metaRes = await fetch(`${BASE}/meta.json`);
   if (!metaRes.ok) {
     document.body.innerHTML = `<div style="padding:40px;color:#eee;font:16px system-ui">No data for “${esc(REGION)}” yet.
@@ -98,7 +106,8 @@ async function boot() {
   ratings = new Ratings(REGION);
   $('#region-name').textContent = state.meta.region.name;
   const keys = profiles();
-  const loaded = await Promise.all(keys.map((k) => fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
+  const loaded = await Promise.all(keys.map(async (k) => (k === state.profile && await early)
+    || fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
   keys.forEach((k, i) => {
     loaded[i].features.forEach((f) => { f.properties.a3 = f.properties.legal?.a3_clear_pct ?? 0; });
     state.spots[k] = loaded[i];
@@ -275,6 +284,7 @@ function initMap() {
     hash: false,
     dragRotate: !TOUCH.matches,
   });
+  if (params.has('bench')) window.__map = map;  // for scripts/bench.mjs
   map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: 'Heights © Environment Agency (OGL)' }), 'bottom-right');
   if (!PHONE.matches) map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   if (!SANDBOXED) {
@@ -996,5 +1006,9 @@ function aboutHtml() {
 boot();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD && !SANDBOXED) {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // Once it's running, have it fetch this region's map data so the app works offline in the field.
+  navigator.serviceWorker.register('./sw.js')
+    .then(() => navigator.serviceWorker.ready)
+    .then((reg) => reg.active?.postMessage({ precache: `${BASE}/offline.json` }))
+    .catch(() => {});
 }
