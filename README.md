@@ -9,11 +9,12 @@ It doesn't look at satellite photos. Every 50 m square of a region gets measured
 then scored on the things pilots actually look for. Spots you already like steer the ranking, and so
 do your 👍 / 👎 in the app.
 
-Two drone profiles out of the box:
+Three profiles out of the box:
 
 | Profile | Drone | UK category | What it hunts for |
 |---|---|---|---|
 | `freestyle5` | 5", 800 g with battery and action cam, no class mark | Open **A3** | gaps, lone trees, tree lines, open ground, drops, bandos; each spot says whether it's A3-clear |
+| `cine5` | the same 5", flown smooth and cinematic | Open **A3** | rivers and coast, viaducts, hills and banks, landmarks and ruins, big fields, a clear view of the sunset; each spot says whether it's A3-clear |
 | `cine85` | 85 mm cinewhoop, under 250 g | Open **A1** | architecture, whoop-sized gaps, plazas, trees, water, bridges, landmarks |
 
 ![Spot card with the 3D model](docs/spot-card.png)
@@ -132,12 +133,20 @@ seeds; places like your thumbs-down spots get pulled down.
 1. **Heights at 1 m**: EA LiDAR first-return surface minus bare earth where available; otherwise
    Meta's tree-height model plus Overture building heights.
 2. **Geometry per 1 km tile**: tall = 4 m and up. Gaps are found by closing the tall mask (5 m) and
-   keeping the bits that were open: 2-12 m wide, both sides at least 5 m tall. Lone trees are tall
-   blobs with at least 80% open ground in a 10 m ring. Edges are tall pixels touching open ground.
-   With LiDAR, the difference between first and last returns finds room under the canopy.
+   keeping the bits that were open: 2-12 m wide, both sides at least 5 m tall, and open ground 8 m out
+   on both sides so you can actually fly through (a hole in a wood's canopy doesn't count). Gaps score
+   by width and how tall their sides are. Lone trees are tall blobs with at least 80% open ground in a
+   10 m ring. Edges are tall pixels touching open ground; tree lines are long, narrow belts of trees
+   (40 m+ long, under 15 m wide). With LiDAR, the difference between first and last returns finds
+   room under the canopy.
 3. **Context** from OSM and Overture: distance to water, bridges and viaducts, bandos (ruins,
-   abandoned/disused structures), cliffs and quarries, landmarks, masts and cranes, paths, car parks;
-   and how busy a place is.
+   abandoned/disused structures), cliffs and quarries, landmarks, masts and cranes, paths, car parks,
+   fast main roads, farmland and public open space; and how busy a place is. A mapped bando only counts
+   in full if LiDAR shows something solid still standing there; old pit and shaft markers with nothing
+   left count a little. Town-wall towers, gates and abbeys are landmarks, not bandos.
+   Also worked out per spot: how big the open field is, how far it is to walk in from a path or road,
+   and how high the skyline is towards the sunset (west-south-west to west-north-west, out to 2 km,
+   hills, woods and buildings included).
 4. **Legal grid at 5 m**: A3 needs 150 m from residential, commercial, industrial and recreational
    land and 50 m from buildings and busy roads; flight restriction zones and restricted areas block
    both drones. MOD land and danger areas are never suggested, and nor is anywhere a spot would
@@ -147,8 +156,10 @@ seeds; places like your thumbs-down spots get pulled down.
    suggestions to go and look at, so legality is a label rather than a filter: anywhere outside
    flight restriction zones and away from MOD land can be picked, and each spot says how much of it
    is A3-clear. `python -m spotfinder score --strict` brings back the old behaviour (the 5" only
-   gets A3-clear ground). Spots are picked greedily with a minimum spacing (400 m for the 5", 250 m
-   for the whoop).
+   gets A3-clear ground). Spots are picked greedily with a minimum spacing (400 m for the 5", 600 m
+   for 5" cine, 250 m for the whoop).
+   Each spot carries a "why" list: points out of 100 per reason, with the numbers behind it (e.g.
+   "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
 
 ## Be real about it
 
