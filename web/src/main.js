@@ -28,24 +28,24 @@ function liteStyle() {
     version: 8,
     sources: {
       lite: {
-        type: 'geojson', data: abs(`${BASE}/basemap.json`), tolerance: 0.5,
+        type: 'vector', tiles: [`${abs(`${BASE}/tiles/`)}{z}/{x}/{y}.pbf`], minzoom: 8, maxzoom: 12, bounds: regionBounds(),
         attribution: '© OpenStreetMap contributors, Overture Maps',
       },
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#f2f2ee' } },
-      { id: 'lite-built', type: 'fill', source: 'lite', filter: k('built'), paint: { 'fill-color': '#e7e4de' } },
-      { id: 'lite-green', type: 'fill', source: 'lite', filter: k('green'), paint: { 'fill-color': '#e0eadb' } },
-      { id: 'lite-wood', type: 'fill', source: 'lite', filter: k('wood'), paint: { 'fill-color': '#d2e2c8' } },
-      { id: 'lite-water', type: 'fill', source: 'lite', filter: k('water'), paint: { 'fill-color': '#c2d8e8' } },
-      { id: 'lite-waterline', type: 'line', source: 'lite', filter: k('waterline'), paint: { 'line-color': '#c2d8e8', 'line-width': w(1, 5) } },
-      { id: 'lite-rail', type: 'line', source: 'lite', filter: k('rail'), paint: { 'line-color': '#a9a9a9', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
+      { id: 'lite-built', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('built'), paint: { 'fill-color': '#e7e4de' } },
+      { id: 'lite-green', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('green'), paint: { 'fill-color': '#e0eadb' } },
+      { id: 'lite-wood', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('wood'), paint: { 'fill-color': '#d2e2c8' } },
+      { id: 'lite-water', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('water'), paint: { 'fill-color': '#c2d8e8' } },
+      { id: 'lite-waterline', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('waterline'), paint: { 'line-color': '#c2d8e8', 'line-width': w(1, 5) } },
+      { id: 'lite-rail', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('rail'), paint: { 'line-color': '#a9a9a9', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
       {
-        id: 'lite-road-case', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        id: 'lite-road-case', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': '#d3cfc8', 'line-width': w(['match', ['get', 'r'], 1, 2.6, 2, 1.8, 1.2], ['match', ['get', 'r'], 1, 10, 2, 8, 6]) },
       },
       {
-        id: 'lite-road', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        id: 'lite-road', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': ['match', ['get', 'r'], 1, '#f7dca6', 2, '#fbefcf', '#ffffff'],
           'line-width': w(['match', ['get', 'r'], 1, 1.6, 2, 1, 0.6], ['match', ['get', 'r'], 1, 8, 2, 6, 4.5]),
@@ -82,6 +82,15 @@ const state = {
 let map, lookup, ratings, checkPopup;
 let liteActive = false;
 let placeLabels = [];
+let heatHiLoaded = false;
+const heatHiWanted = () => heatHiLoaded || map.getZoom() >= 11;
+const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+// The basemap tiles stop at the region's edge; asking for ones outside would only 404.
+function regionBounds() {
+  const lons = state.meta.region.corners.map((c) => c[0]), lats = state.meta.region.corners.map((c) => c[1]);
+  return [Math.min(...lons) - 0.01, Math.min(...lats) - 0.01, Math.max(...lons) + 0.01, Math.max(...lats) + 0.01];
+}
 
 const profiles = () => Object.keys(state.meta.profiles);
 const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.category || '');
@@ -89,6 +98,8 @@ const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.catego
 // ---------------------------------------------------------------- boot
 
 async function boot() {
+  // The last-used drone's spots download alongside meta.json rather than after it.
+  const early = fetch(`${BASE}/spots_${state.profile}.geojson`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const metaRes = await fetch(`${BASE}/meta.json`);
   if (!metaRes.ok) {
     document.body.innerHTML = `<div style="padding:40px;color:#eee;font:16px system-ui">No data for “${esc(REGION)}” yet.
@@ -99,7 +110,8 @@ async function boot() {
   ratings = new Ratings(REGION);
   $('#region-name').textContent = state.meta.region.name;
   const keys = profiles();
-  const loaded = await Promise.all(keys.map((k) => fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
+  const loaded = await Promise.all(keys.map(async (k) => (k === state.profile && await early)
+    || fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
   keys.forEach((k, i) => {
     loaded[i].features.forEach((f) => { f.properties.a3 = f.properties.legal?.a3_clear_pct ?? 0; });
     state.spots[k] = loaded[i];
@@ -118,6 +130,21 @@ async function boot() {
   renderNow();
   syncControls();
   if (!SANDBOXED) loadRegions();
+  setTimeout(() => loadDetails(state.profile), 300);
+}
+
+// The spot card's extras (gap and tree positions, the why breakdown, links) come in a second file
+// per drone, fetched once the list is up, so the list itself shows sooner. Older data has them inline.
+const detailsLoad = {}, detailsDone = new Set();
+function loadDetails(key) {
+  detailsLoad[key] ||= fetch(`${BASE}/spot_details_${key}.json`)
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((byId) => {
+      state.spots[key]?.features.forEach((f) => Object.assign(f.properties, byId[f.properties.id]));
+      detailsDone.add(key);
+    });
+  return detailsLoad[key];
 }
 
 // "Now" banner: wind and rain for the next hour at the middle of the region, and today's light.
@@ -276,6 +303,7 @@ function initMap() {
     hash: false,
     dragRotate: !TOUCH.matches,
   });
+  if (params.has('bench')) window.__map = map;  // for scripts/bench.mjs
   map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: 'Heights © Environment Agency (OGL)' }), 'bottom-right');
   if (!PHONE.matches) map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   if (!SANDBOXED) {
@@ -305,6 +333,11 @@ function initMap() {
     updatePlaceLabels();
   });
   map.on('zoom', updatePlaceLabels);
+  map.on('zoom', () => {
+    if (heatHiLoaded || !heatHiWanted() || !map.getSource('heat')) return;
+    heatHiLoaded = true;
+    map.getSource('heat').updateImage({ url: `${BASE}/heat_${state.profile}.png`, coordinates: state.meta.region.heat_corners });
+  });
   map.on('click', onMapClick);
   map.on('contextmenu', (e) => {
     e.preventDefault();
@@ -374,7 +407,9 @@ function addOverlays() {
   // Zoomed in: the fine heatmap, fading as the streets get readable, plus the legal overlay.
   map.addSource('heatlo', { type: 'image', url: `${BASE}/heatlo_${state.profile}.png`, coordinates: m.heat_lo_corners || m.heat_corners });
   map.addLayer({ id: 'heatlo', type: 'raster', source: 'heatlo', maxzoom: 12, paint: { 'raster-opacity': 0.85, 'raster-fade-duration': 0 } }, before);
-  map.addSource('heat', { type: 'image', url: `${BASE}/heat_${state.profile}.png`, coordinates: m.heat_corners });
+  // The fine heatmap only draws from zoom 12, so it isn't fetched until the map gets close.
+  heatHiLoaded = heatHiWanted();
+  map.addSource('heat', { type: 'image', url: heatHiLoaded ? `${BASE}/heat_${state.profile}.png` : BLANK_PNG, coordinates: m.heat_corners });
   map.addLayer({ id: 'heat', type: 'raster', source: 'heat', minzoom: 12, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 0.3], 'raster-fade-duration': 0 } }, before);
   map.addSource('legal', { type: 'image', url: `${BASE}/legal_${state.profile}.png`, coordinates: m.legal_corners });
   map.addLayer({ id: 'legal', type: 'raster', source: 'legal', minzoom: 11.5, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 11.5, 0, 12.5, 0.85], 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } }, before);
@@ -445,10 +480,11 @@ function setProfile(key) {
   state.profile = key;
   state.like = null;
   savePrefs();
+  loadDetails(key);
   showList();
   const m = state.meta.region;
   if (map.getSource('heat')) {
-    map.getSource('heat').updateImage({ url: `${BASE}/heat_${key}.png`, coordinates: m.heat_corners });
+    if (heatHiLoaded) map.getSource('heat').updateImage({ url: `${BASE}/heat_${key}.png`, coordinates: m.heat_corners });
     map.getSource('heatlo').updateImage({ url: `${BASE}/heatlo_${key}.png`, coordinates: m.heat_lo_corners || m.heat_corners });
     map.getSource('legal').updateImage({ url: `${BASE}/legal_${key}.png`, coordinates: m.legal_corners });
   }
@@ -698,6 +734,15 @@ function select(id, fromList, push = true) {
   markSelected(id);
   showSelection(f);
   showSpot(f, false);
+  const key = state.profile;
+  if (!detailsDone.has(key)) {
+    loadDetails(key).then(() => {
+      if (state.selected === id && state.profile === key) {
+        showSelection(f);
+        showSpot(f, false);
+      }
+    });
+  }
   if (PHONE.matches) setSheet('half');
   flyToSpot(f, fromList ? 15.5 : Math.max(map.getZoom(), 14.5));
 }
@@ -1011,5 +1056,13 @@ function aboutHtml() {
 boot();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD && !SANDBOXED) {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // Once it's running, have it fetch this region's map data so the app works offline in the field.
+  navigator.serviceWorker.register('./sw.js')
+    .then(() => navigator.serviceWorker.ready)
+    .then((reg) => reg.active?.postMessage({
+      precache: `${BASE}/offline.json`,
+      // this first visit loaded the app before the worker was running, so hand it what was loaded
+      urls: performance.getEntriesByType('resource').map((r) => r.name).filter((u) => u.includes('/assets/')),
+    }))
+    .catch(() => {});
 }

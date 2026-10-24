@@ -20,6 +20,11 @@ from tqdm import tqdm
 from .config import Region
 from .heights import HeightReader, Tile
 
+try:
+    import edt as _edt_mod
+except ImportError:
+    _edt_mod = None
+
 log = logging.getLogger(__name__)
 
 CELL = 50        # metres per output cell
@@ -59,6 +64,39 @@ def _blocks(a: np.ndarray, n: int) -> np.ndarray:
     return a.reshape(h // n, n, w // n, n).transpose(0, 2, 1, 3).reshape(h // n, w // n, n * n)
 
 
+def _edt(mask: np.ndarray) -> np.ndarray:
+    """Distance to the nearest False pixel; the edt package is the same transform, several times faster."""
+    if _edt_mod is not None:
+        return _edt_mod.edt(mask, black_border=False, parallel=1)
+    return ndimage.distance_transform_edt(mask)
+
+
+class _Labels:
+    """Per-label count / max / mean / centre from ndimage.label output with bincount, which beats
+    ndimage.sum/maximum/center_of_mass several times over (they sort or loop per call)."""
+
+    def __init__(self, lab: np.ndarray, n: int):
+        self.rows, self.cols = np.nonzero(lab)
+        self.lab = lab[self.rows, self.cols]
+        self.n = n
+        self.count = np.bincount(self.lab, minlength=n + 1)[1:].astype("float64")
+
+    def _vals(self, a):
+        return a[self.rows, self.cols]
+
+    def max(self, a: np.ndarray) -> np.ndarray:
+        out = np.full(self.n + 1, -np.inf)
+        np.maximum.at(out, self.lab, self._vals(a))
+        return out[1:]
+
+    def mean(self, a: np.ndarray) -> np.ndarray:
+        return np.bincount(self.lab, weights=self._vals(a), minlength=self.n + 1)[1:] / self.count
+
+    def centre(self) -> tuple[np.ndarray, np.ndarray]:
+        w = lambda v: np.bincount(self.lab, weights=v, minlength=self.n + 1)[1:] / self.count
+        return w(self.rows), w(self.cols)
+
+
 @dataclass
 class TileResult:
     ix: int
@@ -81,18 +119,18 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
 
     # --- Gaps: morphological closing of the tall mask, minus the tall mask itself.
     dil = dt_tall <= GAP_FILL_R
-    closed = ndimage.distance_transform_edt(dil) > GAP_FILL_R
+    closed = _edt(dil) > GAP_FILL_R
     gap = closed & ~tall & (ohm < 2.5) & ~t.water & (dt_tall >= GAP_MIN_W / 2)
     glab, gn = ndimage.label(gap, structure=np.ones((3, 3)))
     gaps = []
     if gn:
-        idx = np.arange(1, gn + 1)
-        area = ndimage.sum(np.ones_like(ohm), glab, idx)
-        width = 2 * ndimage.maximum(dt_tall, glab, idx)
+        g = _Labels(glab, gn)
+        area = g.count
+        width = 2 * g.max(dt_tall)
         flank_src = ndimage.grey_dilation(np.where(tall, ohm, 0), size=(7, 7))
-        flank = ndimage.mean(flank_src, glab, idx)
-        tree_frac = ndimage.mean(ndimage.grey_dilation((trees >= TALL_M).astype("float32"), size=(7, 7)), glab, idx)
-        com = ndimage.center_of_mass(gap, glab, idx)
+        flank = g.mean(flank_src)
+        tree_frac = g.mean(ndimage.grey_dilation((trees >= TALL_M).astype("float32"), size=(7, 7)))
+        com = list(zip(*g.centre()))
         through = _through(open_ | (ohm < OPEN_M), com, ohm.shape)
         for a, w, f, (r, c), th, tf in zip(area, width, flank, com, through, tree_frac):
             if 3 <= a <= 400 and GAP_MIN_W <= w <= GAP_MAX_W and f >= GAP_MIN_FLANK:
@@ -102,17 +140,17 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
     tlab, tn = ndimage.label(tall, structure=np.ones((3, 3)))
     lone = []
     if tn:
-        idx = np.arange(1, tn + 1)
-        area = ndimage.sum(np.ones_like(ohm), tlab, idx)
-        hmax = ndimage.maximum(ohm, tlab, idx)
+        tl = _Labels(tlab, tn)
+        area = tl.count
+        hmax = tl.max(ohm)
         nearest = tlab[inds[0], inds[1]]
         ring = (dt_tall > 0) & (dt_tall <= LONE_RING)
         ring_n = np.bincount(nearest[ring], minlength=tn + 1)[1:]
         ring_open = np.bincount(nearest[ring & open_], minlength=tn + 1)[1:]
         cand = (area >= 4) & (area <= 300) & (hmax >= 5) & (ring_n > 0) & (ring_open >= 0.8 * np.maximum(ring_n, 1))
         if cand.any():
-            com = ndimage.center_of_mass(tall, tlab, idx[cand])
-            for (r, c), h, a in zip(com, hmax[cand], area[cand]):
+            cr, cc = tl.centre()
+            for r, c, h, a in zip(cr[cand], cc[cand], hmax[cand], area[cand]):
                 lone.append((r, c, float(h), float(a)))
 
     # --- Edges: tall pixels touching open ground (tree lines, building walls).

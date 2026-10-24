@@ -17,6 +17,8 @@ dependencies = [
     "tqdm>=4.66",
     "pillow>=10",
     "osmium>=3.7",
+    "mapbox-vector-tile>=2.0",
+    "edt>=2.4",
 ]
 
 [project.optional-dependencies]

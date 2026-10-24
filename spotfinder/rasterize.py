@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import geopandas as gpd
@@ -103,30 +105,37 @@ def build_vector_rasters(region: Region, tile_m: int = 2000, refresh: bool = Fal
     }
     tmp = {k: p.with_suffix(".part.tif") for k, p in out.items()}
     dsts = {k: rasterio.open(tmp[k], "w", **profiles[k]) for k in out}
+    def burn(gdf, values, dtype, tb, tr, shape, fill=0):
+        idx = gdf.sindex.query(tb, predicate="intersects")
+        if len(idx) == 0:
+            return np.full(shape, fill, dtype=dtype)
+        sub = gdf.iloc[idx]
+        vals = values.iloc[idx] if isinstance(values, pd.Series) else [values] * len(sub)
+        return rasterize(zip(sub.geometry, vals), out_shape=shape, transform=tr, fill=fill, dtype=dtype)
+
+    def tile(x0, y0):
+        tb = box(x0, y0, x0 + tile_m, y0 + tile_m)
+        tr = from_origin(x0, y0 + tile_m, 1.0, 1.0)
+        shape = (tile_m, tile_m)
+        win = rasterio.windows.Window(x0 - xmin, ymax - (y0 + tile_m), tile_m, tile_m)
+        bld = burn(b, b["h_dm"], "uint16", tb, tr, shape)
+        water = burn(w, 1, "uint8", tb, tr, shape)
+        ways = burn(paths, PATH_CODE, "uint8", tb, tr, shape)
+        r = burn(rails, RAIL_CODE, "uint8", tb, tr, shape)
+        ways[r > 0] = RAIL_CODE
+        rd = burn(roads, ROAD_CODE, "uint8", tb, tr, shape)
+        ways[rd > 0] = ROAD_CODE
+        return win, {"bld": bld, "water": water, "ways": ways}
+
+    # GDAL's burn releases the GIL, so tiles rasterise on a few threads; writes stay on this one.
+    for k in (b, w, paths, rails, roads):
+        k.sindex  # build the spatial indexes before the threads share them
+    jobs = [(x0, y0) for y0 in range(ymin, ymax, tile_m) for x0 in range(xmin, xmax, tile_m)]
     try:
-        for y0 in tqdm(range(ymin, ymax, tile_m), desc="rasterize rows"):
-            for x0 in range(xmin, xmax, tile_m):
-                tb = box(x0, y0, x0 + tile_m, y0 + tile_m)
-                tr = from_origin(x0, y0 + tile_m, 1.0, 1.0)
-                shape = (tile_m, tile_m)
-                win = rasterio.windows.Window(x0 - xmin, ymax - (y0 + tile_m), tile_m, tile_m)
-
-                def burn(gdf, values, dtype, fill=0):
-                    idx = gdf.sindex.query(tb, predicate="intersects")
-                    if len(idx) == 0:
-                        return np.full(shape, fill, dtype=dtype)
-                    sub = gdf.iloc[idx]
-                    vals = values.iloc[idx] if isinstance(values, pd.Series) else [values] * len(sub)
-                    return rasterize(zip(sub.geometry, vals), out_shape=shape, transform=tr, fill=fill, dtype=dtype)
-
-                dsts["bld"].write(burn(b, b["h_dm"], "uint16"), 1, window=win)
-                dsts["water"].write(burn(w, 1, "uint8"), 1, window=win)
-                ways = burn(paths, PATH_CODE, "uint8")
-                r = burn(rails, RAIL_CODE, "uint8")
-                ways[r > 0] = RAIL_CODE
-                rd = burn(roads, ROAD_CODE, "uint8")
-                ways[rd > 0] = ROAD_CODE
-                dsts["ways"].write(ways, 1, window=win)
+        with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+            for win, arrs in tqdm(pool.map(lambda j: tile(*j), jobs), total=len(jobs), desc="rasterize tiles"):
+                for k, a in arrs.items():
+                    dsts[k].write(a, 1, window=win)
     finally:
         for d in dsts.values():
             d.close()
