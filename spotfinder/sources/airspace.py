@@ -25,6 +25,7 @@ from ..config import STATIC_DIR
 log = logging.getLogger(__name__)
 
 NATS_DIR = STATIC_DIR / "nats"
+SHARED_NATS_DIRS = [Path("/mnt/project-files/fpv-data/nats")]  # the shared data pack, if it's mounted
 KML_NS = {"k": "http://www.opengis.net/kml/2.2"}
 PATTERN = re.compile(r"EG_UAS_FR_DS_AREA1_FULL_(\d{8})\.kmz$")
 
@@ -32,7 +33,8 @@ PATTERN = re.compile(r"EG_UAS_FR_DS_AREA1_FULL_(\d{8})\.kmz$")
 def pick_dataset(today: dt.date | None = None, folder: Path = NATS_DIR) -> tuple[Path, dt.date]:
     today = today or dt.date.today()
     found = []
-    for p in folder.glob("EG_UAS_FR_DS_AREA1_FULL_*.kmz"):
+    folders = [folder, *SHARED_NATS_DIRS] if folder == NATS_DIR else [folder]
+    for p in (p for d in folders for p in d.glob("EG_UAS_FR_DS_AREA1_FULL_*.kmz")):
         m = PATTERN.search(p.name)
         if m:
             found.append((dt.datetime.strptime(m.group(1), "%Y%m%d").date(), p))

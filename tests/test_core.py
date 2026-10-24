@@ -178,6 +178,18 @@ def test_why_points_add_up_to_the_score():
     assert out[0]["pts"] >= out[-1]["pts"] and all(d["text"] for d in out)
 
 
+def test_regions_config_is_sane():
+    from spotfinder.config import load_regions
+
+    regions = load_regions()
+    assert "newcastle" in regions
+    for r in regions.values():
+        xmin, ymin, xmax, ymax = r.bbox
+        assert xmin < xmax and ymin < ymax
+        assert all(v % 1000 == 0 for v in r.bbox), f"{r.key}: keep boxes on whole km so LiDAR tiles line up"
+        assert r.osm, f"{r.key}: list the Geofabrik extracts covering it"
+
+
 def test_every_park_without_a_spot_gets_its_best_cell():
     grid = np.zeros((20, 20), dtype="int32")
     grid[2:6, 2:6] = 1    # park 1 already has a spot in it

@@ -5,17 +5,25 @@ here (the Town Moor's leisure=common, for one). So land use, legal areas and
 the FPV-interesting stuff (bandos, ruins, cliffs, viaducts, lone trees, power
 lines) come straight from OSM.
 
-Put the county extracts covering the region in data/static/osm/
-(e.g. tyne-and-wear, northumberland, durham from download.geofabrik.de).
+Each region lists the Geofabrik county extracts it needs in regions.toml
+(`osm = ["tyne-and-wear", ...]`). Missing ones are downloaded into
+data/static/osm/ and MD5-checked. A region without a list reads every
+extract in that folder, as before.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import re
+import shutil
+from pathlib import Path
 
 import geopandas as gpd
 import osmium
 import pandas as pd
+import requests
 import shapely
 
 from ..config import BNG, STATIC_DIR, Region
@@ -23,6 +31,8 @@ from ..config import BNG, STATIC_DIR, Region
 log = logging.getLogger(__name__)
 
 OSM_DIR = STATIC_DIR / "osm"
+SHARED_OSM_DIRS = [Path("/mnt/project-files/fpv-data/osm")]  # extracts other runs already fetched
+GEOFABRIK = "https://download.geofabrik.de/europe/united-kingdom/england/{name}-latest.osm.pbf"
 
 AREA_KEYS = {
     "landuse", "leisure", "amenity", "natural", "historic", "military", "man_made", "tourism",
@@ -122,7 +132,7 @@ def extract(region: Region, refresh: bool = False) -> dict[str, gpd.GeoDataFrame
             out[k] = g
         return out
 
-    pbfs = sorted(OSM_DIR.glob("*.osm.pbf"))
+    pbfs = pbf_paths(region)
     if not pbfs:
         raise FileNotFoundError(f"No .osm.pbf extracts in {OSM_DIR}; get them from download.geofabrik.de")
     col = _Collector()
@@ -141,6 +151,54 @@ def extract(region: Region, refresh: bool = False) -> dict[str, gpd.GeoDataFrame
         disk.to_parquet(paths[k])
         out[k] = g
         log.info("OSM %s: %d", k, len(g))
+    return out
+
+
+def _find(name: str) -> Path | None:
+    for d in [OSM_DIR, *SHARED_OSM_DIRS]:
+        hits = [h for h in sorted(d.glob(f"{name}-*.osm.pbf"))  # name-latest or name-YYMMDD
+                if re.fullmatch(rf"{re.escape(name)}-(latest|\d{{6}})\.osm\.pbf", h.name)]
+        if hits:
+            return hits[-1]
+    return None
+
+
+def download(name: str) -> Path:
+    """Fetch one Geofabrik England extract and check its MD5."""
+    OSM_DIR.mkdir(parents=True, exist_ok=True)
+    url = GEOFABRIK.format(name=name)
+    dest = OSM_DIR / url.rsplit("/", 1)[1]
+    s = requests.Session()
+    s.headers["User-Agent"] = "fpv-spot-finder (personal hobby project)"
+    md5 = s.get(url + ".md5", timeout=30)
+    md5.raise_for_status()
+    want = md5.text.split()[0]
+    log.info("OSM: downloading %s", url)
+    tmp = dest.with_suffix(f".{os.getpid()}.part")  # parallel queue jobs may want the same extract
+    h = hashlib.md5()
+    with s.get(url, stream=True, timeout=120) as resp, open(tmp, "wb") as f:
+        resp.raise_for_status()
+        for chunk in resp.iter_content(1 << 20):
+            h.update(chunk)
+            f.write(chunk)
+    if h.hexdigest() != want:
+        tmp.unlink()
+        raise RuntimeError(f"MD5 mismatch for {url}")
+    tmp.replace(dest)
+    return dest
+
+
+def pbf_paths(region: Region) -> list[Path]:
+    """The region's extracts, local or shared, downloading any that are missing."""
+    if not region.osm:
+        return sorted(OSM_DIR.glob("*.osm.pbf"))
+    out = []
+    for name in region.osm:
+        p = _find(name)
+        if p is not None and p.parent != OSM_DIR:
+            OSM_DIR.mkdir(parents=True, exist_ok=True)
+            p = Path(shutil.copy2(p, OSM_DIR / p.name))
+        out.append(p or download(name))
     return out
 
 

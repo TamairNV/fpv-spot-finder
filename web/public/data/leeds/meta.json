@@ -1,0 +1,277 @@
+{
+  "region": {
+    "key": "leeds",
+    "name": "Leeds and Bradford",
+    "bbox_bng": [
+      400000,
+      415000,
+      440000,
+      455000
+    ],
+    "corners": [
+      [
+        -2.0014892249223677,
+        53.99104375617316
+      ],
+      [
+        -1.391431729746749,
+        53.989504435073954
+      ],
+      [
+        -1.3966143279557472,
+        53.63000704927569
+      ],
+      [
+        -2.0014742987296943,
+        53.63152635433133
+      ]
+    ],
+    "center": [
+      -1.6977523946353408,
+      53.81090764806108
+    ],
+    "heat_corners": [
+      [
+        -2.0014892249223677,
+        53.991043756173156
+      ],
+      [
+        -1.3914067640408256,
+        53.991043756173156
+      ],
+      [
+        -1.3914067640408256,
+        53.62992017594253
+      ],
+      [
+        -2.0014892249223677,
+        53.62992017594253
+      ]
+    ],
+    "heat_lo_corners": [
+      [
+        -2.0014892249223677,
+        53.991043756173156
+      ],
+      [
+        -1.3914067640408256,
+        53.991043756173156
+      ],
+      [
+        -1.3914067640408256,
+        53.62992017594253
+      ],
+      [
+        -2.0014892249223677,
+        53.62992017594253
+      ]
+    ],
+    "legal_corners": [
+      [
+        -2.0014892249223677,
+        53.991043756173156
+      ],
+      [
+        -1.391406764040826,
+        53.991043756173156
+      ],
+      [
+        -1.391406764040826,
+        53.62992017594253
+      ],
+      [
+        -2.0014892249223677,
+        53.62992017594253
+      ]
+    ],
+    "legal_res_m": 20,
+    "cell_m": 50
+  },
+  "generated_at": "2026-10-24T15:13:14+00:00",
+  "sources": {
+    "computed_at": "2026-10-24T15:12:29+00:00",
+    "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
+    "lidar_coverage": 0.9999966025352478,
+    "terrain": "EA LiDAR DTM (2 m, averaged to 5 m)",
+    "airspace": "NATS EG_UAS_FR_DS_AREA1_FULL_20261001.kmz (effective 2026-10-01)",
+    "overture_release": "2026-10-21.0",
+    "osm": [
+      "west-yorkshire-261023.osm.pbf",
+      "north-yorkshire-261023.osm.pbf"
+    ],
+    "ratings": {},
+    "ratings_other_regions": {},
+    "legal_mode": "label"
+  },
+  "profiles": {
+    "freestyle5": {
+      "label": "5\" freestyle",
+      "short": "5\"",
+      "drone": "5 inch, 800 g (no class mark)",
+      "category": "Open A3",
+      "weights": {
+        "gaps": 0.2,
+        "lone": 0.12,
+        "edges": 0.14,
+        "space": 0.1,
+        "mix": 0.08,
+        "vertical": 0.08,
+        "relief": 0.1,
+        "bando": 0.1,
+        "water": 0.04,
+        "bridge": 0.04,
+        "sunset": 0.04,
+        "busy": -0.15,
+        "hazard": -0.25,
+        "permission": -0.08,
+        "wet": -0.2,
+        "remote": -0.1,
+        "farm": -0.05,
+        "road": -0.12
+      },
+      "radius_m": 125.0,
+      "components": {
+        "gaps": "gaps between trees or buildings to fly through",
+        "lone": "lone trees or pillars to orbit and power-loop",
+        "edges": "tree lines and edges to skim along",
+        "space": "open ground to carry speed",
+        "mix": "a good mix of obstacles and open space",
+        "vertical": "tall stuff to dive and climb",
+        "relief": "slopes, banks or cliffs to dive",
+        "bando": "abandoned / ruined structures nearby",
+        "water": "water nearby for reflections",
+        "bridge": "a bridge or viaduct nearby",
+        "sunset": "a clear view west for golden hour",
+        "busy": "busy with people",
+        "hazard": "power lines, masts or cranes close by",
+        "permission": "land that needs the owner's permission",
+        "wet": "mostly water",
+        "remote": "a long walk from any path or road",
+        "farm": "farmland: crops or livestock, ask the farmer",
+        "road": "a fast main road right next to it"
+      }
+    },
+    "cine5": {
+      "label": "5\" cinematic",
+      "short": "5\" cine",
+      "drone": "5 inch, 800 g (no class mark)",
+      "category": "Open A3",
+      "weights": {
+        "water": 0.18,
+        "relief": 0.16,
+        "bridge": 0.14,
+        "landmark": 0.12,
+        "sunset": 0.14,
+        "space": 0.1,
+        "edges": 0.08,
+        "bando": 0.08,
+        "busy": -0.12,
+        "hazard": -0.25,
+        "permission": -0.08,
+        "wet": -0.2,
+        "remote": -0.08,
+        "road": -0.1
+      },
+      "radius_m": 175.0,
+      "components": {
+        "water": "water nearby for reflections",
+        "relief": "slopes, banks or cliffs to dive",
+        "bridge": "a bridge or viaduct nearby",
+        "landmark": "a landmark in shot",
+        "sunset": "a clear view west for golden hour",
+        "space": "open ground to carry speed",
+        "edges": "tree lines and edges to skim along",
+        "bando": "abandoned / ruined structures nearby",
+        "busy": "busy with people",
+        "hazard": "power lines, masts or cranes close by",
+        "permission": "land that needs the owner's permission",
+        "wet": "mostly water",
+        "remote": "a long walk from any path or road",
+        "road": "a fast main road right next to it"
+      }
+    },
+    "cine85": {
+      "label": "85 mm cinematic",
+      "short": "85 mm",
+      "drone": "85 mm whoop, under 250 g",
+      "category": "Open A1",
+      "weights": {
+        "architecture": 0.26,
+        "gaps": 0.1,
+        "trees": 0.14,
+        "under": 0.06,
+        "water": 0.14,
+        "bridge": 0.12,
+        "landmark": 0.1,
+        "plaza": 0.06,
+        "relief": 0.04,
+        "bando": 0.06,
+        "sunset": 0.04,
+        "public": 0.04,
+        "busy": -0.06,
+        "crowds": -0.08,
+        "permission": -0.08,
+        "wet": -0.2,
+        "remote": -0.04
+      },
+      "radius_m": 75.0,
+      "components": {
+        "architecture": "interesting buildings and edges",
+        "gaps": "gaps between trees or buildings to fly through",
+        "trees": "trees to weave through",
+        "under": "open space under the tree canopy",
+        "water": "water nearby for reflections",
+        "bridge": "a bridge or viaduct nearby",
+        "landmark": "a landmark in shot",
+        "plaza": "open plazas between buildings",
+        "relief": "slopes, banks or cliffs to dive",
+        "bando": "abandoned / ruined structures nearby",
+        "sunset": "a clear view west for golden hour",
+        "public": "public open space to fly from",
+        "busy": "busy with people",
+        "crowds": "a crowded place",
+        "permission": "land that needs the owner's permission",
+        "wet": "mostly water",
+        "remote": "a long walk from any path or road"
+      }
+    }
+  },
+  "legal_codes": {
+    "0": "Clear of restriction zones; OK for A3 distances",
+    "1": "Flight Restriction Zone: no flying without permission from the airport/prison",
+    "2": "Prohibited or restricted area",
+    "10": "Within 150 m of housing (A3 no-go; fine for a sub-250 g whoop)",
+    "11": "Within 150 m of commercial/industrial land, a school or a hospital (A3 no-go)",
+    "12": "Within 150 m of a park or recreational area (A3 no-go)",
+    "13": "Within 50 m of a building (A3 no-go)",
+    "14": "Within 50 m of a busy road (A3 no-go)"
+  },
+  "flag_bits": {
+    "1": "National Trust land: they ban drone take-off without a permit",
+    "2": "MOD / military land: keep out",
+    "4": "Nature reserve or SSSI: byelaws often ban drones; watch for nesting birds",
+    "8": "Forestry England land: needs their permission for drones",
+    "16": "Woodland Trust land: drones need permission",
+    "32": "Cemetery or churchyard: not a place to fly",
+    "64": "Golf course: private land, and flying golf balls",
+    "128": "Railway within 30 m: stay well clear of the line",
+    "256": "Power lines within 30 m",
+    "512": "Inside a danger area: only fly when it's not active (check NOTAMs)",
+    "1024": "Busy pedestrian area: never fly over crowds",
+    "2048": "Quarry: private site with workers and vehicles; needs the operator's OK",
+    "4096": "Common land / town moor: public open space, so it counts as a recreational area for A3"
+  },
+  "seeds": [],
+  "preview": {
+    "size_m": 320,
+    "res_m": 2,
+    "classes": [
+      "ground",
+      "water",
+      "road",
+      "path",
+      "tree",
+      "building"
+    ]
+  }
+}

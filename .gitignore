@@ -17,3 +17,4 @@ data/static/
 # The app's generated data for each region IS committed (web/public/data/<region>/),
 # so the app works straight after cloning.
 .DS_Store
+logs/

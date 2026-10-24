@@ -79,7 +79,7 @@ branch only ever holds the latest build.
 
 ### The pipeline (to re-score, change rules, or add a region)
 
-Python 3.11+.
+Python 3.12+.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
@@ -133,7 +133,32 @@ seeds; places like your thumbs-down spots get pulled down.
 
 ### New region or new favourite spots
 
-- Regions: add a box to `config/regions.toml` (British National Grid metres, whole km).
+- Regions: add a box to `config/regions.toml` (British National Grid metres, whole km) and list the
+  Geofabrik England county extracts that cover it (`osm = ["west-yorkshire"]`); missing extracts are
+  downloaded into `data/static/osm/`. Then, for a whole new 40 x 40 km region (~45 min, mostly LiDAR):
+
+  ```bash
+  python -m spotfinder lidar --region leeds && python -m spotfinder run --region leeds
+  ```
+
+  The whole of England is tiled into 40 km boxes in `config/regions_grid.toml`
+  (`python -m spotfinder grid --country england` regenerates it). To work through them unattended:
+
+  ```bash
+  python -m spotfinder queue --region all --lidar built --save-to /some/big/disk
+  ```
+
+  Add `--jobs 3` to work on three regions side by side in separate processes: the map-data, legal
+  and scoring steps are mostly single-threaded, so this is what keeps every core busy (each job gets
+  its share of `--workers`). It does each region end to end, fetches the next one while the current one computes, marks
+  finished regions with `data/out/<region>/done.json` and skips them on a rerun, so stop and restart
+  it whenever. `--lidar built` only streams LiDAR for 1 km squares with 200+ buildings (and their
+  neighbours), which is where it matters most; open country uses the tree-height model. About 6 min
+  a region that way, ~12 hours for England; `--lidar all` is about twice that.
+
+  `--region` also takes a comma list (`--region durham,leeds`) or `all`. Each `score` rewrites
+  `web/public/data/regions.json`, the list the app's region picker reads; `python -m spotfinder regions`
+  rewrites just that. Open a region in the app with `?region=<key>`.
 - Your spots: add them to `config/seeds.toml` with a profile; the ranking looks for places with a
   similar mix of features. A seed doesn't need to be legal for that drone (the Nuns Moor seed isn't,
   for the 5"); it only describes style. Each seed is matched on its own, so a woodland seed and a

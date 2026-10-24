@@ -486,6 +486,35 @@ def _flags_text(flag_bits: int) -> list[str]:
     return [txt for bit, txt in legal.FLAG_TEXT.items() if flag_bits & bit and bit != legal.FLAG_COMMON]
 
 
+def _grid_name(r: Region, cx: float, cy: float) -> str:
+    """A generated grid box is named after the two towns nearest its middle, e.g. 'Hexham and Prudhoe'."""
+    path = WEB_DATA_DIR / r.key / "places.json"
+    towns = [p for p in json.loads(path.read_text()) if p[3] == 1] if path.exists() else []
+    if not towns:
+        return r.name
+    towns.sort(key=lambda p: math.hypot((p[1] - cx) * math.cos(math.radians(cy)), p[2] - cy))
+    return " and ".join(t[0] for t in towns[:2])
+
+
+def write_regions_index() -> list[dict]:
+    """web/public/data/regions.json: every region that has web data, for the app's region picker."""
+    from .config import load_regions
+
+    out = []
+    for key, r in load_regions().items():
+        if not (WEB_DATA_DIR / key / "meta.json").exists():
+            continue
+        w, s, e, n = r.lonlat_bbox()
+        cx, cy = bng_to_lonlat((r.bbox[0] + r.bbox[2]) / 2, (r.bbox[1] + r.bbox[3]) / 2)
+        out.append({"key": key, "name": _grid_name(r, cx, cy) if key.startswith("g") else r.name, "center": [round(cx, 5), round(cy, 5)],
+                    "bbox": [round(v, 5) for v in (w, s, e, n)]})
+    WEB_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = WEB_DATA_DIR / f"regions.json.{os.getpid()}"  # parallel queue jobs each rewrite it
+    tmp.write_text(json.dumps(out))
+    tmp.replace(WEB_DATA_DIR / "regions.json")
+    return out
+
+
 def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 100_000,
               parks: tuple | None = None) -> None:
     out = web_dir(region)
@@ -644,6 +673,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
     for s in seeds:
         res = results.get(s.profile)
         r, c = cell_of(region, s.bng)
+        if not (0 <= r < H and 0 <= c < W):
+            continue  # another region's seed: it still steers the ranking here, but isn't on this map
         entry = {"name": s.name, "profile": s.profile, "lon": s.lon, "lat": s.lat, "radius_m": s.radius_m,
                  "note": s.note, "a3_frac": round(float(cells["a3_frac"][r, c]), 2),
                  "a1_frac": round(float(cells["a1_frac"][r, c]), 2),
