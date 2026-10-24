@@ -6,11 +6,14 @@ import datetime as dt
 import json
 import logging
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely
 from PIL import Image
 from shapely import STRtree
 from shapely.geometry import Point, mapping
@@ -159,18 +162,27 @@ def write_legal_layers(region: Region) -> list:
         code20, flags20 = z["code"], z["flags"]
     lookup = np.stack([flags20 & 0xFF, flags20 >> 8, code20], axis=-1).astype("uint8")
     lookup, corners = to_mercator(region, lookup, LEGAL_RES, LEGAL_RES, Resampling.nearest)
-    Image.fromarray(lookup, "RGB").save(out / "legal_lookup.png", optimize=True)
+    # Exact palette when the codes fit in 256 colours (they nearly always do): ~30% smaller, same pixels.
+    packed = lookup.astype("uint32") @ np.array([1 << 16, 1 << 8, 1], dtype="uint32")
+    colours, inv = np.unique(packed, return_inverse=True)
+    if len(colours) <= 256:
+        im = Image.fromarray(inv.reshape(lookup.shape[:2]).astype("uint8"), "P")
+        im.putpalette(np.stack([colours >> 16, (colours >> 8) & 0xFF, colours & 0xFF], axis=-1).ravel().tolist())
+    else:
+        im = Image.fromarray(lookup, "RGB")
+    im.save(out / "legal_lookup.png", optimize=True)
     code = lookup[..., 2]
 
     def overlay(nogo_a3: bool) -> np.ndarray:
-        rgba = np.zeros(code.shape + (4,), dtype="uint8")
+        idx = np.zeros(code.shape, dtype="uint8")
         if nogo_a3:  # greyed out: not A3-clear, so sub-250 g only
-            rgba[code >= 10] = [71, 85, 105, 90]
-        rgba[np.isin(code, [CODE_FRZ, CODE_RESTRICTED])] = [220, 38, 38, 110]
-        return rgba
+            idx[code >= 10] = 1
+        idx[np.isin(code, [CODE_FRZ, CODE_RESTRICTED])] = 2
+        return idx
 
+    colours = [(0, 0, 0, 0), (71, 85, 105, 90), (220, 38, 38, 110)]
     for key, p in scoring.PROFILES.items():
-        Image.fromarray(overlay("A3" in p.category), "RGBA").save(out / f"legal_{key}.png", optimize=True)
+        _palette_png(overlay("A3" in p.category), colours, out / f"legal_{key}.png")
     (out / "zones.geojson").write_text((region.out_dir / "zones.geojson").read_text())
     return corners
 
@@ -240,6 +252,23 @@ class Namer:
 
 # ---------------------------------------------------------------- previews
 
+# zlib releases the GIL, so the ~250 preview PNGs encode on a few threads while the next spot is built.
+_png_pool: ThreadPoolExecutor | None = None
+_png_jobs: list = []
+
+
+def _save_png(im: Image.Image, path: Path) -> None:
+    global _png_pool
+    if _png_pool is None:
+        _png_pool = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+    _png_jobs.append(_png_pool.submit(im.save, path, optimize=True))
+
+
+def _flush_pngs() -> None:
+    while _png_jobs:
+        _png_jobs.pop().result()
+
+
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path) -> dict:
     """160 x 160 px at 2 m: R = class*64, G = height above ground (0.25 m), B = ground (0.5 m above min)."""
     half = PREVIEW_M // 2
@@ -275,7 +304,7 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
         np.clip(np.round(h * 4), 0, 255),
         np.clip(np.round((ground - gmin) * 2), 0, 255),
     ], axis=-1).astype("uint8")
-    Image.fromarray(rgb, "RGB").save(path, optimize=True)
+    _save_png(Image.fromarray(rgb, "RGB"), path)
     return {"size": n, "res": PREVIEW_RES, "ground_min": round(gmin, 1),
             "lidar": bool(t.lidar.mean() > 0.5)}
 
@@ -295,16 +324,26 @@ def _heat_png(region: Region, final: np.ndarray, eligible: np.ndarray, path: Pat
     # so it cuts higher to colour about as much ground
     cut = 0.88 if block == 1 else 0.95
     t = np.clip((s - cut) / (1 - cut), 0, 1)
+    # Palette PNG: index 0 is transparent, 1..255 run along the ramp. Far smaller than RGBA, and
+    # no visible banding, since the ramp only has 255 steps on screen anyway.
+    idx = np.where(t > 0, 1 + np.round(t * 254), 0).astype("uint8")
+    lv = np.linspace(0, 1, 255)
     # amber -> orange -> magenta, fading in from transparent so the map stays readable
     stops = np.array([[255, 196, 0], [255, 112, 48], [214, 36, 110]], dtype=float)
-    seg = np.clip(t * 2, 0, 2)
+    seg = np.clip(lv * 2, 0, 2)
     i = np.minimum(seg.astype(int), 1)
     f = (seg - i)[..., None]
-    rgb = stops[i] * (1 - f) + stops[i + 1] * f
-    alpha = np.where(t > 0, 30 + 190 * t ** 1.2, 0)
-    rgba = np.concatenate([rgb, alpha[..., None]], axis=-1).astype("uint8")
-    Image.fromarray(rgba, "RGBA").save(path, optimize=True)
+    rgb = np.round(stops[i] * (1 - f) + stops[i + 1] * f)
+    alpha = np.round(30 + 190 * lv ** 1.2)
+    _palette_png(idx, [(0, 0, 0, 0)] + [(*c, a) for c, a in zip(rgb.astype(int), alpha.astype(int))], path)
     return corners
+
+
+def _palette_png(idx: np.ndarray, colours: list[tuple], path: Path) -> None:
+    """Indexed PNG with per-entry alpha (tRNS): far smaller than RGBA for overlays with few colours."""
+    im = Image.fromarray(idx, "P")
+    im.putpalette([v for c in colours for v in c[:3]])
+    im.save(path, optimize=True, transparency=bytes(int(c[3]) for c in colours))
 
 
 def _gpx(feats: list[dict], title: str) -> str:
@@ -402,8 +441,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
     namer = Namer(region)
     gaps = pd.read_parquet(region.out_dir / "gaps.parquet")
     lone = pd.read_parquet(region.out_dir / "lone.parquet")
-    gap_tree = STRtree([Point(xy) for xy in zip(gaps.x, gaps.y)]) if len(gaps) else None
-    lone_tree = STRtree([Point(xy) for xy in zip(lone.x, lone.y)]) if len(lone) else None
+    gap_tree = STRtree(shapely.points(gaps.x.values, gaps.y.values)) if len(gaps) else None
+    lone_tree = STRtree(shapely.points(lone.x.values, lone.y.values)) if len(lone) else None
     reader = HeightReader(region)
     from .context import load_dtm
 
@@ -546,6 +585,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
         entry["preview"] = {"file": f"previews/{r}-{c}.png", **done_previews[(r, c)],
                             "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
         seed_out.append(entry)
+    _flush_pngs()
 
     xmin, ymin, xmax, ymax = region.bbox
     site_meta = {
