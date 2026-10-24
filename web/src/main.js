@@ -6,6 +6,7 @@ import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
 import { renderSpot, legalBadge, nice } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
+import { watchThumbs } from './thumbs.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -571,13 +572,19 @@ function spotRow(f, i) {
   const r = ratings.get(state.profile, p.id);
   const sub = [p.locality, state.me ? metres(haversine(state.me, f.geometry.coordinates)) : null, subline(p)].filter(Boolean).join(' · ');
   return el('li', { class: `row-item${state.selected === p.id ? ' on' : ''}${r < 0 ? ' rated-down' : ''}`, 'data-id': p.id },
-    el('span', { class: 'rank' }, i + 1),
+    thumbBox(p.preview, el('i', {}, i + 1)),
     el('div', {},
       el('div', { class: 'spot-name' }, p.title, r > 0 ? el('span', { class: 'rated-up', title: 'You rated it good' }, '▲') : null),
       el('div', { class: 'spot-sub' }, sub)),
     el('div', { class: 'row-side' },
       el('span', { class: 'score', style: `--c:${scoreColour(p.score)}` }, p.score),
       isA3() ? legalBadge(p, true) : null));
+}
+
+// The spot's little top-down picture (top spots only), with the rank or a star on it.
+function thumbBox(preview, tag) {
+  return el('span', { class: `thumb${preview ? '' : ' none'}` },
+    preview ? el('img', { alt: '', 'data-thumb': `${BASE}/${preview.file}`, decoding: 'async' }) : null, tag);
 }
 
 function renderList() {
@@ -605,6 +612,7 @@ function renderList() {
   state.visible = list;
   map?.getSource('spots')?.setData({ type: 'FeatureCollection', features: list });
   drawPins();
+  watchThumbs($('#list-scroll'), $('#list-scroll'));
 }
 
 function clearFilters() {
@@ -681,7 +689,7 @@ function renderSeeds(label) {
     showSeeds ? el('ol', { class: 'seed-list' }, seeds.map((s) => {
       const f = seedSpot(s);
       const li = el('li', { class: 'row-item', title: 'One of your favourite spots: the ranking looks for places like it' },
-        el('span', { class: 'seed-star' }, '★'),
+        thumbBox(s.preview, el('i', { class: 'star' }, '★')),
         el('div', {}, el('div', { class: 'spot-name' }, s.name), el('div', { class: 'spot-sub' }, 'Your spot · the style it looks for')),
         el('div', { class: 'row-side' },
           el('span', { class: 'score', style: `--c:${scoreColour(s.score ?? 0)}` }, s.score ?? '–'),
@@ -820,9 +828,16 @@ function setHash(h, push) {
 
 function openFromHash() {
   const [profile, id] = location.hash.slice(1).split(/[./]/);
-  if (state.spots[profile]) {
-    if (profile !== state.profile) setProfile(profile);
-    if (id) select(id, true, false);
+  if (!state.spots[profile]) return;
+  if (profile !== state.profile) setProfile(profile);
+  if (!id) return;
+  if (feature(id)) select(id, true, false);
+  else {
+    // an old link: the spot isn't in this ranking any more
+    setHash('', false);
+    const note = $('#taste-note');
+    note.hidden = false;
+    note.textContent = 'That shared spot isn\'t in the latest ranking (the scores have been updated since). Here are the best ones now.';
   }
 }
 

@@ -144,8 +144,8 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, st
             # places like the ones you binned get pulled down
             sim = np.clip(sim - 0.6 * scoring.similarity(style, profile, [_near(rc) for rc in down], land), 0, 1)
         seed_cells = [rc for g in groups for rc in g]
-        # Rules scaled so the best 0.01% of the region reads ~100; taste is already 0..1 (1 = just like the seeds).
-        top = float(np.percentile(rule[eligible], 99.99)) if eligible.any() else 1.0
+        # Rules scaled so the best cell in the region reads 100; taste is already 0..1 (1 = just like the seeds).
+        top = float(rule[eligible].max()) if eligible.any() else 1.0
         rule_n = np.clip(rule / max(top, 1e-6), 0, 1)
         final = rule_n if sim is None else 0.6 * rule_n + 0.4 * sim
         # Same blend on the place's style alone, ignoring any A3 mask: how your seed spots score.
