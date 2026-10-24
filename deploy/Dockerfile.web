@@ -1,0 +1,12 @@
+# The app, built and served by nginx, which also passes /api/ to the server container.
+FROM node:20-alpine AS build
+WORKDIR /app/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npx vite build
+
+FROM nginx:1.27-alpine
+LABEL app=fpv-spotter
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/web/dist /usr/share/nginx/html

@@ -1,0 +1,21 @@
+# spotter.tamairnv.co.uk on the home server: the app (nginx) and its API, with the API's data
+# (profiles, synced ratings, flights, photos) in a folder outside the repo so redeploys keep it.
+# Cloudflare's "house" tunnel sends spotter.tamairnv.co.uk to 127.0.0.1:8098.
+name: ${SPOTTER_NAME:-fpv-spotter}
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SPOTTER_PORT:-8098}:80"
+    depends_on: [api]
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    user: "${SPOTTER_UID:-1000}:${SPOTTER_GID:-1000}"  # files in the data folder belong to tnv, not root
+    volumes:
+      - ${SPOTTER_DATA_DIR:-../../fpv-spot-finder-data}:/data

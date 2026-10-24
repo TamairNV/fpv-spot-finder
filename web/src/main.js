@@ -7,6 +7,7 @@ import { Ratings, learnTaste, likeThis } from './ratings.js';
 import { renderSpot, legalBadge, nice } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
+import { attachServer } from './server.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -82,6 +83,7 @@ const state = {
   ...store(PREFS_KEY, {}),
 };
 let map, lookup, ratings, checkPopup;
+let server = null;  // sync, flight log and forecast, when the app runs with its server
 let liteActive = false;
 let placeLabels = [];
 let heatHiLoaded = false;
@@ -152,6 +154,16 @@ async function boot() {
   syncControls();
   if (!SANDBOXED) loadRegions();
   setTimeout(() => loadDetails(state.profile), 300);
+  attachServer({
+    ratings, region: REGION, meta: state.meta,
+    coords: (profile, id) => state.spots[profile]?.features.find((f) => f.properties.id === id)?.geometry.coordinates || null,
+    getProfile: () => state.profile,
+    onChange: () => renderList(),
+    openSpot: (profile, id) => {
+      if (profile && profile !== state.profile) setProfile(profile);
+      select(id, true);
+    },
+  }).then((s) => { server = s; });
 }
 
 // The spot card's extras (gap and tree positions, the why breakdown, links) come in a second file
@@ -520,6 +532,7 @@ function setProfile(key) {
   renderList();
   renderNow();
   drawSeeds();
+  server?.profileChanged();
 }
 
 function savePrefs() {

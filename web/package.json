@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "maplibre-gl": "^4.7.1",
+    "qrcode-generator": "^1.4.4",
     "suncalc": "^1.9.0",
     "three": "^0.169.0"
   },

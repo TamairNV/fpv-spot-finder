@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+httpx==0.28.1
+pillow==11.1.0
+pillow-heif==0.21.0
+pywebpush==2.0.3
+py-vapid==1.9.2
+tzdata==2025.1

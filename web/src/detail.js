@@ -2,6 +2,7 @@
 // the wind and the light, and the score breakdown.
 import { el, metres, compass, scoreColour, SANDBOXED } from './util.js';
 import { sunBox, weatherBox } from './conditions.js';
+import { flightBox } from './server.js';
 
 const NICE = {
   gaps: 'Gaps', lone: 'Lone trees', edges: 'Tree lines / edges', space: 'Open space', mix: 'Obstacle mix',
@@ -170,7 +171,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
         el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
       SANDBOXED ? null : share));
-    kids.push(notesBox(p, ratings, onNote));
+    kids.push(notesBox(p, ratings, onNote), flightBox(spot, profile, onNote));
   }
 
   const p3dHost = el('div');
