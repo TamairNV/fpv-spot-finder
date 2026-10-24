@@ -12,6 +12,7 @@ from .config import Region
 
 CELL = 50
 SUNSET_AZ = (225, 248, 270, 292, 315)  # where the sun sets over the year in the north of England, degrees
+SUNRISE_AZ = (45, 68, 90, 112, 135)    # ...and rises: the coast here faces east
 SUNSET_D = range(2, 41)                # cells out: 100 m .. 2 km
 
 
@@ -39,15 +40,19 @@ def field_size(cells) -> dict[str, np.ndarray]:
 
 
 def sunset_view(cells) -> dict[str, np.ndarray]:
-    """Height of the skyline towards the setting sun, in degrees (low = a clear view of the sunset).
-    Ground from the DTM plus woods and buildings on top; the nearest 100 m is left out because that's
-    the spot itself."""
+    """Height of the skyline towards the setting and the rising sun, in degrees (low = a clear view)."""
+    return {"sunset_horizon": skyline(cells, SUNSET_AZ), "sunrise_horizon": skyline(cells, SUNRISE_AZ)}
+
+
+def skyline(cells, azimuths) -> np.ndarray:
+    """Height of the skyline towards the best of these bearings, in degrees. Ground from the DTM plus
+    woods and buildings on top; the nearest 100 m is left out because that's the spot itself."""
     elev = cells["elev"].astype("float32")
     surf = elev + np.where(cells["tall_frac"] >= 0.5, cells["h_p90"], 0.0)
     eye = elev + 15.0  # a quad hovering at 15 m
     H, W = elev.shape
     per_az = []
-    for az in SUNSET_AZ:
+    for az in azimuths:
         a = np.radians(az)
         dx, dy = np.sin(a), -np.cos(a)  # +x east, rows grow southwards
         best = np.full((H, W), -90.0, dtype="float32")
@@ -61,7 +66,7 @@ def sunset_view(cells) -> dict[str, np.ndarray]:
             best = np.fmax(best, ang)
         per_az.append(best)
     # The best bearing counts: you only need one good line to the sun.
-    return {"sunset_horizon": np.min(per_az, axis=0)}
+    return np.min(per_az, axis=0)
 
 
 def gap_quality(region: Region, shape) -> dict[str, np.ndarray]:

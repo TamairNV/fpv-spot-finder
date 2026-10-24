@@ -65,7 +65,7 @@ NODE_TAGS = {
 KEEP_TAG_KEYS = AREA_KEYS | set(LINE_TAGS) | set(NODE_TAGS) | {
     "name", "operator", "owner", "access", "building", "bridge", "layer", "height", "ele", "denotation",
     "leaf_type", "protect_class", "protection_title", "heritage", "listed_status", "generator:source",
-    "voltage", "location", "tunnel", "ref", "wikidata",
+    "voltage", "location", "tunnel", "ref", "wikidata", "bridge:name", "building:condition",
 }
 
 
@@ -82,7 +82,7 @@ class _Collector(osmium.SimpleHandler):
     def area(self, a):
         tags = a.tags
         interesting = any(k in tags for k in AREA_KEYS) or tags.get("building") in BUILDING_BANDO or any(
-            k.startswith(("abandoned:", "disused:", "ruins:")) for k, _ in tags)
+            k.startswith(("abandoned:", "disused:", "ruins:")) for k, _ in tags) or tags.get("building:condition") == "ruinous"
         if not interesting:
             return
         try:

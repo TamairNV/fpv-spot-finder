@@ -104,7 +104,7 @@ const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.catego
 // Spot types to filter the list by: the reasons worth 2+ points of a spot's score (kinds, from the
 // pipeline). A type nearly every spot has, or only one or two do, isn't worth a chip.
 const KINDS = {
-  park: 'Parks', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', relief: 'Hills and banks', sunset: 'Sunset',
+  park: 'Parks', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', relief: 'Hills and banks', sunset: 'Golden hour', coast: 'Coast', beach: 'Beaches',
   plaza: 'Plazas', under: 'Under the trees', public: 'Public space', edges: 'Tree lines', space: 'Wide open', flow: 'Good lines',
 };
 const hasKind = (f, k) => f.properties.kinds?.includes(k) ?? (f.properties.why || []).some((w) => w.key === k && w.pts >= 2);

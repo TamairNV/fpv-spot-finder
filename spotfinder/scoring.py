@@ -17,7 +17,7 @@ from scipy import ndimage
 
 CELL = 50
 TASTE = 0.4  # share of the final score that is "like your seed spots"; the rest is the rules
-ANCHOR_REACH = 0.75   # a spot's pin moves onto a viaduct, landmark... up to this much of the spacing away
+ANCHOR_REACH = 0.85   # a spot's pin moves onto a viaduct, landmark... up to this much of the spacing away
 ANCHOR_MARGIN = 0.06  # ...if it scores at most this much less there
 
 
@@ -142,7 +142,7 @@ COMPONENT_TEXT = {
     "under": "tall, see-through trees that may have room underneath",
     "landmark": "a landmark in shot",
     "plaza": "open plazas between buildings",
-    "sunset": "a clear view west for golden hour",
+    "sunset": "a clear view of the sunset or sunrise for golden hour",
     "public": "public open space to fly from",
     "busy": "busy with people",
     "hazard": "power lines, masts or cranes close by",
@@ -181,10 +181,11 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
     # The things a spot is about (a bridge, a bando, a beach, a landmark) are measured from its middle,
     # so the best cell, and the pin, is on the viaduct rather than in the field next to it.
     wet = ramp(np.clip(f["water_frac"] - f.get("beach_frac", 0), 0, 1), 0.3, 0.8)  # the beach isn't the sea
-    # Golden hour: either you look down on the sunset, or there's a tree line / wall facing it with open
-    # ground in front to film from.
-    c["sunset"] = np.maximum(ramp(-win_min(f["sunset_horizon"], r), 0.0, 3.0),
-                             0.6 * sat(win_sum(f["edge_w_m"], r), 600 * (2 * r + 1)))
+    # Golden hour: either you look down on the sunset (or the sunrise: the coast here faces east), or
+    # there's a tree line / wall facing the sunset with open ground in front to film from.
+    c["sunset"] = np.maximum.reduce([ramp(-win_min(f["sunset_horizon"], r), 0.0, 3.0),
+                                     ramp(-win_min(f["sunrise_horizon"], r), 0.0, 3.0),
+                                     0.6 * sat(win_sum(f["edge_w_m"], r), 600 * (2 * r + 1))])
     c["remote"] = ramp(win_min(f["dist_access"], r), 250, 600)
     c["hazard"] = share(f["dist_hazard"], 15, 50)
     if p.key == "freestyle5":

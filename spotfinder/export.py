@@ -205,7 +205,7 @@ NOT_A_PLACE = {"hotel", "hostel", "guest_house", "motel", "apartment", "chalet",
                "tanning_salon", "trampoline_park", "indoor_play", "information", "artwork", "gallery"}
 
 
-SIGHT_M = 60  # a spot this close to a named viaduct, bridge or landmark is named after it
+SIGHT_M = 90  # a spot this close to a named viaduct, bridge or landmark is named after it
 
 
 class Namer:
@@ -232,11 +232,13 @@ class Namer:
         self.feat_tree = STRtree(self.feats.geometry.values)
         # A named viaduct, bridge, lighthouse or monument right at the spot is what you'd call it: the Nine
         # Arches Viaduct, not the country park it stands in.
-        # (a railway or road on a viaduct carries the line's or road's name, not the viaduct's)
+        # (a railway or road on a viaduct carries the line's or road's name: the viaduct's is bridge:name)
         sight = lambda t: (((t.get("bridge") in {"viaduct", "aqueduct"} or t.get("man_made") == "bridge")
-                            and not t.get("railway") and not t.get("highway"))
+                            and (t.get("bridge:name") or not (t.get("railway") or t.get("highway"))))
                            or t.get("man_made") == "lighthouse" or t.get("historic") in {"monument", "castle"})
         self.sights = pd.concat([g[g["tags"].map(sight)] for g in (named(ln), named(a), pts)]).reset_index(drop=True)
+        bridge_lines = ln[ln["tags"].map(lambda t: bool(t.get("bridge:name")) and sight(t))]
+        self.sights = pd.concat([self.sights, bridge_lines]).reset_index(drop=True)
         self.sight_tree = STRtree(self.sights.geometry.values)
 
     def _nearest(self, tree, frame, p, max_d):
@@ -254,7 +256,7 @@ class Namer:
         sight, _ = self._nearest(self.sight_tree, self.sights, p, SIGHT_M)
         cont = [i for i in self.area_tree.query(p, predicate="intersects")]
         if sight is not None:
-            title = sight["tags"]["name"]
+            title = sight["tags"].get("bridge:name") or sight["tags"]["name"]
         elif cont:
             best = min(cont, key=lambda i: self.areas.geometry.iloc[i].area)
             title = self.areas["tags"].iloc[best]["name"]
@@ -466,8 +468,11 @@ def _why_text(k: str, key: str, s: dict) -> str:
         "under": "Tall trees with see-through crowns: maybe room underneath (LiDAR can't see where branches start)",
         "landmark": f"Landmark {away(s['landmark_m'])}",
         "plaza": "Open plaza between buildings",
-        "sunset": f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"
-        if s["sunset_deg"] <= -1 else f"{s['west_edge_m']} m of trees and walls facing the sunset, open ground in front",
+        "sunset": f"{s['west_edge_m']} m of trees and walls facing the sunset, open ground in front"
+        if min(s["sunset_deg"], s["sunrise_deg"]) > -1
+        else f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"
+        if s["sunset_deg"] <= s["sunrise_deg"]
+        else f"Looks down on the sunrise: the skyline east is {-s['sunrise_deg']:.0f}° below you",
         "public": "Public open space to fly from",
         "busy": f"Busy: {s['places']} shops, cafés and the like nearby, plus paths" if s["places"]
         else "Busy footpaths: expect walkers",
@@ -654,6 +659,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "lidar_pct": round(100 * wm("lidar_frac")),
                     "gaps_all": int(ws("gaps_all")), "west_edge_m": int(ws("edge_w_m")), "treeline_m": int(ws("treeline_m")),
                     "open_r_m": int(wmax("open_r_m")), "sunset_deg": round(wmin("sunset_horizon"), 1),
+                    "sunrise_deg": round(wmin("sunrise_horizon"), 1),
                     "access_m": int(wmin("dist_access")), "road_busy_m": int(wmin("dist_road_busy")),
                     "beach_m": int(min(wmin("dist_beach"), 99999)), "sea_m": int(min(wmin("dist_sea"), 99999)),
                     "landmark_m": int(wmin("dist_landmark")),

@@ -201,7 +201,8 @@ seeds; places like your thumbs-down spots get pulled down.
    viaducts are landmarks. A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
    golf course (so no bunkers or long-jump pits); for 5" cine only a beach by the sea is "the coast".
    Power lines (within 50 m) and fast roads cost a spot in full only when its middle is on one, and
-   otherwise up to half, by how much of it is near one.
+   otherwise up to half, by how much of it is near one. Golden hour counts a clear view down to the
+   sunrise as well as the sunset: the coast here faces east.
    Also worked out per spot: how big the open field is, how far it is to walk in from a path or road,
    and how high the skyline is towards the sunset (west-south-west to west-north-west, out to 2 km,
    hills, woods and buildings included).
@@ -220,8 +221,8 @@ seeds; places like your thumbs-down spots get pulled down.
    flight restriction zones and away from MOD land can be picked, and each spot says how much of it
    is A3-clear. `python -m spotfinder score --strict` brings back the old behaviour (the 5" only
    gets A3-clear ground). Spots are picked greedily with a minimum spacing (400 m for the 5", 600 m
-   for 5" cine, 250 m for the whoop). When a viaduct, bridge, landmark, bando or beach is within three
-   quarters of that and scores at most 6 points less, the pin goes on it.
+   for 5" cine, 250 m for the whoop). When a viaduct, bridge, landmark, bando or beach is within 85% of
+   that and scores at most 6 points less, the pin goes on it.
    Each spot carries a "why" list: points out of 100 per reason, with the numbers behind it (e.g.
    "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
 6. **Parks**: the ranking alone favours woods and riversides out of town, so every named park,

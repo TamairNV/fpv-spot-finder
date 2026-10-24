@@ -159,8 +159,9 @@ def test_sunset_view_sees_a_hill_to_the_west_not_the_east():
     assert hz[30, 20] > 10          # just east of the ridge: the sunset is behind the hill
     assert hz[30, 59] < hz[30, 20]  # further away it sits lower
     cells2 = _flat_cells()
-    cells2["elev"][:, 50:] = 200.0  # same ridge in the east doesn't matter for sunset
-    assert derived.sunset_view(cells2)["sunset_horizon"][30, 40] < 1
+    cells2["elev"][:, 50:] = 200.0  # same ridge in the east doesn't matter for sunset, only sunrise
+    view = derived.sunset_view(cells2)
+    assert view["sunset_horizon"][30, 40] < 1 and view["sunrise_horizon"][30, 40] > 10
 
 
 def test_open_room_grows_away_from_the_wood():
@@ -180,12 +181,13 @@ def test_why_points_add_up_to_the_score():
     stats = {k: 1 for k in ("gaps", "gaps_whoop", "lone_trees", "edge_m", "treeline_m", "open_pct", "tree_pct",
                             "bld_pct", "water_m", "bridge_m", "places", "hazard_m", "access_m", "road_busy_m",
                             "bando_m", "beach_m", "sea_m", "landmark_m", "west_edge_m")}
-    stats.update(lone_h_max=10.0, open_r_m=100, max_height_m=12.0, relief_m=20.0, sunset_deg=1.0, bld_h_max=0.0)
+    stats.update(lone_h_max=10.0, open_r_m=100, max_height_m=12.0, relief_m=20.0, sunset_deg=1.0, sunrise_deg=1.0,
+                 bld_h_max=0.0)
     sim = np.full((3, 3), 0.5)
     res = {"top": 0.4, "sim": sim}
     out = export.why(comp, p, stats, res, 1, 1)
     rule = scoring.rule_score({k: np.array(v) for k, v in comp.items()}, p)
-    expected = 100 * (0.6 * float(rule) / 0.4 + 0.4 * 0.5)
+    expected = 100 * ((1 - scoring.TASTE) * float(rule) / 0.4 + scoring.TASTE * 0.5)
     assert abs(sum(d["pts"] for d in out) - expected) < 1.5
     assert out[0]["pts"] >= out[-1]["pts"] and all(d["text"] for d in out)
 
