@@ -105,7 +105,10 @@ def load_ratings(region: Region) -> dict[str, tuple[list, list]]:
     return out
 
 
-def score_and_export(region: Region, n_spots: int = 250, previews: int = 120) -> dict:
+def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, strict: bool = False) -> dict:
+    """Score every cell and export the spots. By default legality is a label on each spot, not a filter:
+    the app lists potential places and says which rules they meet. No-fly zones, MOD land and danger areas
+    stay out either way. strict=True only lists spots each drone may fly under its Open subcategory."""
     cells = load_cells(region)
     meta = json.loads((region.out_dir / "cells_meta.json").read_text())
     seeds = load_seeds()
@@ -119,17 +122,21 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120) ->
         return [(i, j) for i in range(max(r - 1, 0), min(r + 2, H)) for j in range(max(c - 1, 0), min(c + 2, W))]
 
     meta["ratings"] = {k: {"up": len(u), "down": len(d)} for k, (u, d) in rated.items()}
+    meta["legal_mode"] = "strict" if strict else "label"
     for key, profile in scoring.PROFILES.items():
-        comps = scoring.components(cells, profile)
         style = scoring.components(cells, profile, legal_only=False)
+        comps = scoring.components(cells, profile) if strict else style
         rule = scoring.rule_score(comps, profile)
         # MOD land and live danger areas are out whatever the score.
         keep_out = (cells["flags"].astype("int64") & (legal.FLAG_MILITARY | legal.FLAG_DANGER_AREA)) > 0
         # ...and so is anywhere the spot itself would reach onto them.
         keep_out = ndimage.binary_dilation(keep_out, structure=np.ones((3, 3)), iterations=profile.radius_cells + 1)
-        eligible = land & (cells[profile.legal_key] >= profile.legal_min) & ~keep_out
-        if profile.legal_window_min:
-            eligible &= scoring.win_mean(cells[profile.legal_key], profile.radius_cells) >= profile.legal_window_min
+        if strict:
+            eligible = land & (cells[profile.legal_key] >= profile.legal_min) & ~keep_out
+            if profile.legal_window_min:
+                eligible &= scoring.win_mean(cells[profile.legal_key], profile.radius_cells) >= profile.legal_window_min
+        else:  # anywhere outside flight restriction zones
+            eligible = land & (cells["a1_frac"] >= 0.9) & ~keep_out
         groups = [export.cells_within(region, s.bng, s.radius_m) for s in seeds if s.profile == key]
         up, down = rated.get(key, ([], []))
         sim = scoring.similarity(style, profile, groups + [_near(rc) for rc in up], land)
@@ -141,7 +148,7 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120) ->
         top = float(np.percentile(rule[eligible], 99.9)) if eligible.any() else 1.0
         rule_n = np.clip(rule / max(top, 1e-6), 0, 1)
         final = rule_n if sim is None else 0.6 * rule_n + 0.4 * sim
-        # Same blend on the place's style alone, ignoring the A3 mask: how your seed spots score.
+        # Same blend on the place's style alone, ignoring any A3 mask: how your seed spots score.
         style_n = np.clip(scoring.rule_score(style, profile) / max(top, 1e-6), 0, 1)
         style_final = style_n if sim is None else 0.6 * style_n + 0.4 * sim
         spots = scoring.pick_spots(final, eligible, profile.spacing_m, n_spots)

@@ -366,14 +366,15 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             wmax = lambda k: float(cells[k][win].max())
             wmin = lambda k: float(cells[k][win].min())
             flag_bits = int(np.bitwise_or.reduce(cells["flags"][win].astype("int64").ravel()))
-            # Take-off: the most open, legal, path-adjacent cell in the window.
+            # Take-off: an open, path-adjacent cell in the window, legal for this drone if there is one.
             best, best_cost = (r, c), 1e9
             for rr in range(win[0].start, win[0].stop):
                 for cc in range(win[1].start, win[1].stop):
-                    legal_frac = cells[profile.legal_key][rr, cc]
-                    if cells["open_frac"][rr, cc] < 0.5 or legal_frac < 0.9:
+                    if cells["open_frac"][rr, cc] < 0.5 or cells["a1_frac"][rr, cc] < 0.9:
                         continue
                     cost = cells["dist_path"][rr, cc] + 0.5 * CELL * math.hypot(rr - r, cc - c)
+                    if cells[profile.legal_key][rr, cc] < 0.9:
+                        cost += 300
                     if cost < best_cost:
                         best, best_cost = (rr, cc), cost
             tx, ty = cell_center(region, *best)
@@ -405,9 +406,15 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             gr = os_grid_ref(x, y)
             a3_clear = wm("a3_frac")
             if key == "freestyle5":
-                a_txt = (f"Open A3: {round(100 * a3_clear)}% of this spot is clear of the A3 distances (150 m from "
-                         "houses, businesses and parks; 50 m from buildings and busy roads). Take off and fly in the "
-                         "clear part; the amber overlay shows the no-go edges.")
+                if a3_clear >= 0.9:
+                    a_txt = ("Open A3: clear of the A3 distances (150 m from houses, businesses and parks; 50 m from "
+                             "buildings and busy roads).")
+                elif a3_clear >= 0.3:
+                    a_txt = (f"Partly A3-clear ({round(100 * a3_clear)}%). Keep the 5\" in the clear part; the amber "
+                             "overlay shows where it isn't. The rest is fine for a sub-250 g drone under A1.")
+                else:
+                    a_txt = ("Not A3-clear: houses, businesses or a park within 150 m, so an 800 g quad is outside "
+                             "the Open A3 rules here. A sub-250 g drone can fly it under A1.")
             else:
                 a_txt = "Open A1 (under 250 g): outside flight restriction zones. Never fly over crowds."
             props = {

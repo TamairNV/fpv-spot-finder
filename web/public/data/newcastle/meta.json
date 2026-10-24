@@ -87,7 +87,7 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-24T01:55:34+00:00",
+  "generated_at": "2026-10-24T11:25:54+00:00",
   "sources": {
     "computed_at": "2026-10-24T01:47:12+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
@@ -100,7 +100,8 @@
       "northumberland-latest.osm.pbf",
       "tyne-and-wear-latest.osm.pbf"
     ],
-    "ratings": {}
+    "ratings": {},
+    "legal_mode": "label"
   },
   "profiles": {
     "freestyle5": {
@@ -212,7 +213,7 @@
       "lon": -1.64,
       "lat": 54.9808,
       "radius_m": 180.0,
-      "note": "Weaving in and around the tree clumps on the Town Moor edge, near Hunters Moor Hospital. Style seed only: the moor counts as a recreational area, so it isn't A3-legal for an 800 g quad.",
+      "note": "Weaving in and around the tree clumps on the Town Moor edge, near Hunters Moor Hospital. The moor counts as a recreational area, so it isn't A3-clear for an 800 g quad.",
       "a3_frac": 0.0,
       "a1_frac": 1.0,
       "flags": [],
@@ -232,7 +233,7 @@
         "hazard": 0.0,
         "wet": 0.0
       },
-      "score": 84,
+      "score": 83,
       "preview": {
         "file": "previews/396-362.png",
         "size": 160,
