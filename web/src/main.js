@@ -1063,6 +1063,12 @@ function wireUI() {
       else if (!$('#view-spot').hidden) goBack();
       return;
     }
+    // / jumps to the search box from anywhere but a text field
+    if (e.key === '/' && !e.target.closest?.('input, textarea, select') && !$('#view-list').hidden) {
+      e.preventDefault();
+      $('#search').focus();
+      return;
+    }
     // ← / → (or k / j) step through the spots while one is open, unless typing or steering the map
     const dir = { ArrowLeft: -1, ArrowRight: 1, k: -1, j: 1 }[e.key];
     if (!dir || $('#view-spot').hidden || e.altKey || e.ctrlKey || e.metaKey) return;

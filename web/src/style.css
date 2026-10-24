@@ -458,3 +458,11 @@ dialog#about li { margin: 4px 0; }
 .mv-orbit { background: #ffc400; }
 .mv-dive { background: #a78bfa; }
 .mv-skim { background: #22d3ee; }
+
+/* short screens (a phone on its side): a tighter list header so more of the list shows */
+@media (max-height: 520px) and (min-width: 821px) {
+  .list-head { padding: 8px 12px 7px; gap: 6px; }
+  #search { height: 32px; }
+  .now { margin-top: 6px; padding: 6px 10px; }
+  .spot-head { padding-top: 6px; padding-bottom: 6px; }
+}
