@@ -20,3 +20,10 @@ def test_report_counts_statuses():
                  eligible=False, sinks=[("hazard", -0.25)])]
     text = evaluate.report(rows)
     assert "1 found" in text and "1 missed" in text and "beach 1/2" in text and "hazard -0.25" in text
+
+
+def test_bando_checks_are_sane():
+    yes, no = evaluate.load_bando_checks()
+    assert yes and no
+    for b in yes + no:
+        assert {"name", "lat", "lon", "why"} <= set(b), b

@@ -54,6 +54,44 @@ def load_known() -> list[KnownSpot]:
             for s in raw.get("spot", [])]
 
 
+def load_bando_checks() -> tuple[list[dict], list[dict]]:
+    path = CONFIG_DIR / "known_spots.toml"
+    if not path.exists():
+        return [], []
+    with open(path, "rb") as f:
+        raw = tomllib.load(f)
+    return raw.get("bando", []), raw.get("not_bando", [])
+
+
+def grade_bandos(region: Region) -> dict | None:
+    """Real bandos with a dot on the app's bando layer, and parks that wrongly have one."""
+    path = export.WEB_DATA_DIR / region.key / "bandos.geojson"
+    yes, no = load_bando_checks()
+    if not path.exists() or not (yes or no):
+        return None
+    pts = [(lonlat_to_bng(*f["geometry"]["coordinates"]), f["properties"])
+           for f in json.loads(path.read_text())["features"]]
+
+    def near(b):
+        x, y = lonlat_to_bng(b["lon"], b["lat"])
+        return [p for (px, py), p in pts if math.hypot(px - x, py - y) <= b.get("radius_m", 100)]
+
+    hits = [(b["name"], near(b)) for b in yes]
+    wrong = [(b["name"], near(b)) for b in no]
+    return dict(n_dots=len(pts), found=[n for n, h in hits if h], missed=[n for n, h in hits if not h],
+                false=[(n, sorted({p.get("n") or p.get("k", "?") for p in h})) for n, h in wrong if h])
+
+
+def bando_report(b: dict | None) -> str:
+    if b is None:
+        return "bandos: no bandos.geojson yet (run `score`) or no checks in known_spots.toml"
+    out = [f"bandos ({b['n_dots']} on the map): {len(b['found'])}/{len(b['found']) + len(b['missed'])} real ones "
+           f"found, {len(b['false'])} parks with a dot"]
+    out += [f"  missed: {n}" for n in b["missed"]]
+    out += [f"  wrongly on: {n} ({', '.join(map(str, k))[:80]})" for n, k in b["false"]]
+    return "\n".join(out)
+
+
 def _score(region: Region) -> tuple[dict, dict]:
     """score_and_export's results without touching web/public or config/score_scale.json."""
     scale = CONFIG_DIR / "score_scale.json"
@@ -132,8 +170,11 @@ def report(rows: list[dict]) -> str:
 
 def run(region: Region, json_out=None) -> list[dict]:
     rows = grade(region)
+    bandos = grade_bandos(region)
     print(report(rows))
+    print()
+    print(bando_report(bandos))
     if json_out:
-        json_out.write_text(json.dumps(rows, indent=1))
+        json_out.write_text(json.dumps({"spots": rows, "bandos": bandos}, indent=1))
         log.info("wrote %s", json_out)
     return rows

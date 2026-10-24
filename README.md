@@ -137,7 +137,9 @@ seeds; places like your thumbs-down spots get pulled down.
 quarries, landmarks), each with the drones it suits and why it's good. `python -m spotfinder eval`
 scores the region the same way `score` does, writes nothing to the app, and says for every one
 whether a listed spot lands on it, at what rank, and which parts of the score lifted or sank it
-(`--json out.json` for the full breakdown). Run it before and after a scoring change.
+(`--json out.json` for the full breakdown). It also checks the bando layer: real derelict buildings
+that should have a dot, and parks on old pit sites that shouldn't. Run it before and after a scoring
+change.
 
 ### New region or new favourite spots
 

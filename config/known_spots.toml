@@ -310,3 +310,141 @@ profiles = ["freestyle5"]
 kinds = ["quarry", "relief"]
 source = "osm+local"
 why = "Disused limestone quarry (nature reserve) behind the Leas; faces and drops."
+
+# Bandos: `spotfinder eval` also checks the app's bando layer (web/public/data/<region>/bandos.geojson,
+# as the last `score` wrote it). A `[[bando]]` should have a dot within radius_m; a `[[not_bando]]`
+# (parks on old pit sites and the like) should have none. Real bandos are big and still standing:
+# see config/reference_bandos.toml for what they look like in OSM.
+
+[[bando]]
+name = "Dunston Staiths"
+lat = 54.95765
+lon = -1.63663
+radius_m = 120
+why = "Derelict timber coal staith, 8,000 m2, 15 m high"
+
+[[bando]]
+name = "Angel Heights flats (abandoned)"
+lat = 54.97386
+lon = -1.64559
+radius_m = 60
+why = "Empty block of flats, 15 m"
+
+[[bando]]
+name = "Gibson Street Baths"
+lat = 54.97420
+lon = -1.59845
+radius_m = 60
+why = "Disused listed baths, 15 m"
+
+[[bando]]
+name = "Wylam Pumping Station"
+lat = 54.97601
+lon = -1.84166
+radius_m = 60
+why = "Disused pumping station, 10 m"
+
+[[bando]]
+name = "Disused works near Ebchester"
+lat = 54.89901
+lon = -1.85785
+radius_m = 80
+why = "Group of disused buildings, 5,000 m2 main shed"
+
+[[bando]]
+name = "Southwick lime kilns"
+lat = 54.91721
+lon = -1.39285
+radius_m = 60
+why = "Ruined lime kilns on the Wear, 7 m"
+
+[[bando]]
+name = "Old Hollinside manor ruins"
+lat = 54.93362
+lon = -1.71210
+radius_m = 60
+why = "Roofless medieval manor house by the Nine Arches"
+
+[[bando]]
+name = "Abandoned industrial, Derwenthaugh"
+lat = 54.96167
+lon = -1.71732
+radius_m = 60
+why = "abandoned:industrial distributor shed, 7 m"
+
+[[not_bando]]
+name = "Rising Sun Country Park (old colliery)"
+lat = 55.01461
+lon = -1.53084
+radius_m = 300
+why = "Landscaped pit heap: a park now"
+
+[[not_bando]]
+name = "Herrington Country Park (old colliery)"
+lat = 54.87523
+lon = -1.47231
+radius_m = 300
+why = "Landscaped pit site: a park now"
+
+[[not_bando]]
+name = "Town Moor"
+lat = 54.98700
+lon = -1.62500
+radius_m = 400
+why = "Open grazing moor"
+
+[[not_bando]]
+name = "Saltwell Park"
+lat = 54.94435
+lon = -1.60459
+radius_m = 250
+why = "Victorian park with a lake"
+
+[[not_bando]]
+name = "Leazes Park"
+lat = 54.97850
+lon = -1.62350
+radius_m = 150
+why = "City park by St James' Park"
+
+[[not_bando]]
+name = "Northumberlandia"
+lat = 55.08865
+lon = -1.62979
+radius_m = 200
+why = "Landform sculpture park"
+
+[[not_bando]]
+name = "Elba Park (old pit marker)"
+lat = 54.85560
+lon = -1.49987
+radius_m = 200
+why = "Reclaimed colliery park; only a pit marker left"
+
+[[not_bando]]
+name = "Good Street Sports Fields (old pit marker)"
+lat = 54.87716
+lon = -1.70343
+radius_m = 150
+why = "Playing fields on an old pit"
+
+[[not_bando]]
+name = "Rainton Meadows (old pit marker)"
+lat = 54.82896
+lon = -1.49264
+radius_m = 250
+why = "Nature reserve on an opencast site"
+
+[[not_bando]]
+name = "Roseberry Grange golf course (old pit marker)"
+lat = 54.86765
+lon = -1.63433
+radius_m = 250
+why = "Golf course"
+
+[[not_bando]]
+name = "Low ruined walls in a meadow near Blyth"
+lat = 55.09980
+lon = -1.49990
+radius_m = 120
+why = "Ten 30-160 m2 wall stubs 2-5 m high in a field: nothing to fly through"
