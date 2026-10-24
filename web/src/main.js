@@ -1057,6 +1057,7 @@ function showCheck(lngLat, point) {
       : [el('div', { class: 'muted' }, 'Outside the area this region covers.')]),
   ].filter(Boolean));
   card.hidden = false;
+  bandoOpen = false;
   if (!checkPopup) checkPopup = new maplibregl.Marker({ element: el('div', { class: 'check-dot' }) });
   checkPopup.setLngLat(lngLat).addTo(map);
 }
@@ -1423,7 +1424,7 @@ function aboutHtml() {
     <li><b>Edges, open space, tall stuff, slopes, water, bridges, bandos</b> nearby, and for the whoop: architecture, plazas, landmarks and under-canopy space.</li>
     <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
     <li><b>Parks</b>: every public park or common of 4 ha or more gets a spot at its best place, even if it doesn't make the top 250. Tap “Parks” above the list to see them.</li>
-    <li><b>Bandos</b>: every ruin and derelict building on OpenStreetMap, checked against LiDAR. Solid purple dots still have something standing; rings are old sites with little left. Turn them on in Layers, or tap “Bandos” or Filters › Bando within.</li>
+    <li><b>Bandos</b>: every ruin and derelict building on OpenStreetMap, checked against LiDAR. Solid purple dots still have something standing (tap one for a 3D close-up from the LiDAR); rings are old sites with little left. Turn them on in Layers, tap “Bandos” or Filters › Bando within, or search “bandos”.</li>
   </ul>
   <h3>Places worth a look, not permission</h3>
   <p>Spots are suggestions to go and check. Each one says how it sits with the rules: the 800 g 5" flies Open <b>A3</b>
