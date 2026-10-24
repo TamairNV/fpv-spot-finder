@@ -100,7 +100,7 @@ const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.catego
 // Spot types to filter the list by: the reasons worth 2+ points of a spot's score (kinds, from the
 // pipeline). A type nearly every spot has, or only one or two do, isn't worth a chip.
 const KINDS = {
-  bando: 'Bandos', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', relief: 'Hills and banks', sunset: 'Sunset',
+  park: 'Parks', bando: 'Bandos', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', relief: 'Hills and banks', sunset: 'Sunset',
   plaza: 'Plazas', under: 'Under the trees', public: 'Public space', edges: 'Tree lines', space: 'Wide open',
 };
 const hasKind = (f, k) => f.properties.kinds?.includes(k) ?? (f.properties.why || []).some((w) => w.key === k && w.pts >= 2);
@@ -595,7 +595,8 @@ function subline(p) {
 function spotRow(f, i) {
   const p = f.properties;
   const r = ratings.get(state.profile, p.id);
-  const sub = [p.locality, state.me ? metres(haversine(state.me, f.geometry.coordinates)) : null, subline(p)].filter(Boolean).join(' · ');
+  const place = p.park && !p.title.includes(p.park) ? `in ${p.park}` : p.locality;
+  const sub = [place, state.me ? metres(haversine(state.me, f.geometry.coordinates)) : null, subline(p)].filter(Boolean).join(' · ');
   return el('li', { class: `row-item${state.selected === p.id ? ' on' : ''}${r < 0 ? ' rated-down' : ''}`, 'data-id': p.id },
     thumbBox(p.preview, el('i', {}, i + 1)),
     el('div', {},
@@ -977,6 +978,12 @@ function wireUI() {
     syncControls();
     applyLayerToggles();
   }));
+  $('#filters').addEventListener('wheel', (e) => {
+    const box = e.currentTarget;
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || box.scrollWidth <= box.clientWidth) return;
+    box.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
   $('#filters').addEventListener('click', (e) => {
     const f = e.target.closest('.fchip')?.dataset.filter;
     if (!f) return;
@@ -1099,6 +1106,7 @@ function aboutHtml() {
     <li><b>Lone trees</b>: single trees with open ground all round, for orbits and power loops.</li>
     <li><b>Edges, open space, tall stuff, slopes, water, bridges, bandos</b> nearby, and for the whoop: architecture, plazas, landmarks and under-canopy space.</li>
     <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
+    <li><b>Parks</b>: every public park or common of 4 ha or more gets a spot at its best place, even if it doesn't make the top 250. Tap “Parks” above the list to see them.</li>
   </ul>
   <h3>Places worth a look, not permission</h3>
   <p>Spots are suggestions to go and check. Each one says how it sits with the rules: the 800 g 5" flies Open <b>A3</b>
@@ -1123,6 +1131,19 @@ function aboutHtml() {
 boot();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD && !SANDBOXED) {
+  // A redeploy with a new worker takes over this page straight away; if that happens while the page
+  // is still starting up, reload once so the new code and data load together.
+  const hadWorker = !!navigator.serviceWorker.controller, t0 = performance.now();
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadWorker || performance.now() - t0 > 15000) return;
+    try {
+      if (sessionStorage.getItem('sw-reloaded')) return;  // once per tab, never a loop
+      sessionStorage.setItem('sw-reloaded', '1');
+    } catch {
+      return;
+    }
+    location.reload();
+  });
   // Once it's running, have it fetch this region's map data so the app works offline in the field.
   navigator.serviceWorker.register('./sw.js')
     .then(() => navigator.serviceWorker.ready)

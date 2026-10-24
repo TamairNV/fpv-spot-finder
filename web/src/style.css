@@ -192,7 +192,12 @@ svg { fill: currentColor; }
 #search:focus { border-color: var(--line-2); outline: none; background: var(--panel-3); }
 .search-clear { position: absolute; right: 4px; top: 4px; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; }
 .search-clear:hover { background: var(--panel-3); color: var(--text); }
-.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+/* one row of chips that scrolls sideways (the mouse wheel scrolls it too); on phones, dragging up
+   and down on it still moves the sheet */
+.filters { display: flex; gap: 6px; overflow-x: auto; touch-action: pan-x; scrollbar-width: none; margin: 0 -12px; padding: 0 12px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 28px), transparent); }
+.filters::-webkit-scrollbar { display: none; }
 .fchip { flex: none; height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 550; white-space: nowrap; }
 .fchip .n { margin-left: 5px; font-size: 11.5px; opacity: .65; font-variant-numeric: tabular-nums; }
 .fchip:hover { color: var(--text); }
@@ -271,7 +276,8 @@ svg { fill: currentColor; }
 .icon-btn:hover { background: var(--panel-2); }
 .icon-btn svg { width: 20px; height: 20px; }
 .sh-main { min-width: 0; }
-.sh-title { font-size: 17px; font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.01em; }
+.sh-title { font-size: 17px; font-weight: 700; line-height: 1.25; overflow: hidden; letter-spacing: -.01em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .sh-sub { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sh-score { --c: var(--heat-2); display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
   font-weight: 800; font-size: 17px; font-variant-numeric: tabular-nums;
@@ -436,11 +442,6 @@ dialog#about li { margin: 4px 0; }
   .sheet-handle span { position: absolute; left: 50%; top: 7px; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: var(--line-2); }
   .drag-zone { touch-action: none; }
   .list-head { padding-top: 2px; }
-  /* one row of chips that scrolls sideways; dragging up and down on it still moves the sheet */
-  .filters { flex-wrap: nowrap; overflow-x: auto; touch-action: pan-x; scrollbar-width: none; margin: 0 -12px; padding: 0 12px;
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 28px), transparent);
-    mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 28px), transparent); }
-  .filters::-webkit-scrollbar { display: none; }
   .spot-head { padding-top: 0; }
   .tiles { grid-template-columns: repeat(3, 1fr); }
 }

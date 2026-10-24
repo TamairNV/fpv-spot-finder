@@ -1,9 +1,12 @@
 // Offline support: once you've opened the app it keeps working with no signal. The page sends the
 // region's file list (data/<region>/offline.json) and the worker fetches the map, spots and basemap
 // tiles in the background, so the field works offline even where you never zoomed in at home.
-// Hashed build assets never change, so they're served cache-first; everything else is served from
-// the cache and refreshed in the background.
+// Hashed build assets never change, so they're served cache-first. The page itself and the spot
+// lists come from the network when there is one (old code must never meet new data after a
+// redeploy: a re-scored list names different 3D previews), falling back to the cache offline or
+// when the network is slow. Everything else is served from the cache and refreshed in the background.
 const CACHE = 'fpv-spots-v2';
+const SLOW_MS = 4000;
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['./', './index.html'])).then(() => self.skipWaiting()));
@@ -49,6 +52,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   const immutable = /\/assets\/[^/]+-[\w-]{8,}\.\w+$/.test(url.pathname);
+  if (req.mode === 'navigate' || /\.(geo)?json$/.test(url.pathname)) {
+    e.respondWith(caches.open(CACHE).then((cache) => networkFirst(cache, req)));
+    return;
+  }
   e.respondWith(caches.open(CACHE).then(async (cache) => {
     const hit = await cache.match(req, { ignoreSearch: req.mode === 'navigate' });
     if (hit && immutable) return hit;
@@ -59,3 +66,15 @@ self.addEventListener('fetch', (e) => {
     return hit || fresh;
   }));
 });
+
+async function networkFirst(cache, req) {
+  const net = fetch(req).then((res) => {
+    if (res.ok) cache.put(req, res.clone());
+    return res;
+  });
+  net.catch(() => {});
+  const res = await Promise.race([net, new Promise((r) => setTimeout(r, SLOW_MS))]).catch(() => null);
+  if (res) return res;
+  const hit = await cache.match(req, { ignoreSearch: req.mode === 'navigate' });
+  return hit || net.catch(() => Response.error());
+}
