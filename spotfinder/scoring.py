@@ -202,8 +202,8 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         c["trees"] = sat(win_sum(f["edge_tree_m"], r), 300) * ramp(win_max(f["tree_h_p90"], r), 4, 12)
         c["under"] = ramp(win_mean(f["under_frac"], r), 0.1, 0.5) * ramp(win_mean(f["tree_frac"], r), 0.05, 0.3)
         c["water"] = near(win_min(f["dist_water"], r), 20, 150)
-        c["bridge"] = np.maximum(near(win_min(f["dist_bridge"], r), 50, 250),
-                                 0.7 * near(win_min(f["dist_footbridge"], r), 30, 150))
+        c["bridge"] = np.maximum(near(win_min(f["dist_bridge"], r), 40, 200),
+                                 0.5 * near(win_min(f["dist_footbridge"], r), 15, 60))
         c["landmark"] = near(win_min(f["dist_landmark"], r), 50, 250)
         bld_m = win_mean(f["bld_frac"], r)
         c["plaza"] = ramp(win_mean(f["open_frac"], r), 0.2, 0.5) * ramp(bld_m, 0.05, 0.25)
