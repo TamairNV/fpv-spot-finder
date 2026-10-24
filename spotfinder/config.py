@@ -34,6 +34,7 @@ class Region:
     key: str
     name: str
     bbox: tuple[int, int, int, int]  # BNG metres: xmin, ymin, xmax, ymax
+    osm: tuple[str, ...] = ()  # Geofabrik England county extracts covering the box, e.g. "tyne-and-wear"
 
     @property
     def width(self) -> int:
@@ -89,13 +90,18 @@ class Settings:
     seeds: list[Seed] = field(default_factory=list)
 
 
-def load_region(key: str) -> Region:
+def load_regions() -> dict[str, Region]:
     with open(CONFIG_DIR / "regions.toml", "rb") as f:
-        regions = tomllib.load(f)
+        raw = tomllib.load(f)
+    return {k: Region(key=k, name=r["name"], bbox=tuple(int(v) for v in r["bbox"]), osm=tuple(r.get("osm", ())))
+            for k, r in raw.items()}
+
+
+def load_region(key: str) -> Region:
+    regions = load_regions()
     if key not in regions:
         raise SystemExit(f"Unknown region '{key}'. Known: {', '.join(regions)}")
-    r = regions[key]
-    return Region(key=key, name=r["name"], bbox=tuple(int(v) for v in r["bbox"]))
+    return regions[key]
 
 
 def load_seeds() -> list[Seed]:

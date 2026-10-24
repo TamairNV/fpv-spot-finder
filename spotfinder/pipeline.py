@@ -52,7 +52,7 @@ def compute_cells(region: Region, use_lidar: bool = True, workers: int = 4) -> d
         "terrain": dtm_src,
         "airspace": g.airspace_label,
         "overture_release": overture.RELEASE,
-        "osm": sorted(p.name for p in osm.OSM_DIR.glob("*.osm.pbf")),
+        "osm": [p.name for p in osm.pbf_paths(region)],
     }
     (out / "cells_meta.json").write_text(json.dumps(meta, indent=2))
     export.save_legal_grids(region, g)
@@ -156,4 +156,5 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, st
                             style_final=style_final, heat=scoring.pct_rank(final, land), eligible=eligible, spots=spots, seed_cells=seed_cells)
         log.info("%s: %d eligible cells, %d spots", key, int(eligible.sum()), len(spots))
     export.write_all(region, cells, results, meta, seeds, previews=previews)
+    export.write_regions_index()
     return results

@@ -120,7 +120,17 @@ seeds; places like your thumbs-down spots get pulled down.
 
 ### New region or new favourite spots
 
-- Regions: add a box to `config/regions.toml` (British National Grid metres, whole km).
+- Regions: add a box to `config/regions.toml` (British National Grid metres, whole km) and list the
+  Geofabrik England county extracts that cover it (`osm = ["west-yorkshire"]`); missing extracts are
+  downloaded into `data/static/osm/`. Then, for a whole new 40 x 40 km region (~45 min, mostly LiDAR):
+
+  ```bash
+  python -m spotfinder lidar --region leeds && python -m spotfinder run --region leeds
+  ```
+
+  `--region` also takes a comma list (`--region durham,leeds`) or `all`. Each `score` rewrites
+  `web/public/data/regions.json`, the list the app's region picker reads; `python -m spotfinder regions`
+  rewrites just that. Open a region in the app with `?region=<key>`.
 - Your spots: add them to `config/seeds.toml` with a profile; the ranking looks for places with a
   similar mix of features. A seed doesn't need to be legal for that drone (the Nuns Moor seed isn't,
   for the 5"); it only describes style. Each seed is matched on its own, so a woodland seed and a

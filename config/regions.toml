@@ -1,6 +1,20 @@
 # Regions are boxes on the British National Grid (EPSG:27700), in metres.
 # bbox = [xmin, ymin, xmax, ymax]. Keep them on whole kilometres so tiles line up.
+# osm = the Geofabrik England county extracts (download.geofabrik.de/europe/united-kingdom/england)
+#       that cover the box; missing ones are downloaded into data/static/osm/.
+# Boxes may overlap; each region is scored on its own.
 
 [newcastle]
 name = "Newcastle upon Tyne"
 bbox = [405000, 545000, 445000, 585000]
+osm = ["tyne-and-wear", "northumberland", "durham"]
+
+[durham]
+name = "Durham and Sunderland"
+bbox = [410000, 515000, 450000, 555000]
+osm = ["durham", "tyne-and-wear"]
+
+[northumberland]
+name = "Morpeth, Ashington and Amble"
+bbox = [395000, 580000, 435000, 620000]
+osm = ["northumberland", "tyne-and-wear"]

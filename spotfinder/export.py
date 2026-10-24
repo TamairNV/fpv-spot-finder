@@ -437,6 +437,23 @@ def _flags_text(flag_bits: int) -> list[str]:
     return [txt for bit, txt in legal.FLAG_TEXT.items() if flag_bits & bit and bit != legal.FLAG_COMMON]
 
 
+def write_regions_index() -> list[dict]:
+    """web/public/data/regions.json: every region that has web data, for the app's region picker."""
+    from .config import load_regions
+
+    out = []
+    for key, r in load_regions().items():
+        if not (WEB_DATA_DIR / key / "meta.json").exists():
+            continue
+        w, s, e, n = r.lonlat_bbox()
+        cx, cy = bng_to_lonlat((r.bbox[0] + r.bbox[2]) / 2, (r.bbox[1] + r.bbox[3]) / 2)
+        out.append({"key": key, "name": r.name, "center": [round(cx, 5), round(cy, 5)],
+                    "bbox": [round(v, 5) for v in (w, s, e, n)]})
+    WEB_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (WEB_DATA_DIR / "regions.json").write_text(json.dumps(out))
+    return out
+
+
 def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 120) -> None:
     out = web_dir(region)
     for old in (out / "previews").glob("*.png"):  # spot ids change between runs

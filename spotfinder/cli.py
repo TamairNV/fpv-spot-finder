@@ -1,4 +1,4 @@
-"""Command line: `python -m spotfinder run --region newcastle`."""
+"""Command line: `python -m spotfinder run --region newcastle` (or `--region durham,leeds`, or `--region all`)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import logging
 import time
 
-from .config import load_region
+from .config import load_region, load_regions
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -20,9 +20,10 @@ def main(argv: list[str] | None = None) -> None:
         ("score", "score cells, pick spots and write the web data (fast)"),
         ("run", "prepare + features + score"),
         ("lidar", "fetch EA LiDAR for the region straight from the WCS (needs environment.data.gov.uk)"),
+        ("regions", "rewrite web/public/data/regions.json, the app's list of regions"),
     ]:
         p = sub.add_parser(name, help=help_)
-        p.add_argument("--region", default="newcastle")
+        p.add_argument("--region", default="newcastle", help="region key, comma-separated keys, or 'all'")
         p.add_argument("--workers", type=int, default=4)
         p.add_argument("--no-lidar", action="store_true", help="ignore LiDAR even if it's there")
         p.add_argument("--spots", type=int, default=250, help="spots per profile")
@@ -34,11 +35,24 @@ def main(argv: list[str] | None = None) -> None:
                            help="only fetch the 1 km squares under the best N spots per profile (0 = whole region)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    region = load_region(args.region)
+    keys = list(load_regions()) if args.region == "all" else [k.strip() for k in args.region.split(",") if k.strip()]
+    regions = [load_region(k) for k in keys]  # fail on a typo before doing any work
 
+    from . import export
+
+    if args.cmd == "regions":
+        logging.info("regions.json: %s", [r["key"] for r in export.write_regions_index()])
+        return
+    for region in regions:
+        t0 = time.time()
+        logging.info("=== %s (%s)", region.key, region.name)
+        _run(args, region)
+        logging.info("%s done in %.0fs", region.key, time.time() - t0)
+
+
+def _run(args, region) -> None:
     from . import pipeline
 
-    t0 = time.time()
     if args.cmd == "lidar":
         from .sources import lidar_wcs
 
@@ -53,7 +67,6 @@ def main(argv: list[str] | None = None) -> None:
         pipeline.refresh_legal(region)
     if args.cmd in ("score", "run"):
         pipeline.score_and_export(region, n_spots=args.spots, previews=args.previews, strict=args.strict)
-    logging.info("done in %.0fs", time.time() - t0)
 
 
 if __name__ == "__main__":
