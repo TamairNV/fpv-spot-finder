@@ -351,6 +351,8 @@ function initMap() {
     hash: false,
     dragRotate: !TOUCH.matches,
   });
+  // On a phone the list sheet covers the bottom half, so centre the region in the part you can see.
+  if (PHONE.matches) map.setPadding({ top: 0, right: 0, bottom: sheetHeights().half, left: 0 });
   if (params.has('bench')) window.__map = map;  // for scripts/bench.mjs
   map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: 'Heights © Environment Agency (OGL)' }), 'bottom-right');
   if (!PHONE.matches) map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');

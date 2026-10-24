@@ -90,8 +90,10 @@ function legalBox(p, a3, cat) {
 }
 
 // Mapped bandos within a walk of the spot, still-standing ones first; filled in once the bando file is in.
+// Distances run from the edge of the spot's circle to the edge of the bando (a circle of its area), the way
+// the "to a bando" figure and the bando filter measure it.
 export const BANDO_STATE = { 1: (h) => `still standing, ${Math.round(h)} m`, 0: () => 'little left', '-1': () => 'not checked' };
-function bandoBox(nearBandos, onBando) {
+function bandoBox(nearBandos, onBando, radiusM) {
   if (!nearBandos) return null;
   const box = el('div', { class: 'box', hidden: true });
   nearBandos().then((list) => {
@@ -99,9 +101,11 @@ function bandoBox(nearBandos, onBando) {
     box.replaceChildren(el('h4', {}, 'Bandos nearby'),
       el('ul', { class: 'bando-near' }, list.map(({ f, d }) => {
         const b = f.properties;
+        const gap = d - radiusM - Math.sqrt((b.a || 0) / Math.PI);
         return el('li', {},
           el('button', { class: 'linklike', title: 'Show it on the map', onclick: () => onBando(f) }, b.n || b.k),
-          el('span', { class: 'muted' }, ` ${b.n ? `${b.k.toLowerCase()}, ` : ''}${BANDO_STATE[b.s](b.h)} · ${metres(d)}`));
+          el('div', { class: 'muted small' }, [b.n ? b.k : null, BANDO_STATE[b.s](b.h), gap < 25 ? 'in the spot' : `${metres(gap)} from the spot`]
+            .filter(Boolean).join(' · ')));
       })));
     box.hidden = false;
   });
@@ -198,7 +202,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   const why = whyList(p);
   if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
   if (p.stats) kids.push(tiles(p.stats, a3));
-  kids.push(bandoBox(nearBandos, onBando));
+  kids.push(bandoBox(nearBandos, onBando, meta.profiles[profile].radius_m || 0));
 
   if (p.legal) kids.push(legalBox(p, a3, category));
   kids.push(takeoffBox(p));

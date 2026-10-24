@@ -494,7 +494,8 @@ dialog#about li { margin: 4px 0; }
 .note-text:focus { outline: none; border-color: var(--line-2); background: var(--panel-3); }
 @media (min-width: 821px) { .note-text { font-size: 13.5px; } }
 .has-note { margin-left: 5px; font-size: 11px; }
-.bando-near { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font-size: 13.5px; }
+.bando-near { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13.5px; }
+.bando-near .small { margin-top: 1px; }
 .bando-near .linklike { font-weight: 600; }
 .bando-label { display: flex; justify-content: space-between; align-items: baseline; }
 .bando-label .linklike { text-transform: none; letter-spacing: 0; font-size: 12.5px; }
