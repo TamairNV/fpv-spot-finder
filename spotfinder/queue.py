@@ -3,8 +3,9 @@
     python -m spotfinder queue --region all --lidar built --save-to /mnt/somewhere
 
 Per region: prepare -> LiDAR -> features -> score, then a done.json marker in
-data/out/<region>/ so a rerun skips it. Fetching (network) for the next region
-runs alongside the features (CPU) of the current one. With --save-to, each
+data/out/<region>/ so a rerun skips it. Fetching (network, the bottleneck: LiDAR
+is ~0.9 s per request) runs `fetch_ahead` regions at a time alongside the features
+(CPU, all `workers`) of the current one. With --save-to, each
 finished region's LiDAR rasters and caches are copied there and the local
 1 km LiDAR squares deleted, so disk use stays at about one region.
 """
@@ -31,11 +32,11 @@ def done_path(region: Region) -> Path:
     return region.out_dir / "done.json"
 
 
-def fetch(region: Region, lidar: str) -> None:
+def fetch(region: Region, lidar: str, lidar_workers: int = 6) -> None:
     """The network-bound part: map data, then LiDAR (all / built-up squares only / none)."""
     pipeline.prepare(region)
     if lidar != "none":
-        lidar_wcs.fetch_region(region, built=lidar == "built")
+        lidar_wcs.fetch_region(region, workers=lidar_workers, built=lidar == "built")
 
 
 def save(region: Region, dest: Path) -> None:
@@ -55,27 +56,26 @@ def save(region: Region, dest: Path) -> None:
 
 
 def run(regions: list[Region], lidar: str = "all", save_to: Path | None = None, redo: bool = False,
-        workers: int = 4) -> None:
+        workers: int = 4, fetch_ahead: int = 1, lidar_workers: int = 6) -> None:
     todo = [r for r in regions if redo or not done_path(r).exists()]
     log.info("queue: %d regions to do, %d already done", len(todo), len(regions) - len(todo))
     if not todo:
         return
-    with ThreadPoolExecutor(1) as net:
-        ahead = net.submit(fetch, todo[0], lidar)
+    with ThreadPoolExecutor(max(fetch_ahead, 1)) as net:
+        # Keep `fetch_ahead` regions downloading; submit the next one as each is taken for processing,
+        # so downloads never get more than that far ahead (disk).
+        fetched = {i: net.submit(fetch, todo[i], lidar, lidar_workers) for i in range(min(fetch_ahead, len(todo)))}
         for i, region in enumerate(todo):
             t0 = time.time()
+            fut = fetched.pop(i)
+            if i + fetch_ahead < len(todo):
+                fetched[i + fetch_ahead] = net.submit(fetch, todo[i + fetch_ahead], lidar, lidar_workers)
             try:
-                ahead.result()
-            except Exception:
-                log.exception("%s: fetching failed, skipping it", region.key)
-                ahead = net.submit(fetch, todo[i + 1], lidar) if i + 1 < len(todo) else None
-                continue
-            ahead = net.submit(fetch, todo[i + 1], lidar) if i + 1 < len(todo) else None
-            try:
+                fut.result()
                 pipeline.compute_cells(region, workers=workers)
                 pipeline.score_and_export(region)
             except Exception:
-                log.exception("%s: processing failed, skipping it", region.key)
+                log.exception("%s: failed, skipping it", region.key)
                 continue
             done_path(region).write_text(json.dumps({
                 "done_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),

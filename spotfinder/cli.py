@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -27,7 +28,7 @@ def main(argv: list[str] | None = None) -> None:
     ]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--region", default="newcastle", help="region key, comma-separated keys, or 'all'")
-        p.add_argument("--workers", type=int, default=4)
+        p.add_argument("--workers", type=int, default=os.cpu_count() or 4, help="CPU processes (default: all cores)")
         p.add_argument("--no-lidar", action="store_true", help="ignore LiDAR even if it's there")
         p.add_argument("--spots", type=int, default=250, help="spots per profile")
         p.add_argument("--previews", type=int, default=120, help="3D previews per profile")
@@ -41,6 +42,9 @@ def main(argv: list[str] | None = None) -> None:
                            help="LiDAR for every 1 km square, only built-up ones (much faster), or none")
             p.add_argument("--save-to", type=Path, help="copy each finished region's data here and free local disk")
             p.add_argument("--redo", action="store_true", help="redo regions that are already done")
+            p.add_argument("--skip", default="", help="comma-separated regions to leave out (e.g. done elsewhere)")
+            p.add_argument("--fetch-ahead", type=int, default=2, help="regions downloading at once")
+            p.add_argument("--lidar-workers", type=int, default=6, help="parallel LiDAR requests per region")
         if name == "lidar":
             p.add_argument("--top", type=int, default=0,
                            help="only fetch the 1 km squares under the best N spots per profile (0 = whole region)")
@@ -63,7 +67,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "queue":
         from . import queue
 
-        queue.run(regions, lidar=args.lidar, save_to=args.save_to, redo=args.redo, workers=args.workers)
+        skip = set(args.skip.split(","))
+        queue.run([r for r in regions if r.key not in skip], lidar=args.lidar, save_to=args.save_to, redo=args.redo,
+                  workers=args.workers, fetch_ahead=args.fetch_ahead, lidar_workers=args.lidar_workers)
         return
     for region in regions:
         t0 = time.time()
