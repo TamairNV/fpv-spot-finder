@@ -19,6 +19,8 @@ from shapely import STRtree
 from shapely.geometry import Point, mapping
 
 from . import legal, scoring
+from . import bandos as bando_mod
+from . import parks as park_mod
 from .config import WEB_DATA_DIR, Region, Seed, bng_to_lonlat
 from .heights import HeightReader
 from .sources import osm
@@ -29,10 +31,12 @@ CELL = 50
 LEGAL_RES = 20  # metres per pixel in the legal lookup/overlay images
 PREVIEW_M = 320
 PREVIEW_RES = 2
+BANDO_PREVIEW_M = 160  # a ruin is small: half the square at twice the detail
+BANDO_PREVIEW_RES = 1
 
 # Spot fields only the spot card uses (gap and tree positions, the why breakdown, outside links):
 # written to spot_details_<profile>.json so the list's file stays small.
-DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links")
+DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links", "line")
 
 # Codes in the legal lookup image (blue channel).
 CODE_CLEAR, CODE_FRZ, CODE_RESTRICTED = 0, 1, 2
@@ -273,13 +277,43 @@ def _flush_pngs() -> None:
         _png_jobs.pop().result()
 
 
-def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path) -> dict:
+def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float) -> dict | None:
+    """The best flyable run starting within `radius` of the spot, as moves the 3D view can draw:
+    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre."""
+    from . import features, lines
+
+    size = 300
+    x0, y0 = int(round(x - size / 2)), int(round(y - size / 2))
+    t = reader.tile(x0, y0, size, features.MARGIN)
+    _, _, _, runs = features.analyse(t, size=size, want_lines=True)
+    nodes, scores, paths = runs[line_key]
+    if not len(nodes):
+        return None
+    px = t.x0 + nodes[:, 1] + 0.5
+    py = t.y1 - nodes[:, 0] - 0.5
+    inside = np.hypot(px - x, py - y) <= radius
+    if not inside.any():
+        return None
+    i = int(np.flatnonzero(inside)[np.argmax(scores[inside])])
+    path = paths[i]
+    if len(path) < 2:
+        return None
+    moves = []
+    for j in path:
+        lon, lat = bng_to_lonlat(px[j], py[j])
+        moves.append([lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6),
+                      round(px[j] - x, 1), round(py[j] - y, 1)])
+    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path)), "moves": moves}
+
+
+def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path,
+                  size_m: int = PREVIEW_M, res_m: int = PREVIEW_RES) -> dict:
     """160 x 160 px at 2 m: R = class*64, G = height above ground (0.25 m), B = ground (0.5 m above min)."""
-    half = PREVIEW_M // 2
+    half = size_m // 2
     x0, y0 = int(round(x - half)), int(round(y - half))
-    t = reader.tile(x0, y0, PREVIEW_M, 0)
-    n = PREVIEW_M // PREVIEW_RES
-    pool = lambda a, fn: fn(a.reshape(n, PREVIEW_RES, n, PREVIEW_RES), axis=(1, 3))
+    t = reader.tile(x0, y0, size_m, 0)
+    n = size_m // res_m
+    pool = lambda a, fn: fn(a.reshape(n, res_m, n, res_m), axis=(1, 3))
     h = pool(t.ohm, np.max)
     bld = pool(t.bld.astype("uint8"), np.max) > 0
     tree = pool((t.trees >= 2).astype("uint8"), np.max) > 0
@@ -293,15 +327,15 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
     cls[tree] = 4
     cls[bld] = 5
     xmin, _, _, ymax = region.bbox
-    # Ground: sample the 5 m DTM at each 2 m pixel centre (nearest is fine at this scale).
-    cols = ((x0 + (np.arange(n) + 0.5) * PREVIEW_RES - xmin) / legal.RES).astype(int)
-    rows = ((ymax - (y0 + PREVIEW_M - (np.arange(n) + 0.5) * PREVIEW_RES)) / legal.RES).astype(int)
+    # Ground: sample the 5 m DTM at each pixel centre (nearest, then smoothed over about 5 m).
+    cols = ((x0 + (np.arange(n) + 0.5) * res_m - xmin) / legal.RES).astype(int)
+    rows = ((ymax - (y0 + size_m - (np.arange(n) + 0.5) * res_m)) / legal.RES).astype(int)
     cols = np.clip(cols, 0, dtm.shape[1] - 1)
     rows = np.clip(rows, 0, dtm.shape[0] - 1)
     ground = dtm[np.ix_(rows, cols)]
     from scipy import ndimage
 
-    ground = ndimage.uniform_filter(ground, size=3)
+    ground = ndimage.uniform_filter(ground, size=max(3, round(6 / res_m)))
     gmin = float(np.nanmin(ground))
     rgb = np.stack([
         cls * 40,
@@ -309,7 +343,7 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
         np.clip(np.round((ground - gmin) * 2), 0, 255),
     ], axis=-1).astype("uint8")
     _save_png(Image.fromarray(rgb, "RGB"), path)
-    return {"size": n, "res": PREVIEW_RES, "ground_min": round(gmin, 1),
+    return {"size": n, "res": res_m, "ground_min": round(gmin, 1),
             "lidar": bool(t.lidar.mean() > 0.5)}
 
 
@@ -374,6 +408,19 @@ def _drivers(comp_vals: dict[str, float], profile: scoring.Profile) -> list[str]
     return [scoring.COMPONENT_TEXT[k] for k, v in pos[:3] if v > 0.02]
 
 
+def _line_mix(line: dict | None) -> str:
+    """'3 gaps, 2 orbits, a dive' from a line's moves."""
+    if not line:
+        return ""
+    from collections import Counter
+
+    order = ["gap", "orbit", "dive", "skim"]
+    n = Counter(m[0] for m in line["moves"])
+    words = {"gap": ("a gap", "gaps"), "orbit": ("an orbit", "orbits"), "dive": ("a dive", "dives"),
+             "skim": ("a skim", "skims")}
+    return ", ".join(words[k][0] if n[k] == 1 else f"{n[k]} {words[k][1]}" for k in order if n[k])
+
+
 def _why_text(k: str, key: str, s: dict) -> str:
     """One line per reason, with the numbers that earned it."""
     plural = lambda n, one, many: f"{n} {one if n == 1 else many}"
@@ -381,6 +428,8 @@ def _why_text(k: str, key: str, s: dict) -> str:
     bando = (f"Ruin or abandoned structure {away(s['bando_m'])}" if s["bando_m"] <= s["bando_site_m"]
              else f"Old industrial site {away(s['bando_site_m'])} (not much left standing)")
     texts = {
+        "flow": (f"A {s['line_moves']}-move line over {s['line_m']} m" + (f": {s['line_mix']}" if s.get("line_mix") else "")
+                 if s.get("line_moves", 0) >= 2 else "Obstacles you can chain into a run"),
         "gaps": (plural(s["gaps_whoop"], "whoop-sized gap", "whoop-sized gaps") + " to thread" if key == "cine85"
                  else plural(s["gaps"], "fly-through gap", "fly-through gaps") + " between trees or buildings"),
         "lone": plural(s["lone_trees"], "lone tree", "lone trees") + f" to orbit, tallest {s['lone_h_max']:.0f} m",
@@ -396,7 +445,7 @@ def _why_text(k: str, key: str, s: dict) -> str:
         "bridge": f"Bridge or viaduct {away(s['bridge_m'])}",
         "architecture": f"Buildings up to {s['bld_h_max']:.0f} m, {s['bld_pct']}% built up",
         "trees": f"{s['tree_pct']}% trees to weave through",
-        "under": "Room to fly under the canopy",
+        "under": "Tall trees with see-through crowns: maybe room underneath (LiDAR can't see where branches start)",
         "landmark": f"Landmark {away(s['landmark_m'])}",
         "plaza": "Open plaza between buildings",
         "sunset": f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"
@@ -466,7 +515,8 @@ def write_regions_index() -> list[dict]:
     return out
 
 
-def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 120) -> None:
+def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 100_000,
+              parks: tuple | None = None) -> None:
     out = web_dir(region)
     for old in (out / "previews").glob("*.png"):  # spot ids change between runs
         old.unlink()
@@ -481,6 +531,9 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
 
     dtm, _ = load_dtm(region)
     done_previews: dict[tuple[int, int], dict] = {}
+    # every bando, for the map, with a close-up 3D model of each one still standing
+    meta["bandos"] = bando_mod.write(region, out, lambda x, y, path: write_preview(
+        reader, dtm, region, x, y, path, BANDO_PREVIEW_M, BANDO_PREVIEW_RES))
 
     for key, res in results.items():
         profile = scoring.PROFILES[key]
@@ -492,6 +545,10 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             lon, lat = bng_to_lonlat(x, y)
             comp_vals = {k: round(float(v[r, c]), 3) for k, v in res["comps"].items()}
             title, locality = namer.name(x, y)
+            park = park_mod.name_at(*parks, r, c) if parks else None
+            park_spot = (r, c) in res.get("park_spots", ())
+            if park_spot and park.lower() not in title.lower():
+                title = park
             R = profile.radius_cells
             H, W = res["final"].shape
             win = (slice(max(r - R, 0), min(r + R + 1, H)), slice(max(c - R, 0), min(c + R + 1, W)))
@@ -531,12 +588,16 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                                       round(lq.x - x, 1), round(lq.y - y, 1)])
             spot_id = f"{r}-{c}"
             preview = None
-            if rank <= previews:
+            if rank <= previews or park_spot:
                 if (r, c) not in done_previews:
                     pm = write_preview(reader, dtm, region, x, y, out / "previews" / f"{spot_id}.png")
                     done_previews[(r, c)] = pm
                 preview = {"file": f"previews/{spot_id}.png", **done_previews[(r, c)],
                            "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
+            line = None
+            line_key = {"freestyle5": "line5", "cine85": "linew"}.get(key)
+            if line_key and rank <= previews:
+                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL)
             gr = os_grid_ref(x, y)
             a3_clear = wm("a3_frac")
             if profile.legal_key == "a3_frac":
@@ -574,12 +635,15 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "bando_site_m": int(wmin("dist_bando_site")), "landmark_m": int(wmin("dist_landmark")),
                     "lone_h_max": round(wmax("lone_h_max"), 1), "bld_h_max": round(wmax("bld_h_max"), 1),
                     "gap_q": round(ws("gq5" if key != "cine85" else "gqw"), 1),
+                    "line_moves": len(line["moves"]) if line else int(wmax("line5_n" if key != "cine85" else "linew_n")),
+                    "line_m": line["length_m"] if line else int(wmax("line5_m" if key != "cine85" else "linew_m")),
+                    "line_mix": _line_mix(line),
                 },
                 "legal": {"summary": a_txt, "flags": _flags_text(flag_bits), "a3_clear_pct": round(100 * a3_clear),
                           "a3_edge_m": int(wmin("dist_a3_edge"))},
                 "takeoff": {"lon": round(tlon, 6), "lat": round(tlat, 6), "dx": tx - x, "dy": ty - y,
                             "path_m": int(cells["dist_path"][best]), "parking_m": int(cells["dist_parking"][best])},
-                "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview,
+                "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview, "line": line,
                 "links": {
                     "satellite": f"https://www.google.com/maps/@{lat:.6f},{lon:.6f},250m/data=!3m1!1e3",
                     "streetview": f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat:.6f},{lon:.6f}",
@@ -589,6 +653,10 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 },
             }
             props["why"] = why(comp_vals, profile, props["stats"], res, r, c)
+            # what the list's type chips filter on: the reasons worth 2+ points (the why list itself loads later)
+            props["kinds"] = [w["key"] for w in props["why"] if w["pts"] >= 2] + (["park"] if park else [])
+            if park:
+                props["park"] = park
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
         (out / f"spots_{key}.gpx").write_text(_gpx(feats, f"{profile.label} spots, {region.name}"))

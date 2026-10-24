@@ -11,6 +11,8 @@ from pathlib import Path
 
 from .config import load_region, load_regions
 
+ALL_PREVIEWS = 100_000  # a 3D model for every spot: ~20 KB each
+
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="spotfinder", description="Find FPV spots from height and map data.")
@@ -32,7 +34,8 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--workers", type=int, default=os.cpu_count() or 4, help="CPU processes (default: all cores)")
         p.add_argument("--no-lidar", action="store_true", help="ignore LiDAR even if it's there")
         p.add_argument("--spots", type=int, default=250, help="spots per profile")
-        p.add_argument("--previews", type=int, default=120, help="3D previews per profile")
+        p.add_argument("--previews", type=int, default=ALL_PREVIEWS,
+                       help="3D previews for the top N spots per profile (default: every spot)")
         p.add_argument("--strict", action="store_true",
                        help="only list spots each drone may fly under its Open subcategory (default: label them)")
         if name == "grid":

@@ -87,9 +87,9 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-24T12:19:51+00:00",
+  "generated_at": "2026-10-24T18:47:56+00:00",
   "sources": {
-    "computed_at": "2026-10-24T12:07:23+00:00",
+    "computed_at": "2026-10-24T18:46:00+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
     "lidar_coverage": 0.9205005168914795,
     "terrain": "AWS terrain tiles (EA 2 m LiDAR DTM in England)",
@@ -101,7 +101,12 @@
       "tyne-and-wear-latest.osm.pbf"
     ],
     "ratings": {},
-    "legal_mode": "label"
+    "legal_mode": "label",
+    "bandos": {
+      "standing": 235,
+      "site": 161,
+      "unknown": 0
+    }
   },
   "profiles": {
     "freestyle5": {
@@ -110,11 +115,12 @@
       "drone": "5 inch, 800 g (no class mark)",
       "category": "Open A3",
       "weights": {
-        "gaps": 0.2,
-        "lone": 0.12,
-        "edges": 0.14,
+        "flow": 0.22,
+        "gaps": 0.12,
+        "lone": 0.08,
+        "edges": 0.1,
         "space": 0.1,
-        "mix": 0.08,
+        "mix": 0.06,
         "vertical": 0.08,
         "relief": 0.1,
         "bando": 0.1,
@@ -131,6 +137,7 @@
       },
       "radius_m": 125.0,
       "components": {
+        "flow": "a run you can chain: gaps, orbits, dives and skims with clear air between",
         "gaps": "gaps between trees or buildings to fly through",
         "lone": "lone trees or pillars to orbit and power-loop",
         "edges": "tree lines and edges to skim along",
@@ -196,10 +203,11 @@
       "drone": "85 mm whoop, under 250 g",
       "category": "Open A1",
       "weights": {
-        "architecture": 0.26,
-        "gaps": 0.1,
+        "architecture": 0.24,
+        "flow": 0.14,
+        "gaps": 0.06,
         "trees": 0.14,
-        "under": 0.06,
+        "under": 0.03,
         "water": 0.14,
         "bridge": 0.12,
         "landmark": 0.1,
@@ -217,9 +225,10 @@
       "radius_m": 75.0,
       "components": {
         "architecture": "interesting buildings and edges",
+        "flow": "a run you can chain: gaps, orbits, dives and skims with clear air between",
         "gaps": "gaps between trees or buildings to fly through",
         "trees": "trees to weave through",
-        "under": "open space under the tree canopy",
+        "under": "tall, see-through trees that may have room underneath",
         "water": "water nearby for reflections",
         "bridge": "a bridge or viaduct nearby",
         "landmark": "a landmark in shot",
@@ -265,8 +274,8 @@
     {
       "name": "Nuns Moor Park trees by Cow Hill",
       "profile": "freestyle5",
-      "lon": -1.64,
-      "lat": 54.9808,
+      "lon": -1.632699,
+      "lat": 54.990645,
       "radius_m": 180.0,
       "note": "Weaving in and around the tree clumps on the Town Moor edge, near Hunters Moor Hospital. The moor counts as a recreational area, so it isn't A3-clear for an 800 g quad.",
       "a3_frac": 0.0,
@@ -274,38 +283,39 @@
       "flags": [],
       "components": {
         "permission": 0.0,
-        "sunset": 0.358,
+        "sunset": 0.12,
         "remote": 0.0,
         "hazard": 0.0,
-        "gaps": 0.783,
-        "lone": 0.987,
-        "edges": 0.996,
-        "space": 0.805,
-        "mix": 0.576,
-        "vertical": 0.467,
-        "relief": 0.057,
+        "flow": 0.006,
+        "gaps": 0.273,
+        "lone": 0.0,
+        "edges": 0.493,
+        "space": 0.86,
+        "mix": 0.209,
+        "vertical": 0.2,
+        "relief": 0.692,
         "bando": 0.0,
         "water": 0.0,
-        "bridge": 0.318,
-        "busy": 0.375,
+        "bridge": 0.0,
+        "busy": 0.031,
         "wet": 0.0,
         "farm": 0.0,
-        "road": 0.0
+        "road": 0.008
       },
-      "score": 80,
+      "score": 57,
       "preview": {
-        "file": "previews/396-362.png",
+        "file": "previews/374-371.png",
         "size": 160,
         "res": 2,
-        "ground_min": 85.2,
+        "ground_min": 76.0,
         "lidar": true,
         "center": [
-          -1.64021,
-          54.980647
+          -1.633089,
+          54.99051
         ],
         "bng": [
-          423125.0,
-          565175.0
+          423575.0,
+          566275.0
         ]
       }
     },
@@ -326,9 +336,10 @@
         "sunset": 0.333,
         "remote": 0.0,
         "hazard": 0.0,
-        "architecture": 0.695,
+        "architecture": 0.694,
+        "flow": 0.0,
         "gaps": 0.227,
-        "trees": 0.518,
+        "trees": 0.508,
         "under": 0.0,
         "water": 0.0,
         "bridge": 0.0,

@@ -12,6 +12,7 @@ const NICE = {
 };
 
 const BACK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';
+const STEP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z"/></svg>';
 
 // How the spot sits with the rules, as a short badge: the 5" needs Open A3, the whoop is A1 anywhere outside FRZs.
 export function legalBadge(p, a3, big = false) {
@@ -88,6 +89,29 @@ function legalBox(p, a3, cat) {
       ' before you go.'));
 }
 
+// Mapped bandos within a walk of the spot, still-standing ones first; filled in once the bando file is in.
+// Distances run from the edge of the spot's circle to the edge of the bando (a circle of its area), the way
+// the "to a bando" figure and the bando filter measure it.
+export const BANDO_STATE = { 1: (h) => `still standing, ${Math.round(h)} m`, 0: () => 'little left', '-1': () => 'not checked' };
+function bandoBox(nearBandos, onBando, radiusM) {
+  if (!nearBandos) return null;
+  const box = el('div', { class: 'box', hidden: true });
+  nearBandos().then((list) => {
+    if (!list.length) return;
+    box.replaceChildren(el('h4', {}, 'Bandos nearby'),
+      el('ul', { class: 'bando-near' }, list.map(({ f, d }) => {
+        const b = f.properties;
+        const gap = d - radiusM - Math.sqrt((b.a || 0) / Math.PI);
+        return el('li', {},
+          el('button', { class: 'linklike', title: 'Show it on the map', onclick: () => onBando(f) }, b.n || b.k),
+          el('div', { class: 'muted small' }, [b.n ? b.k : null, BANDO_STATE[b.s](b.h), b.m ? 'protected site' : null, gap < 25 ? 'in the spot' : `${metres(gap)} from the spot`]
+            .filter(Boolean).join(' · ')));
+      })));
+    box.hidden = false;
+  });
+  return box;
+}
+
 function takeoffBox(p) {
   const t = p.takeoff;
   if (!t) return null;
@@ -101,7 +125,7 @@ function takeoffBox(p) {
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
 }
 
-export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, onRate, onLike, onBack }) {
+export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, nearBandos, onRate, onLike, onBack, onNote, onBando }) {
   const p = spot.properties;
   const [lon, lat] = spot.geometry.coordinates;
   let rating = ratings.get(profile, p.id);
@@ -112,12 +136,20 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the list', title: 'Back to the list', onclick: onBack });
   back.innerHTML = BACK_ICON;
   const score = p.score ?? null;
+  // previous / next spot in the list as it's sorted and filtered now
+  const step = (fn, prev) => {
+    const b = el('button', { class: `icon-btn step${prev ? ' prev' : ''}`, disabled: !fn, onclick: fn,
+      'aria-label': prev ? 'Previous spot' : 'Next spot', title: prev ? 'Previous spot (←)' : 'Next spot (→)' });
+    b.innerHTML = STEP_ICON;
+    return b;
+  };
   head.replaceChildren(back,
     el('div', { class: 'sh-main' },
       el('div', { class: 'sh-title', title: p.title }, p.title),
       el('div', { class: 'sh-sub' },
         isSeed ? 'Your spot' : `#${p.rank}${total ? ` of ${total}` : ''} for the ${label}`,
         p.locality && !isSeed ? ` · ${p.locality}` : '', p.gridref ? ` · ${p.gridref}` : '')),
+    nav ? el('div', { class: 'sh-nav' }, step(nav.prev, true), step(nav.next, false)) : el('span'),
     el('div', { class: 'sh-score', style: `--c:${scoreColour(score ?? 0)};--p:${score ?? 0}`, title: score != null ? `Score ${score} out of 100` : '' },
       el('span', {}, score ?? '–')));
 
@@ -161,14 +193,16 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
         el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
       SANDBOXED ? null : share));
+    kids.push(notesBox(p, ratings, onNote));
   }
 
   const p3dHost = el('div');
-  kids.push(p3dHost);
+  kids.push(p3dHost, lineBox(p));
 
   const why = whyList(p);
   if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
   if (p.stats) kids.push(tiles(p.stats, a3));
+  kids.push(bandoBox(nearBandos, onBando, meta.profiles[profile].radius_m || 0));
 
   if (p.legal) kids.push(legalBox(p, a3, category));
   kids.push(takeoffBox(p));
@@ -211,9 +245,40 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
     });
   } else {
     p3dHost.append(el('div', { class: 'muted small', style: 'margin:0 0 12px' },
-      'The 3D view is made for the top spots only.'));
+      'No 3D model for this spot yet: re-run the scorer to make one.'));
   }
   return { dispose: () => { gone = true; preview?.dispose(); } };
+}
+
+// Your own notes on the place, kept on this device and in the ratings download.
+function notesBox(p, ratings, onNote) {
+  const text = ratings.note(p.id);
+  const area = el('textarea', { class: 'note-text', rows: 3, placeholder: 'Parking, access, who to ask, when it is quiet…', 'aria-label': 'Your notes' }, text);
+  let timer;
+  const keep = () => {
+    clearTimeout(timer);
+    ratings.setNote(p.id, area.value, { title: p.title });
+    onNote?.();
+  };
+  area.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ratings.setNote(p.id, area.value, { title: p.title }), 400);
+  });
+  area.addEventListener('change', keep);
+  return el('details', { class: 'box notes', open: !!text }, el('summary', {}, text ? '📝 Your notes' : '📝 Add a note'), area);
+}
+
+// The pipeline's suggested run through the spot, numbered like the markers in the 3D view.
+const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the edge' };
+function lineBox(p) {
+  const moves = p.line?.moves;
+  if (!moves?.length) return null;
+  const head = [p.stats?.line_mix, p.line.length_m ? `about ${Math.round(p.line.length_m / 10) * 10} m` : null].filter(Boolean).join(' · ');
+  return el('div', { class: 'box line-box' },
+    el('h4', {}, 'A line to fly'),
+    head ? el('p', { class: 'muted small' }, `${head}. From the take-off, in this order; the 3D view numbers them and “Watch the line” rides it.`) : null,
+    el('ol', { class: 'moves' }, moves.map(([kind], i) => el('li', {},
+      el('span', { class: `mv mv-${kind}` }, i + 1), MOVE_TEXT[kind] || kind))));
 }
 
 export function nice(k) {

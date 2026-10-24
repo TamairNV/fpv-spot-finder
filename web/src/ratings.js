@@ -5,6 +5,19 @@ export class Ratings {
   constructor(regionKey) {
     this.key = `fpvspots:${regionKey}:ratings`;
     this.data = store(this.key, {});
+    // your own notes on a place ("security at weekends", "best gaps at the north end"), by spot id
+    this.notesKey = `fpvspots:${regionKey}:notes`;
+    this.notes = store(this.notesKey, {});
+  }
+
+  note(id) {
+    return this.notes[id]?.text || '';
+  }
+
+  setNote(id, text, extra = {}) {
+    if (!text.trim()) delete this.notes[id];
+    else this.notes[id] = { text, t: Date.now(), ...extra };
+    save(this.notesKey, this.notes);
   }
 
   get(profile, id) {
@@ -25,13 +38,15 @@ export class Ratings {
   }
 
   export() {
-    return JSON.stringify({ kind: 'fpv-spot-finder-ratings', version: 1, ratings: this.data }, null, 2);
+    return JSON.stringify({ kind: 'fpv-spot-finder-ratings', version: 1, ratings: this.data, notes: this.notes }, null, 2);
   }
 
   import(text) {
     const j = JSON.parse(text);
     Object.assign(this.data, j.ratings || {});
     save(this.key, this.data);
+    Object.assign(this.notes, j.notes || {});
+    save(this.notesKey, this.notes);
   }
 }
 
