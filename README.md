@@ -41,9 +41,18 @@ Three profiles out of the box:
   ratings; "More like this" finds spots similar to one you like. Ratings stay in your browser and can
   be exported and fed back into the pipeline.
 - **Filters and notes**: chips above the list narrow it to parks, bandos, water, bridges, hills,
-  sunset spots and so on, or to your 👍 spots. ‹ › on a spot (or ← →) steps through the list. Each
-  spot takes your own notes (parking, access, when it's quiet); they show as 📝 in the list, are
+  sunset spots and so on, or to your 👍 spots. **Filters** narrows by the numbers behind each spot:
+  a bando within 100 m / 300 m / 1 km, plenty of gaps or lone trees, something tall to dive (steps
+  that follow each drone's own spread), water or parking within a distance, and quiet places only;
+  shut, the chip says which are on. ‹ › on a spot (or ← →) steps through the list. Each spot takes your own notes (parking, access, when it's quiet); they show as 📝 in the list, are
   searchable, and go in the ratings download.
+- **Bandos on the map**: every ruin and derelict building on OpenStreetMap as a purple dot (solid
+  if LiDAR still sees something standing, a ring if little is left). Tap one for what it is, how
+  tall, the nearest spot, directions and Street View, and for the ones still standing a 3D
+  close-up from the LiDAR at 1 m. On in Layers, and whenever the Bandos chip or
+  the bando filter is on. Search finds them by name or kind ("priory", "bunker"; "bandos" lists the
+  lot), and each spot card lists the bandos within 1 km. Ones that are protected heritage sites
+  (scheduled monuments, attractions) say so. With a mouse, hovering any spot or bando dot names it.
 - **Works offline** once loaded (add it to your home screen). When the online map can't load, it
   switches to a built-in basemap (main roads, rail, water, woods, built-up areas, place names), so it
   still works in a field with no signal. **GPX export** of the spots for OS Maps or a GPS, and a share
@@ -93,7 +102,7 @@ Data (profiles, photos, the pipeline's caches) lives in `../fpv-spot-finder-data
 
 ### The pipeline (to re-score, change rules, or add a region)
 
-Python 3.11+.
+Python 3.12+.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
@@ -147,7 +156,32 @@ seeds; places like your thumbs-down spots get pulled down.
 
 ### New region or new favourite spots
 
-- Regions: add a box to `config/regions.toml` (British National Grid metres, whole km).
+- Regions: add a box to `config/regions.toml` (British National Grid metres, whole km) and list the
+  Geofabrik England county extracts that cover it (`osm = ["west-yorkshire"]`); missing extracts are
+  downloaded into `data/static/osm/`. Then, for a whole new 40 x 40 km region (~45 min, mostly LiDAR):
+
+  ```bash
+  python -m spotfinder lidar --region leeds && python -m spotfinder run --region leeds
+  ```
+
+  The whole of England is tiled into 40 km boxes in `config/regions_grid.toml`
+  (`python -m spotfinder grid --country england` regenerates it). To work through them unattended:
+
+  ```bash
+  python -m spotfinder queue --region all --lidar built --save-to /some/big/disk
+  ```
+
+  Add `--jobs 3` to work on three regions side by side in separate processes: the map-data, legal
+  and scoring steps are mostly single-threaded, so this is what keeps every core busy (each job gets
+  its share of `--workers`). It does each region end to end, fetches the next one while the current one computes, marks
+  finished regions with `data/out/<region>/done.json` and skips them on a rerun, so stop and restart
+  it whenever. `--lidar built` only streams LiDAR for 1 km squares with 200+ buildings (and their
+  neighbours), which is where it matters most; open country uses the tree-height model. About 6 min
+  a region that way, ~12 hours for England; `--lidar all` is about twice that.
+
+  `--region` also takes a comma list (`--region durham,leeds`) or `all`. Each `score` rewrites
+  `web/public/data/regions.json`, the list the app's region picker reads; `python -m spotfinder regions`
+  rewrites just that. Open a region in the app with `?region=<key>`.
 - Your spots: add them to `config/seeds.toml` with a profile; the ranking looks for places with a
   similar mix of features. A seed doesn't need to be legal for that drone (the Nuns Moor seed isn't,
   for the 5"); it only describes style. Each seed is matched on its own, so a woodland seed and a
@@ -166,6 +200,14 @@ seeds; places like your thumbs-down spots get pulled down.
    10 m ring. Edges are tall pixels touching open ground; tree lines are long, narrow belts of trees
    (40 m+ long, under 15 m wide). With LiDAR, the difference between first and last returns finds
    room under the canopy.
+   **Lines**: every fly-through gap, lone tree (orbit), tree 18 m+ (dive) and stretch of tree line
+   (skim, one every 25 m) is a node. Two nodes link when they're 10-70 m apart (5-35 m for the whoop)
+   and a 3 m wide corridor between them is clear below 3 m on the 1 m height grid. Before any of
+   this, winter LiDAR crowns are "leafed on": 1-2 m holes inside a crown are filled to the crown height,
+   and an orbit needs a full 10 m circle of clear air round its crown. From each node a greedy walk
+   picks the next obstacle by its value, a change of move and a smooth heading (no turns over 115°),
+   up to 12 moves, and scores the run with a bonus for variety. Each spot's "flow" is the best run
+   that starts in it, and the spot card gets that run as a suggested line.
 3. **Context** from OSM and Overture: distance to water, bridges and viaducts, bandos (ruins,
    abandoned/disused structures), cliffs and quarries, landmarks, masts and cranes, paths, car parks,
    fast main roads, farmland and public open space; and how busy a place is. A mapped bando only counts
@@ -193,6 +235,10 @@ seeds; places like your thumbs-down spots get pulled down.
    The app's "Parks" chip lists them all.
 7. **3D models**: every spot gets a 320 m square model at 2 m from the same heights (about 20 KB
    each); `score --previews N` limits them to the top N per drone.
+8. **Bandos**: `bandos.geojson` has every mapped bando as a point with what it was (from its OSM
+   tags), how tall the tallest solid thing on it is (LiDAR) and whether that counts as still
+   standing, for the app's bando layer. Each one still standing also gets a 3D close-up (160 m
+   square at 1 m) that opens from its card.
 
 ## Be real about it
 

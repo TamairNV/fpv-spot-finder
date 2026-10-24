@@ -4,7 +4,7 @@ import './style.css';
 import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save, SANDBOXED } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
-import { renderSpot, legalBadge, nice } from './detail.js';
+import { renderSpot, legalBadge, nice, BANDO_STATE } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
 import { attachServer } from './server.js';
@@ -74,6 +74,9 @@ const state = {
   a3only: false,
   kind: null,
   saved: false,
+  more: {},
+  moreOpen: false,
+  bandos: false,
   selected: null,
   detail: null,
   pins: [],
@@ -120,6 +123,30 @@ function kindsFor(profile) {
   return kindCache[profile];
 }
 const liked = (f) => ratings.get(state.profile, f.properties.id) > 0;
+
+// Filters on the numbers behind each spot. Distances are fixed steps; counts follow the drone's own
+// spread (25 gaps is a lot for a whoop spot and few for a 5" one), from the middle up to the top quarter.
+const gapsOf = (s) => (isA3() ? s.gaps : s.gaps_whoop);
+const near = [100, 300, 1000];
+const dist = (v) => (v >= 1000 ? `${v / 1000} km` : `${v} m`);
+function upper(get, step) {
+  const xs = state.spots[state.profile].features.map((f) => get(f.properties.stats || {})).filter(Number.isFinite).sort((a, b) => a - b);
+  const at = (q) => xs[Math.floor(q * (xs.length - 1))] ?? 0;
+  const round = (v) => (step ? Math.round(v / step) * step : v >= 50 ? Math.round(v / 10) * 10 : Math.max(1, Math.round(v / 5) * 5));
+  return [...new Set([round(at(0.5)), round(at(0.75))])].filter((v) => v > 0);
+}
+// chip: how the step reads on the Filters chip once the panel is shut
+const MORE = [
+  { key: 'bando', label: 'Bando within', title: 'A ruin or derelict building that LiDAR says is still standing', opts: () => near, fmt: dist, chip: (v) => `Bando ≤ ${dist(v)}`, test: (s, v) => s.bando_m <= v },
+  { key: 'gaps', label: 'Gaps', title: 'Openings between trees or buildings to fly through', opts: () => upper(gapsOf), fmt: (v) => `${v}+`, chip: (v) => `${v}+ gaps`, test: (s, v) => gapsOf(s) >= v },
+  { key: 'lone', label: 'Lone trees', title: 'Single trees with room all round, to orbit and power loop', opts: () => upper((s) => s.lone_trees), fmt: (v) => `${v}+`, chip: (v) => `${v}+ lone trees`, test: (s, v) => s.lone_trees >= v },
+  { key: 'tall', label: 'Tallest thing', title: 'The tallest tree or building in the spot, to dive', opts: () => upper((s) => s.max_height_m, 1), fmt: (v) => `${v} m+`, chip: (v) => `${v} m+ tall`, test: (s, v) => s.max_height_m >= v },
+  { key: 'water', label: 'Water within', title: 'A river, lake or the sea', opts: () => near, fmt: dist, chip: (v) => `Water ≤ ${dist(v)}`, test: (s, v) => s.water_m <= v },
+  { key: 'parking', label: 'Parking within', title: 'A car park, from the take-off', opts: () => near, fmt: dist, chip: (v) => `Parking ≤ ${dist(v)}`, test: (s, v) => s.parking_m <= v },
+  { key: 'quiet', label: 'People about', title: 'Few shops, cafés and busy paths nearby', opts: () => [0.15], fmt: () => 'Quiet only', chip: () => 'Quiet', test: (s, v, p) => (p.components?.busy ?? 1) < v },
+];
+const moreOn = () => MORE.filter((m) => state.more[m.key] != null);
+const moreActive = () => moreOn().length;
 
 // ---------------------------------------------------------------- boot
 
@@ -347,6 +374,8 @@ function initMap() {
     hash: false,
     dragRotate: !TOUCH.matches,
   });
+  // On a phone the list sheet covers the bottom half, so centre the region in the part you can see.
+  if (PHONE.matches) map.setPadding({ top: 0, right: 0, bottom: sheetHeights().half, left: 0 });
   if (params.has('bench')) window.__map = map;  // for scripts/bench.mjs
   map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: 'Heights © Environment Agency (OGL)' }), 'bottom-right');
   if (!PHONE.matches) map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
@@ -466,6 +495,28 @@ function addOverlays() {
     id: 'zones-line', type: 'line', source: 'zones',
     paint: { 'line-color': ['match', ['get', 'kind'], 'Danger area', '#ff9f1c', '#e5383b'], 'line-width': 1.5, 'line-dasharray': [3, 2] },
   });
+  // Mapped bandos: a solid dot where LiDAR still sees something standing, a ring where little is left.
+  if (hasBandos()) {
+    map.addSource('bandos', { type: 'geojson', data: bandosData || { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'bandos-site', type: 'circle', source: 'bandos', minzoom: 10.5, filter: ['!=', ['get', 's'], 1],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.5, 15, 5], 'circle-opacity': 0,
+        'circle-stroke-color': BANDO_COLOUR, 'circle-stroke-width': 1.5, 'circle-stroke-opacity': 0.8,
+      },
+    });
+    map.addLayer({
+      id: 'bandos-dots', type: 'circle', source: 'bandos', filter: ['==', ['get', 's'], 1],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 2.5, 12, 4.5, 15, 7], 'circle-color': BANDO_COLOUR,
+        'circle-stroke-color': '#1b1030', 'circle-stroke-width': 1,
+      },
+    });
+    for (const id of ['bandos-site', 'bandos-dots']) {
+      map.on('mouseenter', id, () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
+    }
+  }
   map.addSource('sel', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'sel-area', type: 'fill', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.1 } });
   map.addLayer({ id: 'sel-halo', type: 'line', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'line-color': '#ffffff', 'line-width': 3.5, 'line-opacity': 0.8 } });
@@ -497,6 +548,10 @@ function addOverlays() {
   });
   map.on('mouseenter', 'spots-dots', () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'spots-dots', () => { map.getCanvas().style.cursor = ''; });
+  hoverTip('spots-dots', (p) => `<b>${esc(p.title)}</b> · ${p.score}`);
+  for (const id of ['bandos-site', 'bandos-dots']) {
+    hoverTip(id, (p) => `<b>${esc(p.n || p.k)}</b><br>${p.n ? `${esc(p.k)} · ` : ''}${BANDO_STATE[p.s](p.h)}${p.m ? ' · protected site' : ''}`);
+  }
   applyLayerToggles();
   drawPins();
   drawSeeds();
@@ -512,6 +567,19 @@ function addOverlays() {
   $('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
 }
 
+// With a mouse, hovering a dot names it.
+let hoverPop = null;
+function hoverTip(layer, html) {
+  if (TOUCH.matches || !map.getLayer(layer)) return;
+  map.on('mousemove', layer, (e) => {
+    const f = e.features?.[0];
+    if (!f || state.checking) return;
+    hoverPop ||= new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 9, className: 'hover-tip', maxWidth: '260px' });
+    hoverPop.setLngLat(f.geometry.coordinates).setHTML(html(f.properties)).addTo(map);
+  });
+  map.on('mouseleave', layer, () => hoverPop?.remove());
+}
+
 function applyLayerToggles() {
   const vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   vis('heat', $('#lyr-heat').checked);
@@ -523,12 +591,15 @@ function applyLayerToggles() {
   vis('sat', state.base === 'satellite');
   state.pins.forEach((p) => (p.getElement().style.display = $('#lyr-spots').checked ? '' : 'none'));
   $('#lyr-legal-row').hidden = !isA3();
+  $('#lyr-bandos-row').hidden = !hasBandos();
+  syncBandos();
 }
 
 function setProfile(key) {
   if (key === state.profile || !state.spots[key]) return;
   state.profile = key;
   state.like = null;
+  for (const m of MORE) if (state.more[m.key] != null && !m.opts().includes(state.more[m.key])) delete state.more[m.key];
   savePrefs();
   loadDetails(key);
   showList();
@@ -547,7 +618,7 @@ function setProfile(key) {
 }
 
 function savePrefs() {
-  save(PREFS_KEY, { profile: state.profile, sort: state.sort === 'near' ? 'score' : state.sort, base: state.base, a3only: state.a3only });
+  save(PREFS_KEY, { profile: state.profile, sort: state.sort === 'near' ? 'score' : state.sort, base: state.base, a3only: state.a3only, bandos: state.bandos });
 }
 
 // ---------------------------------------------------------------- list
@@ -611,6 +682,10 @@ function orderedSpots() {
   if (state.kind) list = list.filter((f) => hasKind(f, state.kind));
   if (state.saved && !feats.some(liked)) state.saved = false;
   if (state.saved) list = list.filter(liked);
+  for (const m of MORE) {
+    const v = state.more[m.key];
+    if (v != null) list = list.filter((f) => f.properties.stats && m.test(f.properties.stats, v, f.properties));
+  }
   list.sort((a, b) => (desc ? key(b) - key(a) : key(a) - key(b)));
   // spots you've binned sink to the bottom
   list = [...list.filter((f) => ratings.get(state.profile, f.properties.id) >= 0), ...list.filter((f) => ratings.get(state.profile, f.properties.id) < 0)];
@@ -652,13 +727,56 @@ function renderFilters() {
   const chip = (key, on, title, label, n) => el('button', { class: 'fchip', 'data-filter': key, 'aria-pressed': String(on), title },
     label, n != null ? el('span', { class: 'n' }, n) : null);
   const saved = state.spots[state.profile].features.filter(liked).length;
+  // shut, the chip says which filters are on; open, the panel does
+  const on = moreOn();
+  const more = chip('more', on.length > 0, 'Filter by bandos nearby, gaps, lone trees, height, water, parking, people about',
+    [el('span', { class: 'ico', html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v2H3zm14 0h4v2h-4zm-3-2h2v6h-2zM3 16h5v2H3zm9 0h9v2h-9zm-3-2h2v6H9z"/></svg>' }),
+      on.length && !state.moreOpen ? on.map((m) => m.chip(state.more[m.key])).join(' · ') : 'Filters'],
+    on.length && state.moreOpen ? on.length : null);
+  more.setAttribute('aria-expanded', String(state.moreOpen));
+  more.classList.add('more');
   box.replaceChildren(...[
+    more,
     isA3() ? chip('a3', state.a3only, 'Only spots that are mostly 150 m clear of houses and parks', 'A3-clear only') : null,
     saved ? chip('saved', state.saved, 'Spots you rated 👍', 'Your 👍', saved) : null,
     ...kindsFor(state.profile).map(([k, n]) => chip(`kind:${k}`, state.kind === k, `Spots with ${KINDS[k].toLowerCase()}`, KINDS[k], n)),
   ].filter(Boolean));
   box.hidden = !box.children.length;
   box.scrollLeft = x;
+  renderMore();
+}
+
+// On a phone the panel needs the whole sheet; closing it puts the sheet back so the map shows the result.
+let sheetBeforeMore = null;
+function toggleMore(open) {
+  state.moreOpen = open;
+  if (PHONE.matches && open && state.sheet !== 'full') {
+    sheetBeforeMore = state.sheet;
+    setSheet('full');
+  } else if (!open && sheetBeforeMore) {
+    if (PHONE.matches && state.sheet === 'full') setSheet(sheetBeforeMore);  // unless moved by hand since
+    sheetBeforeMore = null;
+  }
+  renderFilters();
+}
+
+function renderMore() {
+  const box = $('#more-filters');
+  box.hidden = !state.moreOpen;
+  if (!state.moreOpen) return;
+  const row = (m) => {
+    const opts = m.opts();
+    const cur = state.more[m.key];
+    return el('div', { class: 'mf-row', title: m.title },
+      el('span', { class: 'mf-label' }, m.label),
+      el('div', { class: 'seg small' },
+        el('button', { 'data-more': m.key, 'data-v': '', class: cur == null ? 'on' : '', 'aria-pressed': String(cur == null) }, 'Any'),
+        ...opts.map((v) => el('button', { 'data-more': m.key, 'data-v': String(v), class: cur === v ? 'on' : '', 'aria-pressed': String(cur === v) }, m.fmt(v)))));
+  };
+  box.replaceChildren(...MORE.map(row),
+    el('div', { class: 'mf-foot' },
+      moreActive() ? el('button', { class: 'linklike', 'data-more-clear': '' }, 'Clear these') : el('span'),
+      el('button', { class: 'linklike', 'data-more-done': '' }, 'Done')));
 }
 
 function renderList() {
@@ -673,6 +791,7 @@ function renderList() {
     renderList();
   });
   renderSeeds(label);
+  renderBandoHits();
   $('#spot-list').replaceChildren(...list.map(spotRow));
   const empty = $('#list-empty');
   empty.hidden = list.length > 0;
@@ -686,6 +805,7 @@ function renderList() {
   state.order = list;
   state.visible = list;
   map?.getSource('spots')?.setData({ type: 'FeatureCollection', features: list });
+  syncBandos();
   drawPins();
   watchThumbs($('#list-scroll'), $('#list-scroll'));
 }
@@ -695,6 +815,7 @@ function clearFilters() {
   state.a3only = false;
   state.kind = null;
   state.saved = false;
+  state.more = {};
   $('#search').value = '';
   $('#search-clear').hidden = true;
   savePrefs();
@@ -880,6 +1001,8 @@ function showSpot(f, isSeed) {
     },
     onBack: () => goBack(),
     onNote: () => renderList(),
+    nearBandos: hasBandos() ? () => loadBandos().then(() => bandosNear(f.geometry.coordinates, 1000, 4)) : null,
+    onBando: showBandoOnMap,
   });
   $('#spot-scroll').scrollTop = 0;
 }
@@ -959,7 +1082,10 @@ function onMapClick(e) {
     return;
   }
   const hit = map.getLayer('spots-dots') && map.queryRenderedFeatures(e.point, { layers: ['spots-dots'] })[0];
-  if (hit) select(hit.properties.id, false);
+  if (hit) return select(hit.properties.id, false);
+  const b = bandoAt(e.point);
+  if (b) showBando(b);
+  else if (bandoOpen) closeCheck();
 }
 
 // The answer goes in a card under the button (a popup on the map gets cut off on phones),
@@ -981,6 +1107,7 @@ function showCheck(lngLat, point) {
       : [el('div', { class: 'muted' }, 'Outside the area this region covers.')]),
   ].filter(Boolean));
   card.hidden = false;
+  bandoOpen = false;
   if (!checkPopup) checkPopup = new maplibregl.Marker({ element: el('div', { class: 'check-dot' }) });
   checkPopup.setLngLat(lngLat).addTo(map);
 }
@@ -988,6 +1115,183 @@ function showCheck(lngLat, point) {
 function closeCheck() {
   $('#check-card').hidden = true;
   checkPopup?.remove();
+  bandoOpen = false;
+}
+
+// ---------------------------------------------------------------- bandos
+
+const BANDO_COLOUR = '#c084fc';
+const hasBandos = () => !!state.meta.sources?.bandos;
+const bandosWanted = () => hasBandos() && (state.bandos || state.kind === 'bando' || state.more.bando != null);
+let bandosData = null, bandosLoad = null, bandoOpen = false;
+
+function loadBandos() {
+  bandosLoad ||= fetch(`${BASE}/bandos.geojson`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((d) => {
+      d ||= { type: 'FeatureCollection', features: [] };
+      d.features.forEach((f, i) => { f.properties.i = i; });
+      bandosData = d;
+      map?.getSource('bandos')?.setData(d);
+    });
+  return bandosLoad;
+}
+
+// Shown when ticked in Layers, or while the Bandos chip or the bando filter is on.
+function syncBandos() {
+  if (!map?.getLayer('bandos-dots')) return;
+  const on = bandosWanted();
+  if (on) loadBandos();
+  for (const id of ['bandos-site', 'bandos-dots']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+}
+
+// Asked to see one (or some), so the layer stays on: it's ticked in Layers.
+function bandosOnMap() {
+  state.bandos = $('#lyr-bandos').checked = true;
+  savePrefs();
+  syncBandos();
+  if (PHONE.matches && state.sheet === 'full') setSheet('half');
+  return PHONE.matches ? { top: 260, bottom: sheetHeights().half, left: 30, right: 30 } : { top: 60, bottom: 60, left: 60, right: 60 };
+}
+
+function showBandoOnMap(b) {
+  const padding = bandosOnMap();
+  map.flyTo({ center: b.geometry.coordinates, zoom: Math.max(map.getZoom(), 15.5), essential: true, duration: 1200,
+    padding: PHONE.matches ? padding : { top: 0, bottom: 0, left: 0, right: 0 } });
+  showBando(b);
+}
+
+function showAllBandos(list) {
+  const padding = bandosOnMap();
+  const xs = list.map((f) => f.geometry.coordinates[0]), ys = list.map((f) => f.geometry.coordinates[1]);
+  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });  // a fly-to's padding sticks and would add to this
+  map.fitBounds([[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]], { padding: { ...padding, top: 70 }, maxZoom: 15.5, duration: 1200 });
+}
+
+// Searching names a bando too ("priory", "mine", "bunker"; "bandos" lists the lot), above the spots.
+function renderBandoHits() {
+  const box = $('#bando-hits');
+  const q = state.query.trim().toLowerCase();
+  if (q.length < 3 || !hasBandos()) return box.replaceChildren();
+  if (!bandosData) {
+    loadBandos().then(() => state.query.trim().toLowerCase() === q && renderBandoHits());
+    return box.replaceChildren();
+  }
+  const all = /^bandos?$/.test(q);
+  const hits = bandosData.features
+    .filter((f) => all || `${f.properties.n || ''} ${f.properties.k}`.toLowerCase().includes(q))
+    .sort((a, b) => (b.properties.s === 1) - (a.properties.s === 1) || !!b.properties.n - !!a.properties.n
+      || (b.properties.h ?? 0) - (a.properties.h ?? 0));
+  if (!hits.length) return box.replaceChildren();
+  box.replaceChildren(
+    el('div', { class: 'section-label bando-label' }, `Bandos · ${hits.length}`,
+      hits.length > 1 ? el('button', { class: 'linklike', onclick: () => showAllBandos(hits) }, 'Show all on the map') : null),
+    el('ul', { class: 'bando-hits' }, hits.slice(0, 5).map((f) => {
+      const p = f.properties;
+      return el('li', { class: 'bando-hit', title: 'Show it on the map', onclick: () => showBandoOnMap(f) },
+        el('i', { class: `bdot s${p.s}` }),
+        el('div', {},
+          el('div', { class: 'spot-name' }, p.n || p.k),
+          el('div', { class: 'spot-sub' }, [p.n ? p.k : null, BANDO_STATE[p.s](p.h), p.m ? 'protected site' : null].filter(Boolean).join(' · '))));
+    })));
+}
+
+// A close-up of the bando in the full-screen 3D view; closing it throws the view away.
+let bando3d = null;
+async function openBando3D(f, btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Loading 3D…';
+  try {
+    const { Preview3D } = await import('./preview3d.js');
+    bando3d?.dispose();
+    const host = el('div', { hidden: true });
+    document.body.append(host);
+    const pv = (bando3d = new Preview3D(host, {
+      spot: { title: f.properties.n || f.properties.k }, preview: { ...f.properties.p, center: f.geometry.coordinates },
+      center: f.geometry.coordinates, profile: state.profile, radiusM: 0,
+      onClose: () => setTimeout(() => {
+        pv.dispose();
+        host.remove();
+        if (bando3d === pv) bando3d = null;
+      }),
+    }));
+    await pv.load(`${BASE}/${f.properties.p.file}`);
+    if (!pv.disposed) pv.toggleFull(true);
+  } catch (e) {
+    btn.after(el('div', { class: 'check-note' }, `3D view unavailable (${e.message || e}).`));
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+function bandosNear(c, maxD, n) {
+  return (bandosData?.features || [])
+    .map((f) => ({ f, d: haversine(c, f.geometry.coordinates) }))
+    .filter((x) => x.d <= maxD)
+    .sort((a, b) => (b.f.properties.s === 1) - (a.f.properties.s === 1) || a.d - b.d)
+    .slice(0, n);
+}
+
+// The closest bando to a tap, with some slack: the dots are small for a finger.
+function bandoAt(point) {
+  if (!bandosData || !bandosWanted()) return null;
+  const pad = TOUCH.matches ? 14 : 7;
+  const hits = map.queryRenderedFeatures([[point.x - pad, point.y - pad], [point.x + pad, point.y + pad]], { layers: ['bandos-dots', 'bandos-site'] });
+  let best = null, bestD = Infinity;
+  for (const h of hits) {
+    const f = bandosData.features[h.properties.i];
+    const q = f && map.project(f.geometry.coordinates);
+    const d = q ? (q.x - point.x) ** 2 + (q.y - point.y) ** 2 : Infinity;
+    if (d < bestD) [best, bestD] = [f, d];
+  }
+  return best;
+}
+
+const BANDO_STATUS = {
+  1: (h) => `Still standing: LiDAR sees something about ${Math.round(h)} m tall here.`,
+  0: () => 'Little left: LiDAR sees nothing much standing, so it may only be a site now.',
+  '-1': () => 'Not checked: no LiDAR here, so it may or may not still be standing.',
+};
+
+function showBando(f) {
+  const p = f.properties;
+  const [lon, lat] = f.geometry.coordinates;
+  let best = null, bestD = Infinity;
+  for (const s of state.spots[state.profile].features) {
+    const d = haversine(f.geometry.coordinates, s.geometry.coordinates);
+    if (d < bestD) [best, bestD] = [s, d];
+  }
+  const who = state.meta.profiles[state.profile].short || state.meta.profiles[state.profile].label;
+  const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener' }, text);
+  const card = $('#check-card');
+  card.replaceChildren(...[
+    el('button', { class: 'x', 'aria-label': 'Close', onclick: closeCheck }, '×'),
+    el('h4', {}, p.n || p.k),
+    el('div', { class: 'bando-status' }, p.n ? el('b', {}, `${p.k}. `) : null, BANDO_STATUS[p.s](p.h)),
+    best ? el('button', {
+      class: 'bando-spot',
+      onclick: () => {
+        closeCheck();
+        select(best.properties.id, false);
+      },
+    },
+    el('span', { class: 'score', style: `--c:${scoreColour(best.properties.score)}` }, best.properties.score),
+    el('span', {}, el('small', {}, `Nearest ${who} spot, ${metres(bestD)} away`), el('br'), best.properties.title)) : null,
+    p.p ? el('button', { class: 'bando-3d', onclick: (e) => openBando3D(f, e.currentTarget) }, '⤢ See it in 3D (LiDAR close-up)') : null,
+    el('div', { class: 'bando-links' },
+      link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, 'Directions'),
+      link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, 'Street View'),
+      p.osm ? link(p.osm, 'OpenStreetMap') : null),
+    el('div', { class: 'check-note' }, p.m
+      ? 'A protected heritage site (a scheduled monument, listed or open to visitors): it has a keeper, so ask before flying and keep clear of people.'
+      : 'Old buildings are usually private and can be unsafe: ask the owner first and keep out of anything unstable.'),
+  ].filter(Boolean));
+  card.hidden = false;
+  bandoOpen = true;
+  if (!checkPopup) checkPopup = new maplibregl.Marker({ element: el('div', { class: 'check-dot' }) });
+  checkPopup.setLngLat(f.geometry.coordinates).addTo(map);
 }
 
 // ---------------------------------------------------------------- UI wiring
@@ -1027,11 +1331,23 @@ function wireUI() {
   $('#filters').addEventListener('click', (e) => {
     const f = e.target.closest('.fchip')?.dataset.filter;
     if (!f) return;
+    if (f === 'more') return toggleMore(!state.moreOpen);
     if (f === 'a3') {
       state.a3only = !state.a3only;
       savePrefs();
     } else if (f === 'saved') state.saved = !state.saved;
     else if (f.startsWith('kind:')) state.kind = state.kind === f.slice(5) ? null : f.slice(5);
+    renderList();
+    $('#list-scroll').scrollTop = 0;
+  });
+  $('#more-filters').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.more) {
+      if (b.dataset.v === '') delete state.more[b.dataset.more];
+      else state.more[b.dataset.more] = Number(b.dataset.v);
+    } else if (b.hasAttribute('data-more-clear')) state.more = {};
+    else if (b.hasAttribute('data-more-done')) return toggleMore(false);
     renderList();
     $('#list-scroll').scrollTop = 0;
   });
@@ -1080,6 +1396,11 @@ function wireUI() {
       $('#btn-layers').setAttribute('aria-expanded', 'false');
     }
   });
+  $('#lyr-bandos').checked = !!state.bandos;
+  $('#lyr-bandos').addEventListener('change', (e) => {
+    state.bandos = e.target.checked;
+    savePrefs();
+  });
   $$('#layers-pop input').forEach((i) => i.addEventListener('change', applyLayerToggles));
   $('#btn-about').addEventListener('click', openAbout);
   $('#btn-check').addEventListener('click', () => setChecking(!state.checking));
@@ -1089,6 +1410,7 @@ function wireUI() {
     if (e.key === 'Escape') {
       if (e.target.matches?.('textarea, input')) return e.target.blur();
       if (state.checking) setChecking(false);
+      else if (!$('#check-card').hidden) closeCheck();
       else if (!$('#view-spot').hidden) goBack();
       return;
     }
@@ -1154,6 +1476,7 @@ function aboutHtml() {
     <li><b>Edges, open space, tall stuff, slopes, water, bridges, bandos</b> nearby, and for the whoop: architecture, plazas, landmarks and under-canopy space.</li>
     <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
     <li><b>Parks</b>: every public park or common of 4 ha or more gets a spot at its best place, even if it doesn't make the top 250. Tap “Parks” above the list to see them.</li>
+    <li><b>Bandos</b>: every ruin and derelict building on OpenStreetMap, checked against LiDAR. Solid purple dots still have something standing (tap one for a 3D close-up from the LiDAR); rings are old sites with little left. Turn them on in Layers, tap “Bandos” or Filters › Bando within, or search “bandos”.</li>
   </ul>
   <h3>Places worth a look, not permission</h3>
   <p>Spots are suggestions to go and check. Each one says how it sits with the rules: the 800 g 5" flies Open <b>A3</b>

@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from spotfinder import features, legal, parks, scoring
+from spotfinder import bandos, features, legal, parks, scoring
 from spotfinder.export import os_grid_ref
 from spotfinder.heights import Tile
 from spotfinder.sources import lidar_wcs
@@ -178,6 +178,18 @@ def test_why_points_add_up_to_the_score():
     assert out[0]["pts"] >= out[-1]["pts"] and all(d["text"] for d in out)
 
 
+def test_regions_config_is_sane():
+    from spotfinder.config import load_regions
+
+    regions = load_regions()
+    assert "newcastle" in regions
+    for r in regions.values():
+        xmin, ymin, xmax, ymax = r.bbox
+        assert xmin < xmax and ymin < ymax
+        assert all(v % 1000 == 0 for v in r.bbox), f"{r.key}: keep boxes on whole km so LiDAR tiles line up"
+        assert r.osm, f"{r.key}: list the Geofabrik extracts covering it"
+
+
 def test_every_park_without_a_spot_gets_its_best_cell():
     grid = np.zeros((20, 20), dtype="int32")
     grid[2:6, 2:6] = 1    # park 1 already has a spot in it
@@ -194,3 +206,63 @@ def test_every_park_without_a_spot_gets_its_best_cell():
     assert parks.picks(grid, names, score, eligible, [(3, 3), (9, 12)], spacing_m=400) == [(14, 14)]
     assert parks.name_at(grid, names, 12, 13) == "B" and parks.name_at(grid, names, 0, 0) is None
 
+
+def test_bando_labels_say_what_it_was():
+    assert bandos.kind({"historic": "mine"}) == "Old pit"
+    assert bandos.kind({"building": "ruins"}) == "Ruins"
+    assert bandos.kind({"building": "warehouse", "disused:military": "yes"}) == "Old military building"
+    assert bandos.kind({"historic": "ruins", "ruins": "church"}) == "Ruined church"
+    assert bandos.kind({"abandoned:landuse": "quarry"}) == "Old quarry"
+    assert bandos.kind({"disused": "yes", "man_made": "adit"}) == "Old adit"
+    assert bandos.kind({"building": "yes", "abandoned": "yes"}) == "Abandoned building"
+    assert bandos.kind({"military": "bunker", "historic": "ruins"}) == "Bunker"
+    assert bandos._osm_url("w4048915") == "https://www.openstreetmap.org/way/4048915"
+    assert bandos._osm_url("x1") is None
+    assert bandos.heritage({"historic": "ruins", "designation": "scheduled_monument"})
+    assert not bandos.heritage({"building": "ruins"})
+
+
+def test_line_links_need_clear_air():
+    from spotfinder import lines
+
+    ohm = np.zeros((200, 200), "float32")
+    nodes = np.array([[100, 50, lines.LONE, 1.0, 6], [100, 90, lines.GAP, 1.0, 6], [100, 130, lines.LONE, 1.0, 6]])
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    assert nb[0] == [1] and sorted(nb[1]) == [0, 2]
+    ohm[80:120, 110] = 10  # a wall between the gap and the last tree
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    assert nb[1] == [0] and nb[2] == []
+
+
+def test_run_prefers_variety_and_flow():
+    from spotfinder import lines
+
+    ohm = np.zeros((300, 300), "float32")
+    # a straight run east: tree, gap, dive tree, gap; plus a skim node off at a hairpin angle
+    nodes = np.array([[150, 30, lines.LONE, 1.0, 6], [150, 70, lines.GAP, 1.0, 6], [150, 110, lines.DIVE, 1.0, 6],
+                      [150, 150, lines.GAP, 1.0, 6], [140, 60, lines.SKIM, 1.0, 6]])
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    score, path = lines.best_run(0, nodes, nb)
+    assert path[:4] == [0, 1, 2, 3]
+    assert score > sum(lines.VALUE[k] for k in (lines.LONE, lines.GAP, lines.DIVE, lines.GAP))
+
+
+def test_analyse_reports_line_cells():
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    for c in range(300, 700, 40):  # a row of separate trees across a field: orbit, gap, orbit...
+        ohm[500:508, c:c + 8] = 12
+    cells, _, _ = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert cells["line5"].max() > 4 and cells["line5_n"].max() >= 5
+
+
+def test_tree_in_a_loose_clump_is_not_an_orbit():
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    ohm[600:606, 300:306] = 12
+    ohm[600:606, 314:320] = 10  # a second tree 8 m away: the first passes its Voronoi ring, not an orbit
+    _, _, lone = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert len(lone) == 0
+    ohm[600:606, 314:320] = 2  # just a low bush: still a fine orbit
+    _, _, lone = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert len(lone) == 1
