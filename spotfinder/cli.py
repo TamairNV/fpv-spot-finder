@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from pathlib import Path
 
 from .config import load_region, load_regions
 
@@ -21,6 +22,8 @@ def main(argv: list[str] | None = None) -> None:
         ("run", "prepare + features + score"),
         ("lidar", "fetch EA LiDAR for the region straight from the WCS (needs environment.data.gov.uk)"),
         ("regions", "rewrite web/public/data/regions.json, the app's list of regions"),
+        ("grid", "tile a whole country into 40 km regions (config/regions_grid.toml)"),
+        ("queue", "work through many regions unattended; skips ones already done, so safe to rerun"),
     ]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--region", default="newcastle", help="region key, comma-separated keys, or 'all'")
@@ -30,11 +33,25 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--previews", type=int, default=120, help="3D previews per profile")
         p.add_argument("--strict", action="store_true",
                        help="only list spots each drone may fly under its Open subcategory (default: label them)")
+        if name == "grid":
+            p.add_argument("--country", default="england", choices=["england", "wales", "scotland"])
+            p.add_argument("--index", help="a saved copy of Geofabrik's index-v1.json (default: download it)")
+        if name == "queue":
+            p.add_argument("--lidar", default="all", choices=["all", "built", "none"],
+                           help="LiDAR for every 1 km square, only built-up ones (much faster), or none")
+            p.add_argument("--save-to", type=Path, help="copy each finished region's data here and free local disk")
+            p.add_argument("--redo", action="store_true", help="redo regions that are already done")
         if name == "lidar":
             p.add_argument("--top", type=int, default=0,
                            help="only fetch the 1 km squares under the best N spots per profile (0 = whole region)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.cmd == "grid":
+        from . import grid
+
+        regions = grid.plan(grid.load_index(args.index), args.country)
+        grid.write(regions)
+        return
     keys = list(load_regions()) if args.region == "all" else [k.strip() for k in args.region.split(",") if k.strip()]
     regions = [load_region(k) for k in keys]  # fail on a typo before doing any work
 
@@ -42,6 +59,11 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "regions":
         logging.info("regions.json: %s", [r["key"] for r in export.write_regions_index()])
+        return
+    if args.cmd == "queue":
+        from . import queue
+
+        queue.run(regions, lidar=args.lidar, save_to=args.save_to, redo=args.redo, workers=args.workers)
         return
     for region in regions:
         t0 = time.time()

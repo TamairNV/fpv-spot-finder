@@ -23,3 +23,23 @@ osm = ["northumberland", "tyne-and-wear"]
 name = "Hexham and the Tyne Valley"
 bbox = [365000, 545000, 405000, 585000]
 osm = ["northumberland", "durham"]
+
+[teesside]
+name = "Teesside"
+bbox = [430000, 500000, 470000, 540000]
+osm = ["north-yorkshire", "durham"]
+
+[leeds]
+name = "Leeds and Bradford"
+bbox = [400000, 415000, 440000, 455000]
+osm = ["west-yorkshire", "north-yorkshire"]
+
+[manchester]
+name = "Manchester"
+bbox = [365000, 380000, 405000, 420000]
+osm = ["greater-manchester", "cheshire", "lancashire", "derbyshire", "west-yorkshire"]
+
+[sheffield]
+name = "Sheffield"
+bbox = [415000, 370000, 455000, 410000]
+osm = ["south-yorkshire", "derbyshire", "west-yorkshire"]

@@ -165,6 +165,27 @@ def spot_tiles(region: Region, top: int, pad_m: float = 250) -> list[tuple[int, 
     return sorted(out, key=lambda t: (-t[1], t[0]))
 
 
+def built_tiles(region: Region, min_buildings: int = 200) -> list[tuple[int, int]]:
+    """1 km squares with some town in them (Overture buildings, from `prepare`), plus their neighbours.
+
+    That's where LiDAR matters most (gaps between buildings, roof heights); open country falls
+    back to the tree-height model, which is fine for woods and lone trees."""
+    from . import overture
+
+    xmin, ymin, xmax, ymax = region.bbox
+    nx, ny = (xmax - xmin) // TILE, (ymax - ymin) // TILE
+    pts = overture.load_layer(region, "buildings").geometry.centroid
+    ix = ((pts.x.to_numpy() - xmin) // TILE).astype(int)
+    iy = ((pts.y.to_numpy() - ymin) // TILE).astype(int)
+    ok = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+    counts = np.zeros((ny, nx), int)
+    np.add.at(counts, (iy[ok], ix[ok]), 1)
+    from scipy import ndimage
+
+    want = ndimage.binary_dilation(counts >= min_buildings, structure=np.ones((3, 3)))
+    return [(xmin + i * TILE, ymin + j * TILE) for j, i in zip(*np.nonzero(want))]
+
+
 def _bng(lonlat) -> tuple[float, float]:
     from ..config import lonlat_to_bng
 
@@ -207,10 +228,16 @@ def assemble(region: Region) -> dict[str, Path]:
     return out
 
 
-def fetch_region(region: Region, workers: int = 6, top: int = 0) -> dict[str, Path]:
-    """Fetch LiDAR for the region (top=0) or just under its best spots, then stitch."""
-    tiles = region_tiles(region) if top <= 0 else spot_tiles(region, top)
-    log.info("LiDAR: %d squares of 1 km to check (%s)", len(tiles), "whole region" if top <= 0 else f"top {top} spots")
+def fetch_region(region: Region, workers: int = 6, top: int = 0, built: bool = False) -> dict[str, Path]:
+    """Fetch LiDAR for the whole region, just under its best spots (top > 0) or just its built-up
+    squares (built), then stitch."""
+    if built:
+        tiles, what = built_tiles(region), "built-up squares"
+    elif top > 0:
+        tiles, what = spot_tiles(region, top), f"top {top} spots"
+    else:
+        tiles, what = region_tiles(region), "whole region"
+    log.info("LiDAR: %d squares of 1 km to check (%s)", len(tiles), what)
     session = requests.Session()
     session.headers["User-Agent"] = "fpv-spot-finder (personal hobby project)"
     counts: dict[str, int] = {}

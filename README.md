@@ -128,6 +128,19 @@ seeds; places like your thumbs-down spots get pulled down.
   python -m spotfinder lidar --region leeds && python -m spotfinder run --region leeds
   ```
 
+  The whole of England is tiled into 40 km boxes in `config/regions_grid.toml`
+  (`python -m spotfinder grid --country england` regenerates it). To work through them unattended:
+
+  ```bash
+  python -m spotfinder queue --region all --lidar built --save-to /some/big/disk
+  ```
+
+  It does each region end to end, fetches the next one while the current one computes, marks
+  finished regions with `data/out/<region>/done.json` and skips them on a rerun, so stop and restart
+  it whenever. `--lidar built` only streams LiDAR for 1 km squares with 200+ buildings (and their
+  neighbours), which is where it matters most; open country uses the tree-height model. About 6 min
+  a region that way, ~12 hours for England; `--lidar all` is about twice that.
+
   `--region` also takes a comma list (`--region durham,leeds`) or `all`. Each `score` rewrites
   `web/public/data/regions.json`, the list the app's region picker reads; `python -m spotfinder regions`
   rewrites just that. Open a region in the app with `?region=<key>`.

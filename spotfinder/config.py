@@ -90,9 +90,13 @@ class Settings:
     seeds: list[Seed] = field(default_factory=list)
 
 
-def load_regions() -> dict[str, Region]:
-    with open(CONFIG_DIR / "regions.toml", "rb") as f:
-        raw = tomllib.load(f)
+def load_regions(grid: bool = True) -> dict[str, Region]:
+    """Hand-made regions (regions.toml) first, then the generated country grid (regions_grid.toml)."""
+    raw = {}
+    for name in ("regions.toml", "regions_grid.toml") if grid else ("regions.toml",):
+        if (CONFIG_DIR / name).exists():
+            with open(CONFIG_DIR / name, "rb") as f:
+                raw |= tomllib.load(f)
     return {k: Region(key=k, name=r["name"], bbox=tuple(int(v) for v in r["bbox"]), osm=tuple(r.get("osm", ())))
             for k, r in raw.items()}
 
