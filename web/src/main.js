@@ -81,6 +81,9 @@ const state = {
 let map, lookup, ratings, checkPopup;
 let liteActive = false;
 let placeLabels = [];
+let heatHiLoaded = false;
+const heatHiWanted = () => heatHiLoaded || map.getZoom() >= 11;
+const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 // The basemap tiles stop at the region's edge; asking for ones outside would only 404.
 function regionBounds() {
@@ -329,6 +332,11 @@ function initMap() {
     updatePlaceLabels();
   });
   map.on('zoom', updatePlaceLabels);
+  map.on('zoom', () => {
+    if (heatHiLoaded || !heatHiWanted() || !map.getSource('heat')) return;
+    heatHiLoaded = true;
+    map.getSource('heat').updateImage({ url: `${BASE}/heat_${state.profile}.png`, coordinates: state.meta.region.heat_corners });
+  });
   map.on('click', onMapClick);
   map.on('contextmenu', (e) => {
     e.preventDefault();
@@ -398,7 +406,9 @@ function addOverlays() {
   // Zoomed in: the fine heatmap, fading as the streets get readable, plus the legal overlay.
   map.addSource('heatlo', { type: 'image', url: `${BASE}/heatlo_${state.profile}.png`, coordinates: m.heat_lo_corners || m.heat_corners });
   map.addLayer({ id: 'heatlo', type: 'raster', source: 'heatlo', maxzoom: 12, paint: { 'raster-opacity': 0.85, 'raster-fade-duration': 0 } }, before);
-  map.addSource('heat', { type: 'image', url: `${BASE}/heat_${state.profile}.png`, coordinates: m.heat_corners });
+  // The fine heatmap only draws from zoom 12, so it isn't fetched until the map gets close.
+  heatHiLoaded = heatHiWanted();
+  map.addSource('heat', { type: 'image', url: heatHiLoaded ? `${BASE}/heat_${state.profile}.png` : BLANK_PNG, coordinates: m.heat_corners });
   map.addLayer({ id: 'heat', type: 'raster', source: 'heat', minzoom: 12, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 0.3], 'raster-fade-duration': 0 } }, before);
   map.addSource('legal', { type: 'image', url: `${BASE}/legal_${state.profile}.png`, coordinates: m.legal_corners });
   map.addLayer({ id: 'legal', type: 'raster', source: 'legal', minzoom: 11.5, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 11.5, 0, 12.5, 0.85], 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } }, before);
@@ -473,7 +483,7 @@ function setProfile(key) {
   showList();
   const m = state.meta.region;
   if (map.getSource('heat')) {
-    map.getSource('heat').updateImage({ url: `${BASE}/heat_${key}.png`, coordinates: m.heat_corners });
+    if (heatHiLoaded) map.getSource('heat').updateImage({ url: `${BASE}/heat_${key}.png`, coordinates: m.heat_corners });
     map.getSource('heatlo').updateImage({ url: `${BASE}/heatlo_${key}.png`, coordinates: m.heat_lo_corners || m.heat_corners });
     map.getSource('legal').updateImage({ url: `${BASE}/legal_${key}.png`, coordinates: m.legal_corners });
   }

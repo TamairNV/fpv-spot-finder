@@ -30,7 +30,8 @@ const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '-
 const results = [];
 for (let i = 0; i < runs; i++) {
   bytes = 0;
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const phone = process.env.PHONE;
+  const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true } : { viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   const cdp = await ctx.newCDPSession(page);
   await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 9e6 / 8, uploadThroughput: 1.5e6 / 8 });
