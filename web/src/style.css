@@ -193,7 +193,8 @@ svg { fill: currentColor; }
 .search-clear { position: absolute; right: 4px; top: 4px; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; }
 .search-clear:hover { background: var(--panel-3); color: var(--text); }
 .filters { display: flex; gap: 6px; flex-wrap: wrap; }
-.fchip { height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 550; }
+.fchip { flex: none; height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 550; white-space: nowrap; }
+.fchip .n { margin-left: 5px; font-size: 11.5px; opacity: .65; font-variant-numeric: tabular-nums; }
 .fchip:hover { color: var(--text); }
 .fchip[aria-pressed="true"] { background: rgba(92, 200, 255, .14); border-color: rgba(92, 200, 255, .5); color: var(--accent); }
 
@@ -255,9 +256,14 @@ svg { fill: currentColor; }
 
 /* ---------------------------------------------------------------- the spot card */
 .spot-head {
-  display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center;
+  display: grid; grid-template-columns: 36px 1fr auto auto; gap: 8px; align-items: center;
   padding: 10px 12px 10px 8px; border-bottom: 1px solid var(--line); background: var(--panel);
 }
+.sh-nav { display: flex; gap: 2px; }
+.sh-nav .icon-btn { width: 32px; height: 36px; color: var(--muted); }
+.sh-nav .icon-btn:hover:not(:disabled) { color: var(--text); }
+.sh-nav .icon-btn:disabled { opacity: .3; cursor: default; background: transparent; }
+.sh-nav .prev svg { transform: scaleX(-1); }
 .icon-btn {
   width: 36px; height: 36px; border-radius: 10px; border: 0; background: transparent; color: var(--text);
   display: grid; place-items: center;
@@ -430,6 +436,11 @@ dialog#about li { margin: 4px 0; }
   .sheet-handle span { position: absolute; left: 50%; top: 7px; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: var(--line-2); }
   .drag-zone { touch-action: none; }
   .list-head { padding-top: 2px; }
+  /* one row of chips that scrolls sideways; dragging up and down on it still moves the sheet */
+  .filters { flex-wrap: nowrap; overflow-x: auto; touch-action: pan-x; scrollbar-width: none; margin: 0 -12px; padding: 0 12px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 28px), transparent); }
+  .filters::-webkit-scrollbar { display: none; }
   .spot-head { padding-top: 0; }
   .tiles { grid-template-columns: repeat(3, 1fr); }
 }

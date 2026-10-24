@@ -160,6 +160,10 @@ seeds; places like your thumbs-down spots get pulled down.
    for 5" cine, 250 m for the whoop).
    Each spot carries a "why" list: points out of 100 per reason, with the numbers behind it (e.g.
    "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
+6. **Parks**: the ranking alone favours woods and riversides out of town, so every named park,
+   common or recreation ground of 4 ha or more that has no spot yet gets one at its best place
+   (listed after the top 250, with a 3D preview), and every spot inside a park is labelled with it.
+   The app's "Parks" chip lists them all.
 
 ## Be real about it
 

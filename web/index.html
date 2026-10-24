@@ -71,9 +71,7 @@
             <input id="search" type="search" placeholder="Search spots or places" autocomplete="off" enterkeyhint="search" />
             <button id="search-clear" class="search-clear" aria-label="Clear search" hidden>×</button>
           </div>
-          <div class="filters" id="filters">
-            <button class="fchip" data-filter="a3" aria-pressed="false" title="Only spots where the 800 g quad is clear of the A3 distances">A3-clear only</button>
-          </div>
+          <div class="filters" id="filters" role="group" aria-label="Filter spots" hidden></div>
         </div>
         <div class="scroll" id="list-scroll">
           <div id="now-box" class="now" hidden></div>

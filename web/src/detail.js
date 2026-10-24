@@ -12,6 +12,7 @@ const NICE = {
 };
 
 const BACK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';
+const STEP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z"/></svg>';
 
 // How the spot sits with the rules, as a short badge: the 5" needs Open A3, the whoop is A1 anywhere outside FRZs.
 export function legalBadge(p, a3, big = false) {
@@ -101,7 +102,7 @@ function takeoffBox(p) {
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
 }
 
-export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, onRate, onLike, onBack }) {
+export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, onRate, onLike, onBack }) {
   const p = spot.properties;
   const [lon, lat] = spot.geometry.coordinates;
   let rating = ratings.get(profile, p.id);
@@ -112,12 +113,20 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the list', title: 'Back to the list', onclick: onBack });
   back.innerHTML = BACK_ICON;
   const score = p.score ?? null;
+  // previous / next spot in the list as it's sorted and filtered now
+  const step = (fn, prev) => {
+    const b = el('button', { class: `icon-btn step${prev ? ' prev' : ''}`, disabled: !fn, onclick: fn,
+      'aria-label': prev ? 'Previous spot' : 'Next spot', title: prev ? 'Previous spot (←)' : 'Next spot (→)' });
+    b.innerHTML = STEP_ICON;
+    return b;
+  };
   head.replaceChildren(back,
     el('div', { class: 'sh-main' },
       el('div', { class: 'sh-title', title: p.title }, p.title),
       el('div', { class: 'sh-sub' },
         isSeed ? 'Your spot' : `#${p.rank}${total ? ` of ${total}` : ''} for the ${label}`,
         p.locality && !isSeed ? ` · ${p.locality}` : '', p.gridref ? ` · ${p.gridref}` : '')),
+    nav ? el('div', { class: 'sh-nav' }, step(nav.prev, true), step(nav.next, false)) : el('span'),
     el('div', { class: 'sh-score', style: `--c:${scoreColour(score ?? 0)};--p:${score ?? 0}`, title: score != null ? `Score ${score} out of 100` : '' },
       el('span', {}, score ?? '–')));
 

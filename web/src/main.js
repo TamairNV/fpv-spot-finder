@@ -68,6 +68,8 @@ const state = {
   like: null,
   query: '',
   a3only: false,
+  kind: null,
+  saved: false,
   selected: null,
   detail: null,
   pins: [],
@@ -94,6 +96,25 @@ function regionBounds() {
 
 const profiles = () => Object.keys(state.meta.profiles);
 const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.category || '');
+
+// Spot types to filter the list by: the reasons worth 2+ points of a spot's score (kinds, from the
+// pipeline). A type nearly every spot has, or only one or two do, isn't worth a chip.
+const KINDS = {
+  bando: 'Bandos', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', relief: 'Hills and banks', sunset: 'Sunset',
+  plaza: 'Plazas', under: 'Under the trees', public: 'Public space', edges: 'Tree lines', space: 'Wide open',
+};
+const hasKind = (f, k) => f.properties.kinds?.includes(k) ?? (f.properties.why || []).some((w) => w.key === k && w.pts >= 2);
+const kindCache = {};
+function kindsFor(profile) {
+  if (!kindCache[profile]) {
+    const feats = state.spots[profile].features;
+    kindCache[profile] = Object.keys(KINDS)
+      .map((k) => [k, feats.filter((f) => hasKind(f, k)).length])
+      .filter(([, n]) => n >= 3 && n <= feats.length * 0.85);
+  }
+  return kindCache[profile];
+}
+const liked = (f) => ratings.get(state.profile, f.properties.id) > 0;
 
 // ---------------------------------------------------------------- boot
 
@@ -554,6 +575,10 @@ function orderedSpots() {
   const q = state.query.trim().toLowerCase();
   let list = feats.filter((f) => !q || `${f.properties.title} ${f.properties.locality} ${f.properties.gridref}`.toLowerCase().includes(q));
   if (state.a3only && isA3()) list = list.filter((f) => f.properties.a3 >= 50);
+  if (state.kind && !kindsFor(state.profile).some(([k]) => k === state.kind)) state.kind = null;
+  if (state.kind) list = list.filter((f) => hasKind(f, state.kind));
+  if (state.saved && !feats.some(liked)) state.saved = false;
+  if (state.saved) list = list.filter(liked);
   list.sort((a, b) => (desc ? key(b) - key(a) : key(a) - key(b)));
   // spots you've binned sink to the bottom
   list = [...list.filter((f) => ratings.get(state.profile, f.properties.id) >= 0), ...list.filter((f) => ratings.get(state.profile, f.properties.id) < 0)];
@@ -587,8 +612,24 @@ function thumbBox(preview, tag) {
     preview ? el('img', { alt: '', 'data-thumb': `${BASE}/${preview.file}`, decoding: 'async' }) : null, tag);
 }
 
+function renderFilters() {
+  const box = $('#filters');
+  const x = box.scrollLeft;
+  const chip = (key, on, title, label, n) => el('button', { class: 'fchip', 'data-filter': key, 'aria-pressed': String(on), title },
+    label, n != null ? el('span', { class: 'n' }, n) : null);
+  const saved = state.spots[state.profile].features.filter(liked).length;
+  box.replaceChildren(...[
+    isA3() ? chip('a3', state.a3only, 'Only spots that are mostly 150 m clear of houses and parks', 'A3-clear only') : null,
+    saved ? chip('saved', state.saved, 'Spots you rated 👍', 'Your 👍', saved) : null,
+    ...kindsFor(state.profile).map(([k, n]) => chip(`kind:${k}`, state.kind === k, `Spots with ${KINDS[k].toLowerCase()}`, KINDS[k], n)),
+  ].filter(Boolean));
+  box.hidden = !box.children.length;
+  box.scrollLeft = x;
+}
+
 function renderList() {
   const { list, note, label } = orderedSpots();
+  renderFilters();
   const noteBox = $('#taste-note');
   noteBox.hidden = !note;
   noteBox.innerHTML = note;
@@ -618,6 +659,8 @@ function renderList() {
 function clearFilters() {
   state.query = '';
   state.a3only = false;
+  state.kind = null;
+  state.saved = false;
   $('#search').value = '';
   $('#search-clear').hidden = true;
   savePrefs();
@@ -776,10 +819,14 @@ function showSpot(f, isSeed) {
   $('#view-list').hidden = true;
   $('#view-spot').hidden = false;
   $('#panel').dataset.view = 'spot';
+  const order = state.order || [];
+  const i = isSeed ? -1 : order.findIndex((g) => g.properties.id === f.properties.id);
+  const stepTo = (j) => (j >= 0 && j < order.length ? () => select(order[j].properties.id, false) : null);
   state.detail = renderSpot({
     head: $('#spot-head'), body: $('#detail-body'),
     spot: f, meta: state.meta, profile: state.profile, ratings, base: BASE, isSeed,
     total: state.spots[state.profile].features.length,
+    nav: i < 0 ? null : { prev: stepTo(i - 1), next: stepTo(i + 1) },
     onRate: (v) => {
       ratings.set(state.profile, f.properties.id, v, { title: f.properties.title });
       renderList();
@@ -802,13 +849,21 @@ function goBack() {
 }
 
 function showList() {
+  const last = state.selected;
   state.detail?.dispose();
   state.detail = null;
   state.selected = null;
   $('#view-spot').hidden = true;
   $('#view-list').hidden = false;
   $('#panel').dataset.view = 'list';
-  $('#list-scroll').scrollTop = state.listScroll || 0;
+  const sc = $('#list-scroll');
+  sc.scrollTop = state.listScroll || 0;
+  // after stepping through spots, keep the last one looked at in view
+  const row = last && sc.querySelector(`.row-item[data-id="${last}"]`);
+  if (row) {
+    const r = row.getBoundingClientRect(), b = sc.getBoundingClientRect();
+    if (r.top < b.top || r.bottom > b.bottom) sc.scrollTop += r.top - b.top - b.height / 3;
+  }
   map?.getSource('sel')?.setData({ type: 'FeatureCollection', features: [] });
   markSelected(null);
   setHash('', false);
@@ -900,8 +955,6 @@ function syncControls() {
   $$('#profile-switch button').forEach((b) => b.classList.toggle('on', b.dataset.profile === state.profile));
   $$('#list-sort button').forEach((b) => b.classList.toggle('on', b.dataset.sort === state.sort && !state.like));
   $$('#basemap-switch button').forEach((b) => b.classList.toggle('on', b.dataset.base === state.base));
-  $('#filters').hidden = !isA3();
-  $('#filters [data-filter="a3"]').setAttribute('aria-pressed', String(state.a3only));
 }
 
 function wireUI() {
@@ -924,11 +977,16 @@ function wireUI() {
     syncControls();
     applyLayerToggles();
   }));
-  $('#filters [data-filter="a3"]').addEventListener('click', () => {
-    state.a3only = !state.a3only;
-    savePrefs();
-    syncControls();
+  $('#filters').addEventListener('click', (e) => {
+    const f = e.target.closest('.fchip')?.dataset.filter;
+    if (!f) return;
+    if (f === 'a3') {
+      state.a3only = !state.a3only;
+      savePrefs();
+    } else if (f === 'saved') state.saved = !state.saved;
+    else if (f.startsWith('kind:')) state.kind = state.kind === f.slice(5) ? null : f.slice(5);
     renderList();
+    $('#list-scroll').scrollTop = 0;
   });
   const search = $('#search');
   search.addEventListener('input', () => {
@@ -980,9 +1038,18 @@ function wireUI() {
   $('#btn-check').addEventListener('click', () => setChecking(!state.checking));
   $('#check-done').addEventListener('click', () => setChecking(false));
   window.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || document.querySelector('.p3d-wrap.full') || $('#about').open) return;
-    if (state.checking) setChecking(false);
-    else if (!$('#view-spot').hidden) goBack();
+    if (document.querySelector('.p3d-wrap.full') || $('#about').open) return;
+    if (e.key === 'Escape') {
+      if (state.checking) setChecking(false);
+      else if (!$('#view-spot').hidden) goBack();
+      return;
+    }
+    // ← / → (or k / j) step through the spots while one is open, unless typing or steering the map
+    const dir = { ArrowLeft: -1, ArrowRight: 1, k: -1, j: 1 }[e.key];
+    if (!dir || $('#view-spot').hidden || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target.closest?.('input, textarea, select, .maplibregl-canvas-container')) return;
+    e.preventDefault();
+    $(`#spot-head .step${dir < 0 ? '.prev' : ':not(.prev)'}`)?.click();
   });
 }
 

@@ -19,6 +19,7 @@ from shapely import STRtree
 from shapely.geometry import Point, mapping
 
 from . import legal, scoring
+from . import parks as park_mod
 from .config import WEB_DATA_DIR, Region, Seed, bng_to_lonlat
 from .heights import HeightReader
 from .sources import osm
@@ -437,7 +438,8 @@ def _flags_text(flag_bits: int) -> list[str]:
     return [txt for bit, txt in legal.FLAG_TEXT.items() if flag_bits & bit and bit != legal.FLAG_COMMON]
 
 
-def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 120) -> None:
+def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 120,
+              parks: tuple | None = None) -> None:
     out = web_dir(region)
     for old in (out / "previews").glob("*.png"):  # spot ids change between runs
         old.unlink()
@@ -463,6 +465,10 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             lon, lat = bng_to_lonlat(x, y)
             comp_vals = {k: round(float(v[r, c]), 3) for k, v in res["comps"].items()}
             title, locality = namer.name(x, y)
+            park = park_mod.name_at(*parks, r, c) if parks else None
+            park_spot = (r, c) in res.get("park_spots", ())
+            if park_spot and park.lower() not in title.lower():
+                title = park
             R = profile.radius_cells
             H, W = res["final"].shape
             win = (slice(max(r - R, 0), min(r + R + 1, H)), slice(max(c - R, 0), min(c + R + 1, W)))
@@ -502,7 +508,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                                       round(lq.x - x, 1), round(lq.y - y, 1)])
             spot_id = f"{r}-{c}"
             preview = None
-            if rank <= previews:
+            if rank <= previews or park_spot:
                 if (r, c) not in done_previews:
                     pm = write_preview(reader, dtm, region, x, y, out / "previews" / f"{spot_id}.png")
                     done_previews[(r, c)] = pm
@@ -560,6 +566,10 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 },
             }
             props["why"] = why(comp_vals, profile, props["stats"], res, r, c)
+            # what the list's type chips filter on: the reasons worth 2+ points (the why list itself loads later)
+            props["kinds"] = [w["key"] for w in props["why"] if w["pts"] >= 2] + (["park"] if park else [])
+            if park:
+                props["park"] = park
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
         (out / f"spots_{key}.gpx").write_text(_gpx(feats, f"{profile.label} spots, {region.name}"))
