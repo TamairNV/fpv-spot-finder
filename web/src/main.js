@@ -720,8 +720,8 @@ function renderMore() {
     return el('div', { class: 'mf-row', title: m.title },
       el('span', { class: 'mf-label' }, m.label),
       el('div', { class: 'seg small' },
-        el('button', { 'data-more': m.key, 'data-v': '', class: cur == null ? 'on' : '' }, 'Any'),
-        ...opts.map((v) => el('button', { 'data-more': m.key, 'data-v': String(v), class: cur === v ? 'on' : '' }, m.fmt(v)))));
+        el('button', { 'data-more': m.key, 'data-v': '', class: cur == null ? 'on' : '', 'aria-pressed': String(cur == null) }, 'Any'),
+        ...opts.map((v) => el('button', { 'data-more': m.key, 'data-v': String(v), class: cur === v ? 'on' : '', 'aria-pressed': String(cur === v) }, m.fmt(v)))));
   };
   box.replaceChildren(...MORE.map(row),
     el('div', { class: 'mf-foot' },

@@ -214,7 +214,8 @@ svg { fill: currentColor; }
 .fchip .ico svg { width: 14px; height: 14px; fill: currentColor; vertical-align: -2.5px; margin-right: 5px; }
 .fchip.more[aria-expanded="true"] { color: var(--text); border-color: var(--text); }
 /* Filters: one row per number, each a row of steps */
-.more-filters { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.more-filters { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+  max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; }
 .mf-row { display: grid; grid-template-columns: 96px 1fr; gap: 8px; align-items: center; }
 .mf-label { font-size: 12.5px; color: var(--muted); }
 .mf-row .seg { background: var(--panel); justify-self: start; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
