@@ -65,3 +65,5 @@ dialog.srv-dialog h2 { margin: 0 0 10px; }
   position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 2000;
   background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 10px; padding: 9px 14px; font-size: 13px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
 }
+.srv-row.rr { padding: 7px 10px; border-radius: 10px; background: rgba(255, 196, 0, .07); border: 1px dashed rgba(255, 196, 0, .35); }
+.srv-row.rr.on { border-style: solid; }

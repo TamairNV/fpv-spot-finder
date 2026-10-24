@@ -145,6 +145,8 @@ class Server {
         this.fcDirty = false;
         this.loadForecast();
       }
+      if (!this.rerank) this.loadRerank();
+      else this.renderBar();  // the re-rank offer counts your ratings
     } catch (e) {
       this.setStatus(e.status === 401 ? 'lost' : 'offline');
       if (e.status === 401) {  // the key's gone (server reset): start a new profile with everything on here
@@ -270,6 +272,80 @@ class Server {
     this.onChange?.();
   }
 
+  // ---- re-rank the whole region with your ratings (the pipeline's scorer, on the server)
+
+  get mineKey() {
+    return `fpvspots:${this.region}:mine`;
+  }
+
+  async loadRerank() {
+    if (!store(KEY, null)) return;
+    try {
+      this.rerank = await call(`rerank?region=${encodeURIComponent(this.region)}`);
+    } catch {
+      return;
+    }
+    const st = this.rerank.job?.state;
+    if (st === 'queued' || st === 'running') {
+      this.rrWatching = true;
+      clearTimeout(this.rrTimer);
+      this.rrTimer = setTimeout(() => this.loadRerank(), 3000);
+    } else if (this.rrWatching) {
+      this.rrWatching = false;
+      if (st === 'done' && this.rerank.copy) return this.useMine(this.rerank.copy.path);
+      if (st === 'failed') this.toast('Re-ranking didn’t work this time. The standard ranking is still here.');
+    }
+    this.renderBar();
+  }
+
+  async startRerank() {
+    this.rerank = { ...this.rerank, job: { state: 'queued' } };
+    this.renderBar();
+    try {
+      await this.sync();  // the server ranks with what it has: send the latest first
+      this.rerank = await call('rerank', { method: 'POST', body: { region: this.region } });
+      this.rrWatching = true;
+      this.loadRerank();
+    } catch (e) {
+      this.rerank = { ...this.rerank, job: null };
+      this.renderBar();
+      alert(e.message);
+    }
+  }
+
+  useMine(path) {
+    save(this.mineKey, path);
+    location.reload();
+  }
+
+  rerankRow() {
+    const rr = this.rerank;
+    if (!rr) return null;
+    const st = rr.job?.state;
+    const using = store(this.mineKey, null);
+    const votes = Object.values(this.ratings.data);
+    const up = votes.filter((r) => r.v > 0).length, down = votes.filter((r) => r.v < 0).length;
+    const when = (iso) => (iso ? new Date(iso).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+    const btn = (text, fn, title) => el('button', { class: 'linklike', onclick: fn, title }, text);
+    const sep = () => el('span', { class: 'sep' }, '·');
+    if (st === 'queued' || st === 'running') return el('div', { class: 'srv-row rr' }, el('span', {}, '⏳ Re-ranking the whole region with your ratings… (a minute or two)'));
+    if (using && rr.copy) {
+      const made = Object.values(rr.copy.ratings || {}).reduce((a, r) => [a[0] + (r.up || 0), a[1] + (r.down || 0)], [0, 0]);
+      return el('div', { class: 'srv-row rr on' }, el('span', {}, `★ Your ranking (${made[0]} 👍, ${made[1]} 👎, ${when(rr.copy.made)})`), sep(),
+        btn('Update', () => this.startRerank(), 'Re-rank again with your latest ratings'), sep(),
+        btn('Standard ranking', () => { save(this.mineKey, null); location.reload(); }));
+    }
+    if (rr.copy) {
+      return el('div', { class: 'srv-row rr' }, btn('★ Use your ranking', () => this.useMine(rr.copy.path), `Made ${when(rr.copy.made)}`), sep(),
+        btn('Update it', () => this.startRerank()));
+    }
+    if (rr.ready && up + down >= 2) {
+      return el('div', { class: 'srv-row rr' }, btn(`★ Re-rank the whole region with my ratings (${up} 👍, ${down} 👎)`, () => this.startRerank(),
+        'The server re-scores every 50 m square, steered towards places like your 👍 and away from your 👎'));
+    }
+    return null;
+  }
+
   // ---- the bar above the list: forecast, sync status, flights
 
   mountBar() {
@@ -301,7 +377,8 @@ class Server {
         el('button', { class: 'linklike', onclick: () => this.openDevices(), title: 'Sync your ratings, notes and flights with your other devices' },
           `${{ ok: '☁︎', syncing: '☁︎', offline: '⚠︎', lost: '⚠︎', idle: '☁︎' }[this.status]} ${syncText}`),
         el('span', { class: 'sep' }, '·'),
-        el('button', { class: 'linklike', onclick: () => this.openDevices() }, 'Link a device')));
+        el('button', { class: 'linklike', onclick: () => this.openDevices() }, 'Link a device')),
+      this.rerankRow() || '');
   }
 
   // ---- forecast

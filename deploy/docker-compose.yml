@@ -11,6 +11,8 @@ services:
     ports:
       - "127.0.0.1:${SPOTTER_PORT:-8098}:80"
     depends_on: [api]
+    volumes:
+      - ${SPOTTER_DATA_DIR:-../../fpv-spot-finder-data}/mine:/srv/mine:ro
   api:
     build:
       context: ..
@@ -19,3 +21,5 @@ services:
     user: "${SPOTTER_UID:-1000}:${SPOTTER_GID:-1000}"  # files in the data folder belong to tnv, not root
     volumes:
       - ${SPOTTER_DATA_DIR:-../../fpv-spot-finder-data}:/data
+      # the pipeline's sources, caches and features for each region (a full `spotfinder run`)
+      - ${SPOTTER_PIPELINE_DIR:-../../fpv-spot-finder-data/pipeline}:/data/pipeline

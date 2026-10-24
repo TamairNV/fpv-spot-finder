@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,10 +10,11 @@ from pathlib import Path
 from pyproj import Transformer
 
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG_DIR = ROOT / "config"
-DATA_DIR = ROOT / "data"
+# The server runs the pipeline with its data elsewhere, and writes a re-ranked copy per person.
+CONFIG_DIR = Path(os.environ.get("SPOTFINDER_CONFIG") or ROOT / "config")
+DATA_DIR = Path(os.environ.get("SPOTFINDER_DATA") or ROOT / "data")
 STATIC_DIR = DATA_DIR / "static"
-WEB_DATA_DIR = ROOT / "web" / "public" / "data"
+WEB_DATA_DIR = Path(os.environ.get("SPOTFINDER_WEB_DATA") or ROOT / "web" / "public" / "data")
 
 BNG = "EPSG:27700"
 WGS84 = "EPSG:4326"

@@ -84,3 +84,10 @@ def test_forecast_windows(monkeypatch):
     assert wk["next"]["spots"][0]["id"] == "1-2"
     # the whoop's limits are much lower: 10 mph gusts are fine, 13 aren't
     assert forecast.week([{"id": "1", "title": "A", "lon": -1.6, "lat": 54.97}], "cine85", now=datetime(2026, 10, 25, 6))["days"][0]["best"]
+
+
+def test_rerank_needs_a_prepared_region_and_ratings():
+    k = c.post("/api/profile").json()["key"]
+    assert c.post("/api/rerank", headers=auth(k), json={"region": "nowhere"}).status_code == 409
+    st = c.get("/api/rerank?region=nowhere", headers=auth(k)).json()
+    assert st == {"ready": False, "job": None, "copy": None}

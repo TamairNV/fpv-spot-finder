@@ -12,7 +12,10 @@ import { attachServer } from './server.js';
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
 const DATA = `${import.meta.env.BASE_URL}data`;
-const BASE = `${DATA}/${REGION}`;
+// your own ranking of the region, made on the server from your ratings ("Re-rank with my ratings")
+const MINE_KEY = `fpvspots:${REGION}:mine`;
+const MINE = SANDBOXED ? null : store(MINE_KEY, null);
+const BASE = MINE ? `${import.meta.env.BASE_URL}${MINE}` : `${DATA}/${REGION}`;
 const PREFS_KEY = 'fpvspots:prefs';
 const PHONE = matchMedia('(max-width: 820px)');
 const TOUCH = matchMedia('(hover: none)');
@@ -124,6 +127,11 @@ async function boot() {
   // The last-used drone's spots download alongside meta.json rather than after it.
   const early = fetch(`${BASE}/spots_${state.profile}.geojson`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const metaRes = await fetch(`${BASE}/meta.json`);
+  if (!metaRes.ok && MINE) { // your ranking's gone (switched back on another device): use the standard one
+    save(MINE_KEY, null);
+    location.reload();
+    return;
+  }
   if (!metaRes.ok) {
     document.body.innerHTML = `<div style="padding:40px;color:#eee;font:16px system-ui">No data for “${esc(REGION)}” yet.
       Run <code>python -m spotfinder run --region ${esc(REGION)}</code> first.</div>`;
@@ -163,7 +171,10 @@ async function boot() {
       if (profile && profile !== state.profile) setProfile(profile);
       select(id, true);
     },
-  }).then((s) => { server = s; });
+  }).then((s) => {
+    server = s;
+    if (s) renderList();
+  });
 }
 
 // The spot card's extras (gap and tree positions, the why breakdown, links) come in a second file
@@ -566,7 +577,8 @@ function orderedSpots() {
       note = `Learned from your ${model.pos} 👍 and ${model.neg} 👎. You seem to like: ${top.map(nice).join(', ').toLowerCase()}. `
         + (SANDBOXED
           ? 'To teach the whole-region ranking, copy your ratings (bottom of the list) and paste them back to Claude.'
-          : 'To teach the whole-region ranking, download your ratings (bottom of the list) into config/ratings/ and re-run the scorer.');
+          : server ? 'To re-rank the whole region with them, use “Re-rank with my ratings” above the list.'
+            : 'To teach the whole-region ranking, download your ratings (bottom of the list) into config/ratings/ and re-run the scorer.');
     } else {
       note = `Rate a few spots 👍 / 👎 (at least 2 good, 1 not) and this list sorts itself by your taste. So far: ${model.pos} 👍, ${model.neg} 👎.`;
     }

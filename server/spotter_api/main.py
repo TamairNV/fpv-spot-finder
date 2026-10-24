@@ -20,11 +20,13 @@ from pydantic import BaseModel, Field
 
 from . import forecast, photos
 from .db import DATA_DIR, DB
+from .rerank import Busy, Reranker
 
 log = logging.getLogger("spotter")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
 db = DB()
+reranker = Reranker(db, DATA_DIR)
 PHOTO_DIR = DATA_DIR / "photos"
 REGION_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
 KINDS = {"rating", "note", "flight"}
@@ -78,7 +80,7 @@ def client_ip(req: Request) -> str:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "features": ["sync", "flights", "photos", "forecast"] + (["push"] if push else [])}
+    return {"ok": True, "features": ["sync", "flights", "photos", "forecast", "rerank"] + (["push"] if push else [])}
 
 
 @app.post("/api/profile")
@@ -239,6 +241,37 @@ def get_forecast(region: str, drone: str = "freestyle5", lon: float | None = Non
     except Exception as e:
         raise HTTPException(502, f"forecast unavailable ({e.__class__.__name__})")
     return {**out, "mine": mine}
+
+
+# ---------------------------------------------------------------- re-rank with your ratings
+
+class Rerank(BaseModel):
+    region: str
+
+
+@app.get("/api/rerank")
+def rerank_status(region: str, pid: int = Depends(profile)):
+    return reranker.status(pid, region_ok(region))
+
+
+@app.post("/api/rerank")
+def rerank(body: Rerank, pid: int = Depends(profile)):
+    region = region_ok(body.region)
+    if not reranker.ready(region):
+        raise HTTPException(409, "the server hasn't worked this region out yet")
+    ratings = {r["k"]: {"v": r["v"]} for r in db.items(pid, region, "rating") if r.get("v")}
+    if not ratings:
+        raise HTTPException(400, "rate a few spots first")
+    try:
+        return reranker.start(pid, region, ratings)
+    except Busy as e:
+        raise HTTPException(429, str(e))
+
+
+@app.delete("/api/rerank")
+def rerank_drop(region: str, pid: int = Depends(profile)):
+    reranker.drop(pid, region_ok(region))
+    return reranker.status(pid, region)
 
 
 # ---------------------------------------------------------------- push
