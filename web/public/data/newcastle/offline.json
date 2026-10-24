@@ -1,5 +1,5 @@
 {
-"generated_at": "2026-10-24T12:07:43+00:00",
+"generated_at": "2026-10-24T12:11:14+00:00",
 "files": [
 "heat_cine5.png",
 "heat_cine85.png",
@@ -13,6 +13,9 @@
 "legal_lookup.png",
 "meta.json",
 "places.json",
+"spot_details_cine5.json",
+"spot_details_cine85.json",
+"spot_details_freestyle5.json",
 "spots_cine5.geojson",
 "spots_cine85.geojson",
 "spots_freestyle5.geojson",

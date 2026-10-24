@@ -30,6 +30,10 @@ LEGAL_RES = 20  # metres per pixel in the legal lookup/overlay images
 PREVIEW_M = 320
 PREVIEW_RES = 2
 
+# Spot fields only the spot card uses (gap and tree positions, the why breakdown, outside links):
+# written to spot_details_<profile>.json so the list's file stays small.
+DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links")
+
 # Codes in the legal lookup image (blue channel).
 CODE_CLEAR, CODE_FRZ, CODE_RESTRICTED = 0, 1, 2
 CODE_A3_RES, CODE_A3_COM, CODE_A3_REC, CODE_A3_BLD, CODE_A3_ROAD = 10, 11, 12, 13, 14
@@ -558,8 +562,13 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             props["why"] = why(comp_vals, profile, props["stats"], res, r, c)
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
-        (out / f"spots_{key}.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
         (out / f"spots_{key}.gpx").write_text(_gpx(feats, f"{profile.label} spots, {region.name}"))
+        # The list only needs the summary; the spot card's extras load after the list is up.
+        details = {f["properties"]["id"]: {k: f["properties"].pop(k) for k in DETAIL_KEYS if k in f["properties"]}
+                   for f in feats}
+        (out / f"spots_{key}.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats},
+                                                             separators=(",", ":")))
+        (out / f"spot_details_{key}.json").write_text(json.dumps(details, separators=(",", ":")))
         log.info("wrote %d %s spots", len(feats), key)
 
     seed_out = []

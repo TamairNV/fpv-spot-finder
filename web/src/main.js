@@ -126,6 +126,21 @@ async function boot() {
   renderNow();
   syncControls();
   if (!SANDBOXED) loadRegions();
+  setTimeout(() => loadDetails(state.profile), 300);
+}
+
+// The spot card's extras (gap and tree positions, the why breakdown, links) come in a second file
+// per drone, fetched once the list is up, so the list itself shows sooner. Older data has them inline.
+const detailsLoad = {}, detailsDone = new Set();
+function loadDetails(key) {
+  detailsLoad[key] ||= fetch(`${BASE}/spot_details_${key}.json`)
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((byId) => {
+      state.spots[key]?.features.forEach((f) => Object.assign(f.properties, byId[f.properties.id]));
+      detailsDone.add(key);
+    });
+  return detailsLoad[key];
 }
 
 // "Now" banner: wind and rain for the next hour at the middle of the region, and today's light.
@@ -454,6 +469,7 @@ function setProfile(key) {
   state.profile = key;
   state.like = null;
   savePrefs();
+  loadDetails(key);
   showList();
   const m = state.meta.region;
   if (map.getSource('heat')) {
@@ -700,6 +716,15 @@ function select(id, fromList, push = true) {
   markSelected(id);
   showSelection(f);
   showSpot(f, false);
+  const key = state.profile;
+  if (!detailsDone.has(key)) {
+    loadDetails(key).then(() => {
+      if (state.selected === id && state.profile === key) {
+        showSelection(f);
+        showSpot(f, false);
+      }
+    });
+  }
   if (PHONE.matches) setSheet('half');
   flyToSpot(f, fromList ? 15.5 : Math.max(map.getZoom(), 14.5));
 }
