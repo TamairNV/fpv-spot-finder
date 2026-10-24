@@ -42,17 +42,17 @@ Three profiles out of the box:
   be exported and fed back into the pipeline.
 - **Filters and notes**: chips above the list narrow it to parks, bandos, water, bridges, hills,
   sunset spots and so on, or to your 👍 spots. **Filters** narrows by the numbers behind each spot:
-  a bando within 100 m / 300 m / 1 km, plenty of gaps or lone trees (steps that follow each drone's
-  own spread), water or parking within a distance, and quiet places only. ‹ › on a spot (or ← →)
-  steps through the list. Each
-  spot takes your own notes (parking, access, when it's quiet); they show as 📝 in the list, are
+  a bando within 100 m / 300 m / 1 km, plenty of gaps or lone trees, something tall to dive (steps
+  that follow each drone's own spread), water or parking within a distance, and quiet places only;
+  shut, the chip says which are on. ‹ › on a spot (or ← →) steps through the list. Each spot takes your own notes (parking, access, when it's quiet); they show as 📝 in the list, are
   searchable, and go in the ratings download.
 - **Bandos on the map**: every ruin and derelict building on OpenStreetMap as a purple dot (solid
   if LiDAR still sees something standing, a ring if little is left). Tap one for what it is, how
   tall, the nearest spot, directions and Street View, and for the ones still standing a 3D
   close-up from the LiDAR at 1 m. On in Layers, and whenever the Bandos chip or
   the bando filter is on. Search finds them by name or kind ("priory", "bunker"; "bandos" lists the
-  lot), and each spot card lists the bandos within 1 km.
+  lot), and each spot card lists the bandos within 1 km. Ones that are protected heritage sites
+  (scheduled monuments, attractions) say so. With a mouse, hovering any spot or bando dot names it.
 - **Works offline** once loaded (add it to your home screen). When the online map can't load, it
   switches to a built-in basemap (main roads, rail, water, woods, built-up areas, place names), so it
   still works in a field with no signal. **GPX export** of the spots for OS Maps or a GPS, and a share
