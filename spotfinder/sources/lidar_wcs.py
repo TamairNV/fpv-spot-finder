@@ -63,7 +63,11 @@ def tile_url(layer: str, x0: int, y0: int) -> str:
 
 
 def _get(session: requests.Session, url: str, tries: int = 4) -> np.ndarray | None:
-    """One coverage as a 1000x1000 float32 array (NaN = no data); None if the square is empty."""
+    """One coverage as a 1000x1000 float32 array (NaN = no data); None if the square is empty.
+
+    The EA server answers HTTP 500 for squares with no data at all (offshore, for one), so a 500
+    that persists through the retries counts as empty rather than as a failure."""
+    status = None
     for attempt in range(tries):
         try:
             r = session.get(url, timeout=60)
@@ -77,11 +81,16 @@ def _get(session: requests.Session, url: str, tries: int = 4) -> np.ndarray | No
                 if nd is not None and not math.isnan(nd):
                     a[a == nd] = np.nan
                 return a if np.isfinite(a).any() else None
+            status = r.status_code
             if r.status_code in (400, 404):
                 return None  # outside coverage
         except (requests.RequestException, rasterio.errors.RasterioIOError) as e:
+            status = None
             log.debug("retry %s: %s", url, e)
         time.sleep(2 ** attempt)
+    if status == 500:
+        log.debug("treating persistent HTTP 500 as an empty square: %s", url)
+        return None
     raise RuntimeError(f"WCS kept failing: {url}")
 
 

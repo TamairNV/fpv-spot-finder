@@ -26,6 +26,16 @@ const DRONES = {
 const G = 9.81;
 const AXES_KEY = 'fpvspots:gamepad-axes';
 
+// The first connected radio/gamepad, or null. Embedded pages can be refused the Gamepad API
+// outright (it throws), and then the keyboard still flies.
+function firstPad() {
+  try {
+    return navigator.getGamepads ? [...navigator.getGamepads()].find(Boolean) ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadPixels(url) {
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -388,7 +398,7 @@ export class Preview3D {
     this.camera.updateProjectionMatrix();
     this.axes = store(AXES_KEY, { roll: 0, pitch: 1, thr: 2, yaw: 3, inv: [false, true, false, false] });
     this.fly = {
-      spec, acro: !!navigator.getGamepads?.()[0], pos: new THREE.Vector3(), vel: new THREE.Vector3(),
+      spec, acro: !!firstPad(), pos: new THREE.Vector3(), vel: new THREE.Vector3(),
       q: new THREE.Quaternion(), heading: 0, crashes: 0, gatesHit: 0, last: performance.now(), armed: false,
     };
     this.resetDrone();
@@ -451,7 +461,7 @@ export class Preview3D {
     const k = (c) => (this.keys.has(c) ? 1 : 0);
     let roll = k('KeyD') - k('KeyA'), pitch = k('KeyW') - k('KeyS'), yaw = k('ArrowRight') - k('ArrowLeft');
     let thr = null, pad = false;
-    const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(Boolean) : null;
+    const gp = firstPad();
     if (gp && gp.axes.length >= 4) {
       const a = this.axes;
       const ax = (i, inv) => (gp.axes[i] ?? 0) * (inv ? -1 : 1);
@@ -570,7 +580,7 @@ export class Preview3D {
       const t0 = performance.now();
       await new Promise((resolve) => {
         const tick = () => {
-          const gp = [...navigator.getGamepads()].find(Boolean);
+          const gp = firstPad();
           if (gp) gp.axes.forEach((v, i) => {
             lo[i] = Math.min(lo[i] ?? v, v);
             hi[i] = Math.max(hi[i] ?? v, v);

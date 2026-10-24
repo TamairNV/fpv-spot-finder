@@ -177,14 +177,22 @@ def write_legal_layers(region: Region) -> list:
 
 # ---------------------------------------------------------------- naming
 
+# Named places a pilot would recognise a spot by. Hotels, gyms and bowling alleys are named too, but
+# "By Premier Inn" says little about the place.
+NOT_A_PLACE = {"hotel", "hostel", "guest_house", "motel", "apartment", "chalet", "fitness_centre", "sports_hall",
+               "bowling_alley", "amusement_arcade", "dance", "escape_game", "adult_gaming_centre", "sauna",
+               "tanning_salon", "trampoline_park", "indoor_play", "information", "artwork", "gallery"}
+
+
 class Namer:
     def __init__(self, region: Region):
         o = osm.extract(region)
         a, n, ln = o["areas"], o["nodes"], o["lines"]
         named = lambda g: g[g["tags"].map(lambda t: bool(t.get("name")))]
-        good_area = named(a)[named(a)["tags"].map(lambda t: any(k in t for k in (
+        good_area = named(a)[named(a)["tags"].map(lambda t: (any(k in t for k in (
             "leisure", "natural", "historic", "water", "place", "military", "tourism"))
-            or t.get("landuse") in {"forest", "meadow", "recreation_ground", "quarry", "brownfield", "reservoir"})]
+            or t.get("landuse") in {"forest", "meadow", "recreation_ground", "quarry", "brownfield", "reservoir"})
+            and t.get("tourism") not in NOT_A_PLACE and t.get("leisure") not in NOT_A_PLACE)]
         good_area = good_area[good_area.geometry.area < 5e6]
         self.areas = good_area.reset_index(drop=True)
         self.area_tree = STRtree(self.areas.geometry.values)
@@ -192,7 +200,9 @@ class Namer:
         self.places = pts[pts["tags"].map(lambda t: t.get("place") in {
             "city", "town", "village", "hamlet", "suburb", "neighbourhood", "quarter", "locality"})].reset_index(drop=True)
         self.place_tree = STRtree(self.places.geometry.values)
-        feats = pts[pts["tags"].map(lambda t: any(k in t for k in ("natural", "historic", "tourism", "man_made")))]
+        # (memorial points are mostly plaques)
+        feats = pts[pts["tags"].map(lambda t: any(k in t for k in ("natural", "historic", "tourism", "man_made"))
+                                    and t.get("tourism") not in NOT_A_PLACE and t.get("historic") != "memorial")]
         rivers = named(ln)[named(ln)["tags"].map(lambda t: t.get("waterway") in {"river", "canal"} or "bridge" in t)]
         self.feats = pd.concat([feats, rivers]).reset_index(drop=True)
         self.feat_tree = STRtree(self.feats.geometry.values)
@@ -437,6 +447,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
         log.info("wrote %d %s spots", len(feats), key)
 
     seed_out = []
+    H, W = cells["a3_frac"].shape
     for s in seeds:
         res = results.get(s.profile)
         r, c = cell_of(region, s.bng)
@@ -445,8 +456,11 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                  "a1_frac": round(float(cells["a1_frac"][r, c]), 2),
                  "flags": _flags_text(int(cells["flags"][r, c]))}
         if res is not None:
-            entry["components"] = {k: round(float(v[r, c]), 3) for k, v in res["style"].items()}
-            entry["score"] = round(100 * float(res["style_final"][r, c]))
+            # Scored like a spot: at the best cell of the area you named, not just its middle.
+            br, bc = max((rc for rc in cells_within(region, s.bng, s.radius_m) if 0 <= rc[0] < H and 0 <= rc[1] < W),
+                         key=lambda rc: res["style_final"][rc])
+            entry["components"] = {k: round(float(v[br, bc]), 3) for k, v in res["style"].items()}
+            entry["score"] = round(100 * float(res["style_final"][br, bc]))
         if (r, c) not in done_previews:
             x, y = cell_center(region, r, c)
             done_previews[(r, c)] = write_preview(reader, dtm, region, x, y, out / "previews" / f"{r}-{c}.png")

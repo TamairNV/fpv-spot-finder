@@ -10,7 +10,7 @@ import time
 import numpy as np
 from scipy import ndimage
 
-from . import context, export, features, legal, rasterize, scoring
+from . import basemap, context, export, features, legal, rasterize, scoring
 from .config import CONFIG_DIR, Region, load_seeds
 from .heights import lidar_paths
 from .sources import canopy, osm, overture, terrain
@@ -25,6 +25,7 @@ def prepare(region: Region) -> None:
     canopy.build_chm(region)
     terrain.build_dtm(region)
     rasterize.build_vector_rasters(region)
+    basemap.write_basemap(region)
 
 
 def compute_cells(region: Region, use_lidar: bool = True, workers: int = 4) -> dict[str, np.ndarray]:
@@ -54,6 +55,20 @@ def compute_cells(region: Region, use_lidar: bool = True, workers: int = 4) -> d
         "osm": sorted(p.name for p in osm.OSM_DIR.glob("*.osm.pbf")),
     }
     (out / "cells_meta.json").write_text(json.dumps(meta, indent=2))
+    export.save_legal_grids(region, g)
+    return cells
+
+
+def refresh_legal(region: Region) -> dict[str, np.ndarray]:
+    """Rebuild only the legal grids (airspace, A1/A3 distances, warning flags) and keep the rest."""
+    cells = load_cells(region)
+    g = legal.build_legal(region)
+    cells.update(context.legal_features(g))
+    np.savez_compressed(region.out_dir / "cells.npz", **cells)
+    meta_path = region.out_dir / "cells_meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["airspace"] = g.airspace_label
+    meta_path.write_text(json.dumps(meta, indent=2))
     export.save_legal_grids(region, g)
     return cells
 
@@ -110,7 +125,8 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120) ->
         rule = scoring.rule_score(comps, profile)
         # MOD land and live danger areas are out whatever the score.
         keep_out = (cells["flags"].astype("int64") & (legal.FLAG_MILITARY | legal.FLAG_DANGER_AREA)) > 0
-        keep_out = ndimage.binary_dilation(keep_out, iterations=1)
+        # ...and so is anywhere the spot itself would reach onto them.
+        keep_out = ndimage.binary_dilation(keep_out, structure=np.ones((3, 3)), iterations=profile.radius_cells + 1)
         eligible = land & (cells[profile.legal_key] >= profile.legal_min) & ~keep_out
         if profile.legal_window_min:
             eligible &= scoring.win_mean(cells[profile.legal_key], profile.radius_cells) >= profile.legal_window_min

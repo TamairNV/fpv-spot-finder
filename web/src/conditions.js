@@ -1,6 +1,6 @@
 // Sun times (computed locally) and wind/rain from Open-Meteo (free, no key).
 import SunCalc from 'suncalc';
-import { el } from './util.js';
+import { el, SANDBOXED } from './util.js';
 
 const hm = (d) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -45,8 +45,20 @@ export async function weather(lon, lat) {
   return p;
 }
 
+// Where to look instead when the forecast can't be fetched (offline, or a host that blocks it).
+function noForecast(box, lon, lat) {
+  box.replaceChildren(el('h4', {}, 'Wind and rain'),
+    el('div', { class: 'muted' }, 'Can\'t load the forecast here. ',
+      el('a', { href: `https://www.windy.com/?${lat.toFixed(3)},${lon.toFixed(3)},13`, target: '_blank', rel: 'noopener' }, 'Open this spot on Windy'),
+      '.'));
+}
+
 export function weatherBox(lon, lat, profile) {
   const box = el('div', { class: 'box' }, el('h4', {}, 'Wind and rain, next 18 hours'), el('div', { class: 'muted' }, 'Loading forecast…'));
+  if (SANDBOXED) {
+    noForecast(box, lon, lat);
+    return box;
+  }
   weather(lon, lat).then((w) => {
     const lim = LIMITS[profile] || LIMITS.freestyle5;
     const now = Date.now();
@@ -75,8 +87,6 @@ export function weatherBox(lon, lat, profile) {
       el('div', { class: 'muted', style: 'margin-bottom:6px;font-size:12.5px' },
         `Big number = gusts (mph), arrow = where the wind blows to, % = chance of rain. ${summary}`),
       strip);
-  }).catch(() => {
-    box.replaceChildren(el('h4', {}, 'Wind and rain'), el('div', { class: 'muted' }, 'Forecast unavailable offline.'));
-  });
+  }).catch(() => noForecast(box, lon, lat));
   return box;
 }

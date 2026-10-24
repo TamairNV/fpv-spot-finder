@@ -16,6 +16,7 @@ def main(argv: list[str] | None = None) -> None:
         ("prepare", "download and grid the source data"),
         ("features", "compute per-cell features (slow part)"),
         ("context", "recompute only the map-context features, e.g. after editing bando rules (fast)"),
+        ("legal", "rebuild only the legal grids, e.g. after a new NATS AIRAC file (a few minutes)"),
         ("score", "score cells, pick spots and write the web data (fast)"),
         ("run", "prepare + features + score"),
         ("lidar", "fetch EA LiDAR for the region straight from the WCS (needs environment.data.gov.uk)"),
@@ -46,6 +47,8 @@ def main(argv: list[str] | None = None) -> None:
         pipeline.compute_cells(region, use_lidar=not args.no_lidar, workers=args.workers)
     if args.cmd == "context":
         pipeline.refresh_context(region)
+    if args.cmd == "legal":
+        pipeline.refresh_legal(region)
     if args.cmd in ("score", "run"):
         pipeline.score_and_export(region, n_spots=args.spots, previews=args.previews)
     logging.info("done in %.0fs", time.time() - t0)

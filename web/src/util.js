@@ -1,3 +1,7 @@
+// Built for a sandboxed host with no map tiles or outside requests (VITE_TARGET=artifact):
+// the app starts on the bundled basemap and hides what that host refuses (downloads, location, share).
+export const SANDBOXED = import.meta.env.VITE_TARGET === 'artifact';
+
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 

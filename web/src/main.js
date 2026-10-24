@@ -1,7 +1,7 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './style.css';
-import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save } from './util.js';
+import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save, SANDBOXED } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
 import { renderDetail, nice } from './detail.js';
@@ -11,20 +11,46 @@ const REGION = params.get('region') || 'newcastle';
 const BASE = `${import.meta.env.BASE_URL}data/${REGION}`;
 const PREFS_KEY = 'fpvspots:prefs';
 
+const abs = (path) => new URL(path, location.href).href;
+
 const BASEMAP_URL = 'https://tiles.openfreemap.org/styles/liberty';
-const FALLBACK_STYLE = {
-  version: 8,
-  sources: {
-    osm: {
-      type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19,
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+// The bundled basemap: water, woods, built-up land, main roads and place names from the pipeline.
+// Used offline, when the tile server can't be reached, and in sandboxed hosts.
+function liteStyle() {
+  const k = (kind) => ['==', ['get', 'k'], kind];
+  const w = (lo, hi) => ['interpolate', ['linear'], ['zoom'], 9, lo, 16, hi];
+  return {
+    version: 8,
+    sources: {
+      lite: {
+        type: 'geojson', data: abs(`${BASE}/basemap.json`), tolerance: 0.5,
+        attribution: '© OpenStreetMap contributors, Overture Maps',
+      },
     },
-  },
-  layers: [
-    { id: 'bg', type: 'background', paint: { 'background-color': '#dde3df' } },
-    { id: 'osm', type: 'raster', source: 'osm' },
-  ],
-};
+    layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#eef0e8' } },
+      { id: 'lite-built', type: 'fill', source: 'lite', filter: k('built'), paint: { 'fill-color': '#e1dcd3' } },
+      { id: 'lite-green', type: 'fill', source: 'lite', filter: k('green'), paint: { 'fill-color': '#d5e6c4' } },
+      { id: 'lite-wood', type: 'fill', source: 'lite', filter: k('wood'), paint: { 'fill-color': '#b5d09c' } },
+      { id: 'lite-water', type: 'fill', source: 'lite', filter: k('water'), paint: { 'fill-color': '#a6c8e2' } },
+      { id: 'lite-waterline', type: 'line', source: 'lite', filter: k('waterline'), paint: { 'line-color': '#a6c8e2', 'line-width': w(1, 5) } },
+      { id: 'lite-rail', type: 'line', source: 'lite', filter: k('rail'), paint: { 'line-color': '#8f8f8f', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
+      {
+        id: 'lite-road-case', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#bdb6aa', 'line-width': w(['match', ['get', 'r'], 1, 2.6, 2, 1.8, 1.2], ['match', ['get', 'r'], 1, 10, 2, 8, 6]) },
+      },
+      {
+        id: 'lite-road', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': ['match', ['get', 'r'], 1, '#f3bd5d', 2, '#fbe19a', '#ffffff'],
+          'line-width': w(['match', ['get', 'r'], 1, 1.6, 2, 1, 0.6], ['match', ['get', 'r'], 1, 8, 2, 6, 4.5]),
+        },
+      },
+    ],
+  };
+}
+let liteActive = false;
+let placeLabels = [];
 const SATELLITE = {
   type: 'raster', tileSize: 256, maxzoom: 19,
   tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
@@ -78,39 +104,69 @@ async function boot() {
 
 function initMap() {
   const [lon, lat] = state.meta.region.center;
+  const offline = SANDBOXED || navigator.onLine === false;
+  liteActive = offline;
   map = new maplibregl.Map({
     container: 'map',
-    style: BASEMAP_URL,
+    style: offline ? liteStyle() : BASEMAP_URL,
     center: [lon, lat],
     zoom: 10.2,
     maxZoom: 18.5,
-    attributionControl: { compact: true },
+    attributionControl: { compact: true, customAttribution: 'Heights © Environment Agency (OGL)' },
     hash: false,
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
-  const geo = new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false });
-  map.addControl(geo, 'top-right');
-  geo.on('geolocate', (e) => {
-    state.me = [e.coords.longitude, e.coords.latitude];
-    if (state.sort === 'near') renderList();
-  });
+  if (!SANDBOXED) {
+    const geo = new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false });
+    map.addControl(geo, 'top-right');
+    geo.on('geolocate', (e) => {
+      state.me = [e.coords.longitude, e.coords.latitude];
+      if (state.sort === 'near') renderList();
+    });
+  }
 
-  // If the vector basemap can't be reached, fall back to plain OSM tiles; overlays work either way.
-  let loaded = false, fellBack = false;
+  // If the online basemap can't be reached, switch to the bundled one; overlays work either way.
+  let loaded = offline, fellBack = offline;
   const fallback = () => {
     if (loaded || fellBack) return;
     fellBack = true;
-    map.setStyle(FALLBACK_STYLE);
+    liteActive = true;
+    map.setStyle(liteStyle());
   };
-  const timer = setTimeout(fallback, 6000);
+  const timer = offline ? null : setTimeout(fallback, 6000);
   map.on('error', () => fallback());
   map.on('style.load', () => {
     loaded = true;
     clearTimeout(timer);
     addOverlays();
+    updatePlaceLabels();
   });
+  map.on('zoom', updatePlaceLabels);
   map.on('click', onMapClick);
+  loadPlaceLabels();
+}
+
+// Place names for the bundled basemap, as plain HTML labels (no font files needed).
+async function loadPlaceLabels() {
+  try {
+    const rows = await fetch(`${BASE}/places.json`).then((r) => r.json());
+    placeLabels = rows.map(([name, lon, lat, rank]) => {
+      const node = el('div', { class: `place r${rank}` }, name);
+      return { rank, marker: new maplibregl.Marker({ element: node }).setLngLat([lon, lat]).addTo(map) };
+    });
+    updatePlaceLabels();
+  } catch {
+    /* no labels, the map still works */
+  }
+}
+
+function updatePlaceLabels() {
+  const z = map.getZoom();
+  const minZoom = [0, 8.5, 11.5, 13.5];
+  placeLabels.forEach(({ rank, marker }) => {
+    marker.getElement().style.display = liteActive && z >= minZoom[rank] ? '' : 'none';
+  });
 }
 
 function firstSymbolId() {
@@ -120,8 +176,10 @@ function firstSymbolId() {
 function addOverlays() {
   const m = state.meta.region;
   const before = firstSymbolId();
-  if (!map.getSource('sat')) map.addSource('sat', SATELLITE);
-  map.addLayer({ id: 'sat', type: 'raster', source: 'sat', layout: { visibility: state.base === 'satellite' ? 'visible' : 'none' } }, before);
+  if (!SANDBOXED) {
+    if (!map.getSource('sat')) map.addSource('sat', SATELLITE);
+    map.addLayer({ id: 'sat', type: 'raster', source: 'sat', layout: { visibility: state.base === 'satellite' ? 'visible' : 'none' } }, before);
+  }
   // Zoomed out: a coarse heatmap (100 m, max of the cells) so good areas stay visible.
   // Zoomed in: the 25 m heatmap plus the legal overlay, which is too busy to read from far out.
   map.addSource('heatlo', { type: 'image', url: `${BASE}/heatlo_${state.profile}.png`, coordinates: m.heat_lo_corners || m.heat_corners });
@@ -330,8 +388,8 @@ function renderSeeds() {
   const box = $('#seeds-box');
   const seeds = seedsFor(state.profile);
   const tools = el('div', { style: 'margin-top:8px;display:flex;gap:12px;flex-wrap:wrap' },
-    el('a', { href: `${BASE}/spots_${state.profile}.gpx`, download: `fpv-spots-${REGION}-${state.profile}.gpx` }, 'Spots as GPX'),
-    el('a', { href: '#', onclick: exportRatings }, 'Download my ratings'));
+    SANDBOXED ? null : el('a', { href: `${BASE}/spots_${state.profile}.gpx`, download: `fpv-spots-${REGION}-${state.profile}.gpx` }, 'Spots as GPX'),
+    el('a', { href: '#', onclick: exportRatings }, SANDBOXED ? 'Copy my ratings' : 'Download my ratings'));
   if (!seeds.length) {
     box.replaceChildren(el('div', {}, 'No seed spots for this drone. Add your favourite spots to config/seeds.toml and the ranking learns their style.'), tools);
     return;
@@ -381,7 +439,7 @@ function select(id, fly) {
   const f = state.spots[state.profile].features.find((x) => x.properties.id === id);
   if (!f) return;
   state.selected = id;
-  history.replaceState(null, '', `#${state.profile}/${id}`);
+  history.replaceState(null, '', `#${state.profile}.${id}`);
   $$('#spot-list li').forEach((li) => li.classList.toggle('on', li.dataset.id === id));
   $(`#spot-list li[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
   state.pins.forEach((m) => m.getElement().classList.toggle('on', m.getElement().dataset.id === id));
@@ -437,7 +495,7 @@ function closeDetail() {
 }
 
 function openFromHash() {
-  const [profile, id] = location.hash.slice(1).split('/');
+  const [profile, id] = location.hash.slice(1).split(/[./]/);
   if (state.spots[profile]) {
     if (profile !== state.profile) setProfile(profile);
     if (id) select(id, true);
@@ -482,6 +540,11 @@ function syncSegs() {
 }
 
 function wireUI() {
+  if (SANDBOXED) {
+    $('#list-sort button[data-sort="near"]')?.remove();
+    $('#basemap-switch')?.previousElementSibling?.remove();
+    $('#basemap-switch')?.remove();
+  }
   $$('#profile-switch button').forEach((b) => b.addEventListener('click', () => setProfile(b.dataset.profile)));
   $$('#list-sort button').forEach((b) => b.addEventListener('click', () => {
     state.sort = b.dataset.sort;
@@ -523,6 +586,19 @@ function wireUI() {
 
 function exportRatings(e) {
   e.preventDefault();
+  if (SANDBOXED) {
+    const link = e.currentTarget;
+    const json = ratings.export();
+    const showText = () => {  // no clipboard here: put the text where it can be selected and copied by hand
+      link.textContent = 'Copy this text into config/ratings/<region>.json:';
+      const box = el('textarea', { class: 'ratings-json', readonly: true, rows: 4 }, json);
+      link.after(box);
+      box.select();
+    };
+    (navigator.clipboard ? navigator.clipboard.writeText(json) : Promise.reject(new Error('no clipboard'))).then(
+      () => { link.textContent = 'Copied: paste into config/ratings/<region>.json'; }, showText);
+    return;
+  }
   const blob = new Blob([ratings.export()], { type: 'application/json' });
   const a = el('a', { href: URL.createObjectURL(blob), download: `fpv-ratings-${REGION}.json` });
   a.click();
@@ -568,6 +644,6 @@ function aboutHtml() {
 
 boot();
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+if ('serviceWorker' in navigator && import.meta.env.PROD && !SANDBOXED) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }

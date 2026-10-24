@@ -1,5 +1,5 @@
 // The spot card: why it scored, what's there, can you fly it, the light, the wind, and a 3D look.
-import { el, metres, compass } from './util.js';
+import { el, metres, compass, SANDBOXED } from './util.js';
 import { sunBox, weatherBox } from './conditions.js';
 import { Preview3D } from './preview3d.js';
 
@@ -116,7 +116,7 @@ export function renderDetail(host, { spot, meta, profile, ratings, base, onRate,
         } catch { /* share sheet closed */ }
       },
     }, 'Share this spot');
-    kids.push(el('div', { style: 'font-size:13px;margin:2px 0 4px' }, share));
+    if (!SANDBOXED) kids.push(el('div', { style: 'font-size:13px;margin:2px 0 4px' }, share));
   }
 
   const p3dHost = el('div');

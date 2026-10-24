@@ -34,8 +34,10 @@ Two drone profiles out of the box:
 - **Ratings**: 👍 / 👎 any spot. "My taste" re-ranks the list with a small model trained on your
   ratings; "More like this" finds spots similar to one you like. Ratings stay in your browser and can
   be exported and fed back into the pipeline.
-- **Works offline** once loaded (add it to your home screen), **GPX export** of the spots for OS Maps
-  or a GPS, and a share link for each spot.
+- **Works offline** once loaded (add it to your home screen). When the online map can't load, it
+  switches to a built-in basemap (main roads, rail, water, woods, built-up areas, place names), so it
+  still works in a field with no signal. **GPX export** of the spots for OS Maps or a GPS, and a share
+  link for each spot.
 - Links out to Geograph (people's ground-level photos of that 1 km square, often the quickest way
   to judge a place), Street View, satellite and OS Maps.
 
@@ -77,7 +79,8 @@ Everything else downloads itself and is cached in `data/cache/<region>/`:
 
 ```bash
 python -m spotfinder run --region newcastle      # everything: ~10 min for 40 x 40 km
-python -m spotfinder score --region newcastle    # just re-score + re-export (~30 s)
+python -m spotfinder score --region newcastle    # just re-score + re-export (~1 min)
+python -m spotfinder legal --region newcastle    # just the legal grids, e.g. after a new AIRAC (~4 min)
 pytest                                           # quick checks
 ```
 
@@ -110,7 +113,8 @@ seeds; places like your thumbs-down spots get pulled down.
 - Regions: add a box to `config/regions.toml` (British National Grid metres, whole km).
 - Your spots: add them to `config/seeds.toml` with a profile; the ranking looks for places with a
   similar mix of features. A seed doesn't need to be legal for that drone (the Nuns Moor seed isn't,
-  for the 5"); it only describes style.
+  for the 5"); it only describes style. Each seed is matched on its own, so a woodland seed and a
+  bando seed don't blur into one average.
 - Rules and weights: `spotfinder/scoring.py`. Legal distances and land-owner flags:
   `spotfinder/legal.py`.
 
@@ -127,8 +131,9 @@ seeds; places like your thumbs-down spots get pulled down.
    and how busy a place is.
 4. **Legal grid at 5 m**: A3 needs 150 m from residential, commercial, industrial and recreational
    land and 50 m from buildings and busy roads; flight restriction zones and restricted areas block
-   both drones. MOD land and danger areas are never suggested. National Trust, Forestry England,
-   Woodland Trust, nature reserves, golf courses, cemeteries, railways and power lines are flagged.
+   both drones. MOD land and danger areas are never suggested, and nor is anywhere a spot would
+   reach onto them. National Trust, Forestry England, Woodland Trust, nature reserves, golf courses,
+   cemeteries, railways (not ones in tunnels) and power lines are flagged.
 5. **Score**: a weighted rule score (only counting features on ground the drone may legally use),
    blended 60/40 with similarity to your seed spots. Legality is a gate, not a weight. Spots are
    picked greedily with a minimum spacing (400 m for the 5", 250 m for the whoop).
