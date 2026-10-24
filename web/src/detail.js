@@ -104,7 +104,7 @@ function bandoBox(nearBandos, onBando, radiusM) {
         const gap = d - radiusM - Math.sqrt((b.a || 0) / Math.PI);
         return el('li', {},
           el('button', { class: 'linklike', title: 'Show it on the map', onclick: () => onBando(f) }, b.n || b.k),
-          el('div', { class: 'muted small' }, [b.n ? b.k : null, BANDO_STATE[b.s](b.h), gap < 25 ? 'in the spot' : `${metres(gap)} from the spot`]
+          el('div', { class: 'muted small' }, [b.n ? b.k : null, BANDO_STATE[b.s](b.h), b.m ? 'protected site' : null, gap < 25 ? 'in the spot' : `${metres(gap)} from the spot`]
             .filter(Boolean).join(' · ')));
       })));
     box.hidden = false;

@@ -206,3 +206,5 @@ def test_bando_labels_say_what_it_was():
     assert bandos.kind({"military": "bunker", "historic": "ruins"}) == "Bunker"
     assert bandos._osm_url("w4048915") == "https://www.openstreetmap.org/way/4048915"
     assert bandos._osm_url("x1") is None
+    assert bandos.heritage({"historic": "ruins", "designation": "scheduled_monument"})
+    assert not bandos.heritage({"building": "ruins"})

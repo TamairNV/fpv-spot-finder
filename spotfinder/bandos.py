@@ -60,6 +60,12 @@ def kind(t: dict) -> str:
     return "Bando"
 
 
+def heritage(t: dict) -> bool:
+    """A protected or visitor site (scheduled monument, listed, an attraction): it has a keeper."""
+    return bool(t.get("designation")) or any(k.startswith("heritage") for k in t) \
+        or t.get("tourism") in {"attraction", "museum"}
+
+
 def _osm_url(osm_id: str) -> str | None:
     kinds = {"n": "node", "w": "way", "r": "relation"}
     if osm_id and osm_id[0] in kinds and osm_id[1:].isdigit():
@@ -91,6 +97,8 @@ def write(region: Region, out: Path, preview: Callable[[float, float, Path], dic
                  "a": int(round(g.area))}
         if t.get("name"):
             props["n"] = t["name"]
+        if heritage(t):
+            props["m"] = 1
         if url := _osm_url(str(osm_id)):
             props["osm"] = url
         if preview and s == STANDING:

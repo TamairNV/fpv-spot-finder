@@ -527,7 +527,7 @@ function addOverlays() {
   map.on('mouseleave', 'spots-dots', () => { map.getCanvas().style.cursor = ''; });
   hoverTip('spots-dots', (p) => `<b>${esc(p.title)}</b> · ${p.score}`);
   for (const id of ['bandos-site', 'bandos-dots']) {
-    hoverTip(id, (p) => `<b>${esc(p.n || p.k)}</b><br>${p.n ? `${esc(p.k)} · ` : ''}${BANDO_STATE[p.s](p.h)}`);
+    hoverTip(id, (p) => `<b>${esc(p.n || p.k)}</b><br>${p.n ? `${esc(p.k)} · ` : ''}${BANDO_STATE[p.s](p.h)}${p.m ? ' · protected site' : ''}`);
   }
   applyLayerToggles();
   drawPins();
@@ -1168,7 +1168,7 @@ function renderBandoHits() {
         el('i', { class: `bdot s${p.s}` }),
         el('div', {},
           el('div', { class: 'spot-name' }, p.n || p.k),
-          el('div', { class: 'spot-sub' }, [p.n ? p.k : null, BANDO_STATE[p.s](p.h)].filter(Boolean).join(' · '))));
+          el('div', { class: 'spot-sub' }, [p.n ? p.k : null, BANDO_STATE[p.s](p.h), p.m ? 'protected site' : null].filter(Boolean).join(' · '))));
     })));
 }
 
@@ -1259,7 +1259,9 @@ function showBando(f) {
       link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, 'Directions'),
       link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, 'Street View'),
       p.osm ? link(p.osm, 'OpenStreetMap') : null),
-    el('div', { class: 'check-note' }, 'Old buildings are usually private and can be unsafe: ask the owner first and keep out of anything unstable.'),
+    el('div', { class: 'check-note' }, p.m
+      ? 'A protected heritage site (a scheduled monument, listed or open to visitors): it has a keeper, so ask before flying and keep clear of people.'
+      : 'Old buildings are usually private and can be unsafe: ask the owner first and keep out of anything unstable.'),
   ].filter(Boolean));
   card.hidden = false;
   bandoOpen = true;
