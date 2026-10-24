@@ -1,0 +1,46 @@
+{
+ "freestyle5/Nuns Moor Park trees by Cow Hill": {
+  "features": [
+   "gaps",
+   "lone",
+   "edges",
+   "space",
+   "mix",
+   "vertical",
+   "relief",
+   "water"
+  ],
+  "values": [
+   0.80416,
+   0.854,
+   0.97528,
+   0.55738,
+   0.55144,
+   0.51463,
+   0.0739,
+   0.0
+  ]
+ },
+ "cine85/Newcastle Helix: Urban Sciences Building and Frederick Douglass Centre": {
+  "features": [
+   "architecture",
+   "gaps",
+   "trees",
+   "under",
+   "water",
+   "bridge",
+   "plaza",
+   "relief"
+  ],
+  "values": [
+   0.65845,
+   0.23573,
+   0.39523,
+   0.00312,
+   0.0,
+   0.0,
+   0.40446,
+   0.41271
+  ]
+ }
+}

@@ -121,6 +121,9 @@ def _region_style(key: str, profile_key: str) -> tuple[dict, tuple[int, int]] | 
     return style, next(iter(style.values())).shape
 
 
+SEED_STYLES = CONFIG_DIR / "seed_styles.json"  # seeds' style vectors, so other machines can use them
+
+
 def _home_style(seed, profile_key: str) -> np.ndarray | None:
     """Style of a seed that lies outside the region being scored, measured in a region that has it."""
     for other in load_regions().values():
@@ -128,7 +131,16 @@ def _home_style(seed, profile_key: str) -> np.ndarray | None:
         cells = got and _inside(other, seed, got[1])
         if cells:
             log.info("seed %s (%s): style taken from %s", seed.name, profile_key, other.key)
-            return scoring.style_vector(got[0], scoring.PROFILES[profile_key], cells)
+            vec = scoring.style_vector(got[0], scoring.PROFILES[profile_key], cells)
+            saved = json.loads(SEED_STYLES.read_text()) if SEED_STYLES.exists() else {}
+            saved[f"{profile_key}/{seed.name}"] = {"features": list(scoring.PROFILES[profile_key].style_features),
+                                                   "values": [round(float(v), 5) for v in vec]}
+            SEED_STYLES.write_text(json.dumps(saved, indent=1))
+            return vec
+    # Not scored here (e.g. a fresh clone working through other regions): use the copy kept in config.
+    saved = json.loads(SEED_STYLES.read_text()).get(f"{profile_key}/{seed.name}") if SEED_STYLES.exists() else None
+    if saved and saved["features"] == list(scoring.PROFILES[profile_key].style_features):
+        return np.array(saved["values"], dtype="float64")
     log.warning("seed %s isn't inside any scored region; skipping it", seed.name)
     return None
 
