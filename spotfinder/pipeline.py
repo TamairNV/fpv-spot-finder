@@ -117,7 +117,7 @@ def _region_style(key: str, profile_key: str) -> tuple[dict, tuple[int, int]] | 
     other = load_regions()[key]
     if not (other.out_dir / "cells.npz").exists():
         return None
-    style = scoring.components(load_cells(other), scoring.PROFILES[profile_key], legal_only=False)
+    style = scoring.components(derived.add_derived(load_cells(other), other), scoring.PROFILES[profile_key], legal_only=False)
     return style, next(iter(style.values())).shape
 
 
