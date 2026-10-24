@@ -34,6 +34,7 @@
         <label id="lyr-legal-row"><input type="checkbox" id="lyr-legal" checked /><i class="sw sw-a3"></i><span>Not A3-clear <small>(5" needs 150 m from houses and parks)</small></span></label>
         <label><input type="checkbox" id="lyr-zones" checked /><i class="sw sw-frz"></i><span>No-fly zones <small>(airports, prisons)</small></span></label>
         <label><input type="checkbox" id="lyr-spots" checked /><i class="sw sw-pin"></i><span>Spot pins</span></label>
+        <label id="lyr-bandos-row" hidden><input type="checkbox" id="lyr-bandos" /><i class="sw sw-bando"></i><span>Bandos <small>(ruins and derelict buildings; solid = still standing, ring = little left)</small></span></label>
         <div class="pop-title" id="basemap-title">Base map</div>
         <div class="seg small" id="basemap-switch">
           <button data-base="map">Map</button>
@@ -68,16 +69,16 @@
           </div>
           <div class="search-wrap">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3Zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z"/></svg>
-            <input id="search" type="search" placeholder="Search spots or places" autocomplete="off" enterkeyhint="search" />
+            <input id="search" type="search" placeholder="Search spots, places or bandos" title="Search (press / to jump here)" autocomplete="off" enterkeyhint="search" />
             <button id="search-clear" class="search-clear" aria-label="Clear search" hidden>×</button>
           </div>
-          <div class="filters" id="filters">
-            <button class="fchip" data-filter="a3" aria-pressed="false" title="Only spots where the 800 g quad is clear of the A3 distances">A3-clear only</button>
-          </div>
+          <div class="filters" id="filters" role="group" aria-label="Filter spots" hidden></div>
+          <div class="more-filters" id="more-filters" role="group" aria-label="More filters" hidden></div>
         </div>
         <div class="scroll" id="list-scroll">
           <div id="now-box" class="now" hidden></div>
           <div id="taste-note" class="note" hidden></div>
+          <div id="bando-hits"></div>
           <div id="seeds-box"></div>
           <ol id="spot-list"></ol>
           <div id="list-empty" class="empty" hidden></div>

@@ -10,7 +10,7 @@ import time
 import numpy as np
 from scipy import ndimage
 
-from . import basemap, context, derived, export, features, legal, rasterize, scoring
+from . import basemap, context, derived, export, features, legal, parks, rasterize, scoring
 from .config import CONFIG_DIR, Region, load_seeds
 from .heights import lidar_paths
 from .sources import canopy, osm, overture, terrain
@@ -105,7 +105,7 @@ def load_ratings(region: Region) -> dict[str, tuple[list, list]]:
     return out
 
 
-def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, strict: bool = False) -> dict:
+def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000, strict: bool = False) -> dict:
     """Score every cell and export the spots. By default legality is a label on each spot, not a filter:
     the app lists potential places and says which rules they meet. No-fly zones, MOD land and danger areas
     stay out either way. strict=True only lists spots each drone may fly under its Open subcategory."""
@@ -121,6 +121,8 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, st
         r, c = rc
         return [(i, j) for i in range(max(r - 1, 0), min(r + 2, H)) for j in range(max(c - 1, 0), min(c + 2, W))]
 
+    park_list = parks.load(region)
+    park_grid = parks.grid(region, park_list, land.shape)
     meta["ratings"] = {k: {"up": len(u), "down": len(d)} for k, (u, d) in rated.items()}
     meta["legal_mode"] = "strict" if strict else "label"
     for key, profile in scoring.PROFILES.items():
@@ -152,8 +154,13 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, st
         style_n = np.clip(scoring.rule_score(style, profile) / max(top, 1e-6), 0, 1)
         style_final = style_n if sim is None else 0.6 * style_n + 0.4 * sim
         spots = scoring.pick_spots(final, eligible, profile.spacing_m, n_spots)
+        # every park without a spot gets one at its best place, listed after the ranking
+        park_spots = parks.picks(park_grid, park_list, final, eligible, spots, profile.spacing_m)
+        spots += park_spots
         results[key] = dict(top=top, comps=comps, style=style, rule=rule, rule_rank=rule_n, sim=sim, final=final,
-                            style_final=style_final, heat=scoring.pct_rank(final, land), eligible=eligible, spots=spots, seed_cells=seed_cells)
-        log.info("%s: %d eligible cells, %d spots", key, int(eligible.sum()), len(spots))
-    export.write_all(region, cells, results, meta, seeds, previews=previews)
+                            style_final=style_final, heat=scoring.pct_rank(final, land), eligible=eligible, spots=spots,
+                            park_spots=set(park_spots), seed_cells=seed_cells)
+        log.info("%s: %d eligible cells, %d spots + %d park spots", key, int(eligible.sum()), len(spots) - len(park_spots),
+                 len(park_spots))
+    export.write_all(region, cells, results, meta, seeds, previews=previews, parks=(park_grid, park_list))
     return results

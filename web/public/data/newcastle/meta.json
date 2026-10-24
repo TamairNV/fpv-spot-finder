@@ -87,9 +87,9 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-24T18:09:52+00:00",
+  "generated_at": "2026-10-24T18:47:56+00:00",
   "sources": {
-    "computed_at": "2026-10-24T18:08:58+00:00",
+    "computed_at": "2026-10-24T18:46:00+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
     "lidar_coverage": 0.9205005168914795,
     "terrain": "AWS terrain tiles (EA 2 m LiDAR DTM in England)",
@@ -101,7 +101,12 @@
       "tyne-and-wear-latest.osm.pbf"
     ],
     "ratings": {},
-    "legal_mode": "label"
+    "legal_mode": "label",
+    "bandos": {
+      "standing": 235,
+      "site": 161,
+      "unknown": 0
+    }
   },
   "profiles": {
     "freestyle5": {
