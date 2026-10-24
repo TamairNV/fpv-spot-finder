@@ -93,6 +93,7 @@ svg { fill: currentColor; }
 .sw-a3 { background: rgba(71, 85, 105, .75); }
 .sw-frz { background: rgba(220, 38, 38, .25); border: 1.5px dashed #e5383b; }
 .sw-pin { border-radius: 50%; background: #14191d; box-shadow: inset 0 0 0 2.5px var(--heat-2); }
+.sw-bando { border-radius: 50%; background: #c084fc; box-shadow: inset 0 0 0 1px #1b1030; transform: scale(.8); }
 
 /* ---------------------------------------------------------------- map */
 #map { grid-column: 2; grid-row: 2; position: relative; min-height: 0; background: #e9ebe6; }
@@ -166,6 +167,14 @@ svg { fill: currentColor; }
 .check-row .ico.ok { background: rgba(74, 222, 128, .16); color: var(--ok); }
 .check-row .ico.bad { background: rgba(248, 113, 113, .16); color: var(--bad); }
 .check-note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+/* a bando, tapped on the map */
+.bando-status { font-size: 13px; color: var(--muted); }
+.bando-status b { color: var(--text); font-weight: 600; }
+.bando-spot { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; width: 100%; margin: 10px 0 2px; padding: 8px 10px;
+  border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel-2); color: var(--text); text-align: left; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.bando-spot:hover { background: var(--panel-3); }
+.bando-spot small { color: var(--muted); font-weight: 500; font-size: 12px; }
+.bando-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 13px; }
 
 /* ---------------------------------------------------------------- the panel (list <-> spot) */
 #panel {
@@ -202,6 +211,16 @@ svg { fill: currentColor; }
 .fchip .n { margin-left: 5px; font-size: 11.5px; opacity: .65; font-variant-numeric: tabular-nums; }
 .fchip:hover { color: var(--text); }
 .fchip[aria-pressed="true"] { background: rgba(92, 200, 255, .14); border-color: rgba(92, 200, 255, .5); color: var(--accent); }
+.fchip .ico svg { width: 14px; height: 14px; fill: currentColor; vertical-align: -2.5px; margin-right: 5px; }
+.fchip.more[aria-expanded="true"] { color: var(--text); border-color: var(--text); }
+/* Filters: one row per number, each a row of steps */
+.more-filters { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.mf-row { display: grid; grid-template-columns: 96px 1fr; gap: 8px; align-items: center; }
+.mf-label { font-size: 12.5px; color: var(--muted); }
+.mf-row .seg { background: var(--panel); justify-self: start; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.mf-row .seg::-webkit-scrollbar { display: none; }
+.mf-row .seg.small button { padding: 3px 10px; font-size: 12.5px; }
+.mf-foot { display: flex; justify-content: space-between; font-size: 12.5px; padding-top: 2px; }
 
 .now { margin: 10px 12px 0; padding: 8px 11px; border-radius: 10px; background: var(--panel-2); font-size: 12.5px; color: var(--muted); display: grid; gap: 2px; }
 .now b { color: var(--text); font-weight: 650; }

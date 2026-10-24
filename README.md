@@ -41,9 +41,16 @@ Three profiles out of the box:
   ratings; "More like this" finds spots similar to one you like. Ratings stay in your browser and can
   be exported and fed back into the pipeline.
 - **Filters and notes**: chips above the list narrow it to parks, bandos, water, bridges, hills,
-  sunset spots and so on, or to your 👍 spots. ‹ › on a spot (or ← →) steps through the list. Each
+  sunset spots and so on, or to your 👍 spots. **Filters** narrows by the numbers behind each spot:
+  a bando within 100 m / 300 m / 1 km, plenty of gaps or lone trees (steps that follow each drone's
+  own spread), water or parking within a distance, and quiet places only. ‹ › on a spot (or ← →)
+  steps through the list. Each
   spot takes your own notes (parking, access, when it's quiet); they show as 📝 in the list, are
   searchable, and go in the ratings download.
+- **Bandos on the map**: every ruin and derelict building on OpenStreetMap as a purple dot (solid
+  if LiDAR still sees something standing, a ring if little is left). Tap one for what it is, how
+  tall, the nearest spot, directions and Street View. On in Layers, and whenever the Bandos chip or
+  the bando filter is on.
 - **Works offline** once loaded (add it to your home screen). When the online map can't load, it
   switches to a built-in basemap (main roads, rail, water, woods, built-up areas, place names), so it
   still works in a field with no signal. **GPX export** of the spots for OS Maps or a GPS, and a share
@@ -170,6 +177,9 @@ seeds; places like your thumbs-down spots get pulled down.
    The app's "Parks" chip lists them all.
 7. **3D models**: every spot gets a 320 m square model at 2 m from the same heights (about 20 KB
    each); `score --previews N` limits them to the top N per drone.
+8. **Bandos**: `bandos.geojson` has every mapped bando as a point with what it was (from its OSM
+   tags), how tall the tallest solid thing on it is (LiDAR) and whether that counts as still
+   standing, for the app's bando layer.
 
 ## Be real about it
 

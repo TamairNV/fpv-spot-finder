@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from spotfinder import features, legal, parks, scoring
+from spotfinder import bandos, features, legal, parks, scoring
 from spotfinder.export import os_grid_ref
 from spotfinder.heights import Tile
 from spotfinder.sources import lidar_wcs
@@ -194,3 +194,15 @@ def test_every_park_without_a_spot_gets_its_best_cell():
     assert parks.picks(grid, names, score, eligible, [(3, 3), (9, 12)], spacing_m=400) == [(14, 14)]
     assert parks.name_at(grid, names, 12, 13) == "B" and parks.name_at(grid, names, 0, 0) is None
 
+
+def test_bando_labels_say_what_it_was():
+    assert bandos.kind({"historic": "mine"}) == "Old pit"
+    assert bandos.kind({"building": "ruins"}) == "Ruins"
+    assert bandos.kind({"building": "warehouse", "disused:military": "yes"}) == "Old military building"
+    assert bandos.kind({"historic": "ruins", "ruins": "church"}) == "Ruined church"
+    assert bandos.kind({"abandoned:landuse": "quarry"}) == "Old quarry"
+    assert bandos.kind({"disused": "yes", "man_made": "adit"}) == "Old adit"
+    assert bandos.kind({"building": "yes", "abandoned": "yes"}) == "Abandoned building"
+    assert bandos.kind({"military": "bunker", "historic": "ruins"}) == "Bunker"
+    assert bandos._osm_url("w4048915") == "https://www.openstreetmap.org/way/4048915"
+    assert bandos._osm_url("x1") is None

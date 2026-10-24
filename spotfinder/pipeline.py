@@ -10,7 +10,7 @@ import time
 import numpy as np
 from scipy import ndimage
 
-from . import basemap, context, derived, export, features, legal, parks, rasterize, scoring
+from . import bandos, basemap, context, derived, export, features, legal, parks, rasterize, scoring
 from .config import CONFIG_DIR, Region, load_seeds
 from .heights import lidar_paths
 from .sources import canopy, osm, overture, terrain
@@ -162,5 +162,6 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
                             park_spots=set(park_spots), seed_cells=seed_cells)
         log.info("%s: %d eligible cells, %d spots + %d park spots", key, int(eligible.sum()), len(spots) - len(park_spots),
                  len(park_spots))
+    meta["bandos"] = bandos.write(region)  # before write_all, so the offline list has it
     export.write_all(region, cells, results, meta, seeds, previews=previews, parks=(park_grid, park_list))
     return results

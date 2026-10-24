@@ -34,6 +34,7 @@
         <label id="lyr-legal-row"><input type="checkbox" id="lyr-legal" checked /><i class="sw sw-a3"></i><span>Not A3-clear <small>(5" needs 150 m from houses and parks)</small></span></label>
         <label><input type="checkbox" id="lyr-zones" checked /><i class="sw sw-frz"></i><span>No-fly zones <small>(airports, prisons)</small></span></label>
         <label><input type="checkbox" id="lyr-spots" checked /><i class="sw sw-pin"></i><span>Spot pins</span></label>
+        <label id="lyr-bandos-row" hidden><input type="checkbox" id="lyr-bandos" /><i class="sw sw-bando"></i><span>Bandos <small>(ruins and derelict buildings; solid = still standing, ring = little left)</small></span></label>
         <div class="pop-title" id="basemap-title">Base map</div>
         <div class="seg small" id="basemap-switch">
           <button data-base="map">Map</button>
@@ -72,6 +73,7 @@
             <button id="search-clear" class="search-clear" aria-label="Clear search" hidden>×</button>
           </div>
           <div class="filters" id="filters" role="group" aria-label="Filter spots" hidden></div>
+          <div class="more-filters" id="more-filters" role="group" aria-label="More filters" hidden></div>
         </div>
         <div class="scroll" id="list-scroll">
           <div id="now-box" class="now" hidden></div>
