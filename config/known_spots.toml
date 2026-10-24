@@ -311,6 +311,67 @@ kinds = ["quarry", "relief"]
 source = "osm+local"
 why = "Disused limestone quarry (nature reserve) behind the Leas; faces and drops."
 
+
+[[spot]]
+name = "Northern Spire bridge, Sunderland"
+lat = 54.91716
+lon = -1.42468
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["bridge", "river", "landmark"]
+source = "osm+local"
+why = "105 m cable-stayed pylon over the Wear; a big modern landmark with riverbanks to fly from."
+
+[[spot]]
+name = "Herd Sand and the Groyne, South Shields"
+lat = 55.00483
+lon = -1.42221
+radius_m = 250
+profiles = ["cine5", "freestyle5"]
+kinds = ["beach", "coast", "landmark"]
+source = "web"
+why = "Wide beach at the Tyne mouth with the red Groyne lighthouse and both piers; long-range FPV videos fly Tynemouth to South Shields."
+
+[[spot]]
+name = "Seaton Sluice harbour and South Beach"
+lat = 55.08428
+lon = -1.47464
+radius_m = 250
+profiles = ["cine5"]
+kinds = ["coast", "beach", "relief"]
+source = "web"
+why = "Rock-cut harbour cut, Rocky Island, dunes and a long beach north to Blyth (YouTube drone videos of Seaton Sluice)."
+
+[[spot]]
+name = "Ravensworth Castle ruins"
+lat = 54.92649
+lon = -1.63823
+radius_m = 120
+profiles = ["freestyle5", "cine5"]
+kinds = ["ruin", "bando", "trees"]
+source = "osm+local"
+why = "Ruined towers of a demolished castle in woodland (scheduled monument: look, don't touch)."
+
+[[spot]]
+name = "Hylton Castle"
+lat = 54.92255
+lon = -1.44325
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["landmark", "ruin", "park"]
+source = "osm+local"
+why = "Medieval gatehouse castle in open parkland."
+
+[[spot]]
+name = "Finchale Priory"
+lat = 54.81826
+lon = -1.54045
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["ruin", "river", "landmark"]
+source = "osm+local"
+why = "Priory ruins in a loop of the Wear, wooded banks opposite (English Heritage)."
+
 # Bandos: `spotfinder eval` also checks the app's bando layer (web/public/data/<region>/bandos.geojson,
 # as the last `score` wrote it). A `[[bando]]` should have a dot within radius_m; a `[[not_bando]]`
 # (parks on old pit sites and the like) should have none. Real bandos are big and still standing:
