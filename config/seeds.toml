@@ -11,6 +11,14 @@ radius_m = 180
 note = "Weaving in and around the tree clumps on the Town Moor edge, near Hunters Moor Hospital. The moor counts as a recreational area, so it isn't A3-clear for an 800 g quad."
 
 [[seed]]
+name = "Nine Arches viaduct and the river beach, Derwent Walk"
+profile = "freestyle5"
+lat = 54.93330
+lon = -1.72010
+radius_m = 150
+note = "Arches to fly through ~25 m over the Derwent, a gravel beach underneath to take off from, woods either side. Two big power lines cross by its west end, so stay low under them."
+
+[[seed]]
 name = "Newcastle Helix: Urban Sciences Building and Frederick Douglass Centre"
 profile = "cine85"
 lat = 54.97330

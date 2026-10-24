@@ -26,6 +26,7 @@ def prepare(region: Region) -> None:
     canopy.build_chm(region)
     terrain.build_dtm(region)
     rasterize.build_vector_rasters(region)
+    rasterize.build_land_raster(region)
     basemap.write_basemap(region)
 
 
@@ -190,7 +191,7 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
     meta = json.loads((region.out_dir / "cells_meta.json").read_text())
     seeds = load_seeds()
     results = {}
-    land = (cells["water_frac"] < 0.6) & (cells["elev"] > -2)
+    land = ((cells["water_frac"] - cells["beach_frac"]) < 0.6) & (cells["elev"] > -2)  # a beach is land
     rated = load_ratings(region)
     H, W = land.shape
 
@@ -232,11 +233,11 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
         top = float(rule[eligible].max()) if eligible.any() else 1.0
         top = score_scale(region, key, meta["legal_mode"], top)
         rule_n = scoring.soft_cap(rule / max(top, 1e-6))
-        final = rule_n if sim is None else 0.6 * rule_n + 0.4 * sim
+        final = scoring.blend(rule_n, sim)
         # Same blend on the place's style alone, ignoring any A3 mask: how your seed spots score.
         style_n = scoring.soft_cap(scoring.rule_score(style, profile) / max(top, 1e-6))
-        style_final = style_n if sim is None else 0.6 * style_n + 0.4 * sim
-        spots = scoring.pick_spots(final, eligible, profile.spacing_m, n_spots)
+        style_final = scoring.blend(style_n, sim)
+        spots = scoring.pick_spots(final, eligible, profile.spacing_m, n_spots, anchor=profile.anchor(cells))
         # every park without a spot gets one at its best place, listed after the ranking
         park_spots = parks.picks(park_grid, park_list, final, eligible, spots, profile.spacing_m)
         spots += park_spots

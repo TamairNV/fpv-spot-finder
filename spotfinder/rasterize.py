@@ -44,6 +44,16 @@ PATH_CLASSES = {"footway", "path", "cycleway", "bridleway", "steps", "pedestrian
 ROAD_CODE = 1
 PATH_CODE = 2
 RAIL_CODE = 3
+# land_1m.tif: ground a suggested line keeps off, and viaducts whose arches you can fly through
+HOMES_CODE = 1    # houses and their gardens (residential land that isn't a park or a big green)
+PARKING_CODE = 2  # car parks: cars and people getting in and out
+VIADUCT_CODE = 3  # the deck of a railway or footpath viaduct or aqueduct (not a road one)
+GREEN_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "village_green", "golf_course", "pitch"}
+GREEN_LANDUSE = {"recreation_ground", "village_green", "forest", "meadow", "grass"}
+GREEN_NATURAL = {"wood", "scrub", "grassland", "heath", "wetland"}
+GREEN_MIN_M2 = 5000  # a verge or a patch of grass between houses is still the estate
+ROAD_HIGHWAYS = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link", "trunk_link",
+                 "primary_link", "secondary_link", "unclassified", "residential", "service"}
 
 
 def building_heights(b: gpd.GeoDataFrame) -> np.ndarray:
@@ -141,4 +151,68 @@ def build_vector_rasters(region: Region, tile_m: int = 2000, refresh: bool = Fal
             d.close()
     for k in out:
         tmp[k].rename(out[k])
+    return out
+
+
+def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False) -> Path:
+    """land_1m.tif: homes and gardens, car parks and viaduct decks (codes above), from OpenStreetMap."""
+    from .sources import osm
+
+    out = region.cache_dir / "land_1m.tif"
+    if out.exists() and not refresh:
+        return out
+    o = osm.extract(region)
+    a = o["areas"]
+    polys = a[a.geom_type.isin(["Polygon", "MultiPolygon"])]
+    tag = lambda k: polys["tags"].map(lambda t: t.get(k))
+    homes = polys[tag("landuse").isin(["residential", "garages"])
+                  | ((tag("leisure") == "garden") & (tag("access") == "private"))]
+    green = polys[(tag("leisure").isin(GREEN_LEISURE) | tag("landuse").isin(GREEN_LANDUSE)
+                   | tag("natural").isin(GREEN_NATURAL)) & (polys.geometry.area >= GREEN_MIN_M2)]
+    parking = polys[(tag("amenity") == "parking") | tag("parking").isin(["surface", "multi-storey"])]
+    # Viaducts: the mapped deck outline where there is one, else the line, 8 m wide. Road viaducts and
+    # the Metro (traffic, overhead wires) don't count.
+    l = o["lines"]
+    vt = l["tags"]
+    via = l[vt.map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"} and t.get("highway") not in ROAD_HIGHWAYS
+                   and t.get("railway") not in {"light_rail", "subway", "tram"})]
+    decks = polys[tag("bridge").isin(["viaduct", "aqueduct"]) & (tag("man_made") == "bridge")]
+    viaducts = pd.concat([decks.geometry, via[via.geom_type != "Polygon"].geometry.buffer(4, cap_style="flat")])
+    layers = [(gpd.GeoDataFrame(geometry=list(g), crs=BNG), code) for g, code in
+              ((homes.geometry, HOMES_CODE), (parking.geometry, PARKING_CODE), (viaducts, VIADUCT_CODE))]
+    green = gpd.GeoDataFrame(geometry=list(green.geometry), crs=BNG)
+    for g, _ in layers:
+        g.sindex
+    green.sindex
+
+    xmin, ymin, xmax, ymax = region.bbox
+    tmp = out.with_suffix(".part.tif")
+    dst = rasterio.open(tmp, "w", **_profile(region, "uint8"))
+
+    def burn(gdf, tb, tr, shape):
+        idx = gdf.sindex.query(tb, predicate="intersects")
+        if len(idx) == 0:
+            return np.zeros(shape, dtype="uint8")
+        return rasterize(((g, 1) for g in gdf.geometry.iloc[idx]), out_shape=shape, transform=tr, fill=0,
+                         dtype="uint8")
+
+    def tile(x0, y0):
+        tb = box(x0, y0, x0 + tile_m, y0 + tile_m)
+        tr = from_origin(x0, y0 + tile_m, 1.0, 1.0)
+        shape = (tile_m, tile_m)
+        win = rasterio.windows.Window(x0 - xmin, ymax - (y0 + tile_m), tile_m, tile_m)
+        land = np.zeros(shape, dtype="uint8")
+        for gdf, code in layers:
+            land[burn(gdf, tb, tr, shape) > 0] = code
+        land[(land == HOMES_CODE) & (burn(green, tb, tr, shape) > 0)] = 0  # a park inside an estate is a park
+        return win, land
+
+    jobs = [(x0, y0) for y0 in range(ymin, ymax, tile_m) for x0 in range(xmin, xmax, tile_m)]
+    try:
+        with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+            for win, land in tqdm(pool.map(lambda j: tile(*j), jobs), total=len(jobs), desc="rasterize land"):
+                dst.write(land, 1, window=win)
+    finally:
+        dst.close()
+    tmp.rename(out)
     return out

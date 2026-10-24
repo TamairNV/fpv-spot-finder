@@ -21,9 +21,9 @@ def add_derived(cells: dict[str, np.ndarray], region: Region) -> dict[str, np.nd
     out.update(sunset_view(cells))
     out["dist_access"] = np.minimum.reduce([cells["dist_path"], cells["dist_road_minor"], cells["dist_parking"]])
     out.update(gap_quality(region, cells["gaps"].shape))
-    for k in ("dist_bando_site", "dist_road_busy"):
+    for k in ("dist_road_busy", "dist_beach", "dist_sea"):
         out.setdefault(k, np.full(cells["gaps"].shape, 1e6, dtype="float32"))
-    for k in ("public_frac", "farm_frac", "treeline_m", "edge_w_m", "line5", "line5_m", "line5_n",
+    for k in ("public_frac", "farm_frac", "beach_frac", "treeline_m", "edge_w_m", "line5", "line5_m", "line5_n",
               "linew", "linew_m", "linew_n"):
         out.setdefault(k, np.zeros(cells["gaps"].shape, dtype="float32"))
     return out

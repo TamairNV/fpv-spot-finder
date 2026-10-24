@@ -20,6 +20,7 @@ from shapely.geometry import Point, mapping
 
 from . import legal, scoring
 from . import bandos as bando_mod
+from .rasterize import VIADUCT_CODE
 from . import parks as park_mod
 from .config import WEB_DATA_DIR, Region, Seed, bng_to_lonlat
 from .heights import HeightReader
@@ -308,7 +309,8 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
 
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path,
                   size_m: int = PREVIEW_M, res_m: int = PREVIEW_RES) -> dict:
-    """160 x 160 px at 2 m: R = class*64, G = height above ground (0.25 m), B = ground (0.5 m above min)."""
+    """160 x 160 px at 2 m: R = class*40 (0 ground, 1 water, 2 road, 3 path, 4 tree, 5 building, 6 viaduct deck),
+    G = height above ground (0.25 m), B = ground (0.5 m above min)."""
     half = size_m // 2
     x0, y0 = int(round(x - half)), int(round(y - half))
     t = reader.tile(x0, y0, size_m, 0)
@@ -326,6 +328,8 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
     cls[water] = 1
     cls[tree] = 4
     cls[bld] = 5
+    if t.land is not None:  # a viaduct deck: the 3D view draws it as a slab with open arches below
+        cls[(pool((t.land == VIADUCT_CODE).astype("uint8"), np.max) > 0) & (h >= 4)] = 6
     xmin, _, _, ymax = region.bbox
     # Ground: sample the 5 m DTM at each pixel centre (nearest, then smoothed over about 5 m).
     cols = ((x0 + (np.arange(n) + 0.5) * res_m - xmin) / legal.RES).astype(int)
@@ -414,10 +418,10 @@ def _line_mix(line: dict | None) -> str:
         return ""
     from collections import Counter
 
-    order = ["gap", "orbit", "dive", "skim"]
+    order = ["arch", "gap", "orbit", "dive", "skim"]
     n = Counter(m[0] for m in line["moves"])
     words = {"gap": ("a gap", "gaps"), "orbit": ("an orbit", "orbits"), "dive": ("a dive", "dives"),
-             "skim": ("a skim", "skims")}
+             "skim": ("a skim", "skims"), "arch": ("an arch", "arches")}
     return ", ".join(words[k][0] if n[k] == 1 else f"{n[k]} {words[k][1]}" for k in order if n[k])
 
 
@@ -425,8 +429,6 @@ def _why_text(k: str, key: str, s: dict) -> str:
     """One line per reason, with the numbers that earned it."""
     plural = lambda n, one, many: f"{n} {one if n == 1 else many}"
     away = lambda m: "right here" if m < 25 else f"{m} m away"
-    bando = (f"Ruin or abandoned structure {away(s['bando_m'])}" if s["bando_m"] <= s["bando_site_m"]
-             else f"Old industrial site {away(s['bando_site_m'])} (not much left standing)")
     texts = {
         "flow": (f"A {s['line_moves']}-move line over {s['line_m']} m" + (f": {s['line_mix']}" if s.get("line_mix") else "")
                  if s.get("line_moves", 0) >= 2 else "Obstacles you can chain into a run"),
@@ -440,9 +442,11 @@ def _why_text(k: str, key: str, s: dict) -> str:
         "mix": f"Good mix: {s['tree_pct']}% trees, {s['open_pct']}% open",
         "vertical": f"Tall stuff to dive, up to {s['max_height_m']:.0f} m",
         "relief": f"{s['relief_m']:.0f} m of height change: banks and slopes to dive",
-        "bando": bando,
+        "bando": f"Derelict building {away(s['bando_m'])}",
         "water": f"Water {s['water_m']} m away" if s["water_m"] >= 25 else "Right by the water",
         "bridge": f"Bridge or viaduct {away(s['bridge_m'])}",
+        "beach": f"Beach {away(s['beach_m'])}: open sand along the water",
+        "coast": f"Beach {away(s['beach_m'])}" if s["beach_m"] <= s["sea_m"] else f"The sea {away(s['sea_m'])}",
         "architecture": f"Buildings up to {s['bld_h_max']:.0f} m, {s['bld_pct']}% built up",
         "trees": f"{s['tree_pct']}% trees to weave through",
         "under": "Tall trees with see-through crowns: maybe room underneath (LiDAR can't see where branches start)",
@@ -466,10 +470,10 @@ def _why_text(k: str, key: str, s: dict) -> str:
 
 def why(comp_vals: dict[str, float], profile: scoring.Profile, stats: dict, res: dict, r: int, c: int) -> list[dict]:
     """The score taken apart: points (out of 100) per reason, biggest first, penalties last.
-    The rule part is 60% of the score when there are seed spots (100% without), shared out by weight."""
+    The rule part is 1 - TASTE of the score when there are seed spots (all of it without), shared out by weight."""
     pos = sum(w for w in profile.weights.values() if w > 0)
     has_taste = res["sim"] is not None
-    scale = 100 * (0.6 if has_taste else 1.0) / (pos * max(res["top"], 1e-6))
+    scale = 100 * (1 - scoring.TASTE if has_taste else 1.0) / (pos * max(res["top"], 1e-6))
     out = []
     for k, w in profile.weights.items():
         pts = scale * w * comp_vals.get(k, 0.0)
@@ -477,7 +481,7 @@ def why(comp_vals: dict[str, float], profile: scoring.Profile, stats: dict, res:
             out.append({"key": k, "text": _why_text(k, profile.key, stats), "pts": round(pts, 1)})
     if has_taste:
         out.append({"key": "taste", "text": "Like your favourite spots and 👍 ratings",
-                    "pts": round(40 * float(res["sim"][r, c]), 1)})
+                    "pts": round(100 * scoring.TASTE * float(res["sim"][r, c]), 1)})
     out.sort(key=lambda d: -d["pts"])
     return out
 
@@ -632,7 +636,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "gaps_all": int(ws("gaps_all")), "west_edge_m": int(ws("edge_w_m")), "treeline_m": int(ws("treeline_m")),
                     "open_r_m": int(wmax("open_r_m")), "sunset_deg": round(wmin("sunset_horizon"), 1),
                     "access_m": int(wmin("dist_access")), "road_busy_m": int(wmin("dist_road_busy")),
-                    "bando_site_m": int(wmin("dist_bando_site")), "landmark_m": int(wmin("dist_landmark")),
+                    "beach_m": int(min(wmin("dist_beach"), 99999)), "sea_m": int(min(wmin("dist_sea"), 99999)),
+                    "landmark_m": int(wmin("dist_landmark")),
                     "lone_h_max": round(wmax("lone_h_max"), 1), "bld_h_max": round(wmax("bld_h_max"), 1),
                     "gap_q": round(ws("gq5" if key != "cine85" else "gqw"), 1),
                     "line_moves": len(line["moves"]) if line else int(wmax("line5_n" if key != "cine85" else "linew_n")),

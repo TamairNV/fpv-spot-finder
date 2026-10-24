@@ -73,6 +73,18 @@ def test_pick_spots_respects_spacing():
     assert picked[0] == tuple(np.unravel_index(score.argmax(), score.shape))
 
 
+def test_pin_moves_onto_the_viaduct_next_door():
+    score = np.zeros((40, 40))
+    score[20, 20] = 1.0   # the best cell is the field...
+    score[20, 25] = 0.96  # ...250 m from the viaduct, which is nearly as good
+    viaduct = np.zeros_like(score, bool)
+    viaduct[20, 25] = True
+    everywhere = np.ones_like(score, bool)
+    assert scoring.pick_spots(score, everywhere, spacing_m=400, n=1, anchor=viaduct) == [(20, 25)]
+    score[20, 25] = 0.5   # much worse on the viaduct itself: the pin stays in the field
+    assert scoring.pick_spots(score, everywhere, spacing_m=400, n=1, anchor=viaduct) == [(20, 20)]
+
+
 def test_similarity_peaks_at_the_seed():
     rng = np.random.default_rng(2)
     p = scoring.PROFILES["cine85"]
@@ -167,7 +179,7 @@ def test_why_points_add_up_to_the_score():
     comp = {k: 0.5 for k in p.weights}
     stats = {k: 1 for k in ("gaps", "gaps_whoop", "lone_trees", "edge_m", "treeline_m", "open_pct", "tree_pct",
                             "bld_pct", "water_m", "bridge_m", "places", "hazard_m", "access_m", "road_busy_m",
-                            "bando_m", "bando_site_m", "landmark_m", "west_edge_m")}
+                            "bando_m", "beach_m", "sea_m", "landmark_m", "west_edge_m")}
     stats.update(lone_h_max=10.0, open_r_m=100, max_height_m=12.0, relief_m=20.0, sunset_deg=1.0, bld_h_max=0.0)
     sim = np.full((3, 3), 0.5)
     res = {"top": 0.4, "sim": sim}
@@ -207,19 +219,70 @@ def test_every_park_without_a_spot_gets_its_best_cell():
     assert parks.name_at(grid, names, 12, 13) == "B" and parks.name_at(grid, names, 0, 0) is None
 
 
+def test_only_real_derelict_buildings_are_bandos():
+    # derelict, abandoned or disused buildings and works are
+    assert bandos.is_bando({"building": "ruins"}) and bandos.is_bando({"building": "yes", "abandoned": "yes"})
+    assert bandos.is_bando({"building": "industrial", "disused:man_made": "pumping_station"})
+    assert bandos.is_bando({"building": "warehouse", "disused:military": "ammunition"})
+    assert bandos.is_bando({"building": "yes", "building:condition": "ruinous"})
+    # old land, pits and railways aren't, nor is a lighthouse that's a house now, nor one that's gone
+    assert not bandos.is_bando({"building": "ruins", "demolished:building": "yes"})
+    assert not bandos.is_bando({"abandoned:landuse": "quarry"})
+    assert not bandos.is_bando({"historic": "mine"}) and not bandos.is_bando({"historic": "mine_shaft"})
+    assert not bandos.is_bando({"abandoned:railway": "rail"})
+    assert not bandos.is_bando({"abandoned:man_made": "spoil_heap"})
+    assert not bandos.is_bando({"building": "residential", "disused:man_made": "lighthouse"})
+    # monuments with keepers are left out; a listed building left to rot isn't
+    assert bandos.heritage({"historic": "ruins", "designation": "scheduled_monument"})
+    assert bandos.heritage({"historic": "ruins", "name": "Cliffords Fort"})
+    assert bandos.heritage({"building": "ruins", "ruins": "yes", "name": "St Catherine's Chapel"})
+    assert not bandos.heritage({"building": "abandoned", "name": "Ebenezer Methodist Church"})
+    assert not bandos.heritage({"historic": "ruins", "ruins": "lime_kiln", "name": "Southwick Limekilns"})
+    assert not bandos.heritage({"building": "yes", "disused": "yes", "listed_status": "Grade II"})
+
+
 def test_bando_labels_say_what_it_was():
-    assert bandos.kind({"historic": "mine"}) == "Old pit"
     assert bandos.kind({"building": "ruins"}) == "Ruins"
-    assert bandos.kind({"building": "warehouse", "disused:military": "yes"}) == "Old military building"
-    assert bandos.kind({"historic": "ruins", "ruins": "church"}) == "Ruined church"
-    assert bandos.kind({"abandoned:landuse": "quarry"}) == "Old quarry"
-    assert bandos.kind({"disused": "yes", "man_made": "adit"}) == "Old adit"
-    assert bandos.kind({"building": "yes", "abandoned": "yes"}) == "Abandoned building"
-    assert bandos.kind({"military": "bunker", "historic": "ruins"}) == "Bunker"
+    assert bandos.kind({"building": "warehouse", "disused:military": "ammunition"}) == "Old military building"
+    assert bandos.kind({"building": "industrial", "disused:man_made": "pumping_station"}) == "Old pumping station"
+    assert bandos.kind({"building": "yes", "disused": "yes", "disused:amenity": "pub"}) == "Old pub"
+    assert bandos.kind({"building": "industrial", "abandoned": "yes"}) == "Old factory"
+    assert bandos.kind({"abandoned": "yes", "building": "apartments"}) == "Abandoned building"
     assert bandos._osm_url("w4048915") == "https://www.openstreetmap.org/way/4048915"
     assert bandos._osm_url("x1") is None
-    assert bandos.heritage({"historic": "ruins", "designation": "scheduled_monument"})
-    assert not bandos.heritage({"building": "ruins"})
+
+
+def test_lines_keep_off_homes_and_roads():
+    from spotfinder import lines
+
+    n = 200
+    land = np.zeros((n, n), "uint8")
+    land[:, :60] = 1  # houses and gardens down the left
+    road = np.zeros((n, n), bool)
+    road[150:154, :] = True
+    d_road = __import__("scipy").ndimage.distance_transform_edt(~road)
+    blocked = lines.keep_out(land, None, d_road, lines.FREESTYLE)
+    nodes = lines.nodes_from([(100, 30, 6.0, 10.0, 40.0, True, 1.0), (100, 100, 6.0, 10.0, 40.0, True, 1.0),
+                              (100, 140, 6.0, 10.0, 40.0, True, 1.0), (152, 120, 6.0, 10.0, 40.0, True, 1.0)],
+                             [], np.zeros((n, n), bool), lines.FREESTYLE, blocked)
+    assert sorted(nodes[:, 1].tolist()) == [100, 140]  # the garden gap and the one on the road are gone
+    # a link across the road is blocked; one alongside it isn't
+    nodes = np.array([[120, 100, lines.GAP, 1.0, 6], [180, 100, lines.GAP, 1.0, 6], [120, 150, lines.GAP, 1.0, 6]])
+    nb = lines.links(nodes, np.zeros((n, n), "float32"), lines.FREESTYLE, blocked)
+    assert nb[0] == [2]
+
+
+def test_viaduct_deck_gives_arches():
+    from spotfinder import lines
+
+    n = 120
+    deck = np.zeros((n, n), bool)
+    deck[58:63, 10:110] = True
+    ohm = np.zeros((n, n), "float32")
+    ohm[58:63, 10:110] = np.r_[np.linspace(2, 25, 50), np.linspace(25, 2, 50)]  # high over the middle
+    a = lines.arches(deck, ohm)
+    assert 4 <= len(a) <= 7 and all(h >= lines.ARCH_MIN_H for _, _, h in a)
+
 
 
 def test_line_links_need_clear_air():

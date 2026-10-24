@@ -20,6 +20,7 @@ from tqdm import tqdm
 from .config import Region
 from . import lines
 from .heights import HeightReader, Tile
+from .rasterize import HOMES_CODE, PARKING_CODE, VIADUCT_CODE
 
 try:
     import edt as _edt_mod
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 CELL = 50        # metres per output cell
 TILE = 1000      # metres per processing tile (core)
 MARGIN = 40      # metres of context around each tile
+ARCH_W = 8.0     # how wide we take a viaduct arch to be, for the gap counts
 
 TALL_M = 4.0     # anything this tall is an obstacle to weave around
 OPEN_M = 1.5     # below this counts as open ground
@@ -237,8 +239,15 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     grid_n = size // n
     for key in ("gaps", "gaps_all", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max"):
         cells[key] = np.zeros((grid_n, grid_n), dtype="float32")
+    # Nothing in people's gardens or on car parks counts, and a viaduct's arches are gaps too.
+    home = (t.land == HOMES_CODE) | (t.land == PARKING_CODE) if t.land is not None else None
+    at_home = lambda r, c: home is not None and bool(home[min(int(round(r)), home.shape[0] - 1),
+                                                         min(int(round(c)), home.shape[1] - 1)])
+    gaps = [g for g in gaps if not at_home(g[0], g[1])]
+    lone = [o for o in lone if not at_home(o[0], o[1])]
+    arch = lines.arches(t.land == VIADUCT_CODE, t.ohm) if t.land is not None else []
     keep_gaps, keep_lone = [], []
-    for r, c, w, f, a, th, tf in gaps:
+    for r, c, w, f, a, th, tf in gaps + [(r, c, ARCH_W, h, ARCH_W * 10, True, 0.0) for r, c, h in arch]:
         rr, cc = r - m, c - m
         if 0 <= rr < size and 0 <= cc < size:
             i, j = int(rr // n), int(cc // n)
@@ -259,9 +268,12 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
             keep_lone.append((t.x0 + c + 0.5, t.y1 - r - 0.5, h, a))
     # --- Flyable lines: chain the obstacles into runs and keep the best run starting in each cell.
     runs = {}
+    d_bld = ndimage.distance_transform_edt(~t.bld) if t.bld.any() else None
+    d_road = ndimage.distance_transform_edt(~road) if road.any() else None
     for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
-        nodes = lines.nodes_from(gaps, lone, treeline, style)
-        nb = lines.links(nodes, ohm, style)
+        blocked = lines.keep_out(t.land, d_bld, d_road, style)
+        nodes = lines.nodes_from(gaps, lone, treeline, style, blocked, arch)
+        nb = lines.links(nodes, ohm, style, blocked)
         scores, paths = lines.all_runs(nodes, nb)
         runs[name] = (nodes, scores, paths)
         for k in (name, name + "_m", name + "_n"):

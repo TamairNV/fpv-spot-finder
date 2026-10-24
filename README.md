@@ -46,13 +46,11 @@ Three profiles out of the box:
   that follow each drone's own spread), water or parking within a distance, and quiet places only;
   shut, the chip says which are on. ‹ › on a spot (or ← →) steps through the list. Each spot takes your own notes (parking, access, when it's quiet); they show as 📝 in the list, are
   searchable, and go in the ratings download.
-- **Bandos on the map**: every ruin and derelict building on OpenStreetMap as a purple dot (solid
-  if LiDAR still sees something standing, a ring if little is left). Tap one for what it is, how
-  tall, the nearest spot, directions and Street View, and for the ones still standing a 3D
-  close-up from the LiDAR at 1 m. On in Layers, and whenever the Bandos chip or
-  the bando filter is on. Search finds them by name or kind ("priory", "bunker"; "bandos" lists the
-  lot), and each spot card lists the bandos within 1 km. Ones that are protected heritage sites
-  (scheduled monuments, attractions) say so. With a mouse, hovering any spot or bando dot names it.
+- **Bandos**: derelict, abandoned and disused buildings and works, as purple dots. The Bandos chip
+  lists them, biggest first. Tap one for what it was, how tall it still stands, the nearest spot,
+  directions and Street View, and a 3D close-up from the LiDAR at 1 m. Search finds them by name or
+  kind ("pub", "factory"; "bandos" lists the lot), and each spot card lists the bandos within 1 km.
+  With a mouse, hovering any spot or bando dot names it.
 - **Works offline** once loaded (add it to your home screen). When the online map can't load, it
   switches to a built-in basemap (main roads, rail, water, woods, built-up areas, place names), so it
   still works in a field with no signal. **GPX export** of the spots for OS Maps or a GPS, and a share
@@ -185,11 +183,24 @@ seeds; places like your thumbs-down spots get pulled down.
    picks the next obstacle by its value, a change of move and a smooth heading (no turns over 115°),
    up to 12 moves, and scores the run with a bonus for variety. Each spot's "flow" is the best run
    that starts in it, and the spot card gets that run as a suggested line.
-3. **Context** from OSM and Overture: distance to water, bridges and viaducts, bandos (ruins,
-   abandoned/disused structures), cliffs and quarries, landmarks, masts and cranes, paths, car parks,
-   fast main roads, farmland and public open space; and how busy a place is. A mapped bando only counts
-   in full if LiDAR shows something solid still standing there; old pit and shaft markers with nothing
-   left count a little. Town-wall towers, gates and abbeys are landmarks, not bandos.
+   Lines keep off people's homes and gardens (residential land that isn't a park or a big green),
+   car parks and roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building;
+   gaps and lone trees in gardens or on car parks don't count at all. A railway or footpath viaduct
+   whose deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and a move of its own
+   (two arches of one viaduct don't link, they sit side by side). `land_1m.tif` holds those homes,
+   car parks and viaduct decks.
+3. **Context** from OSM and Overture: distance to water, the sea and beaches, bridges and viaducts,
+   bandos, cliffs and quarries, landmarks, masts and cranes, paths, car parks, fast main roads,
+   farmland and public open space; and how busy a place is. A bando is a mapped building or works
+   tagged derelict, abandoned, ruined or disused, 100 m² or more, not in a park, churchyard or
+   museum, not a monument (scheduled, a castle, fort, chapel or abbey ruin), and with LiDAR still
+   seeing walls 4 m+ tall on its footprint. A bridge counts where LiDAR sees its deck 4 m+ in the air
+   for 30 m over water or 80 m anywhere (Overture flags whole road segments, culverts and all);
+   railway and footpath viaducts always count. Lighthouses, famous artworks, listed bridges and named
+   viaducts are landmarks. A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
+   golf course (so no bunkers or long-jump pits); for 5" cine only a beach by the sea is "the coast".
+   Power lines (within 50 m) and fast roads cost a spot in full only when its middle is on one, and
+   otherwise up to half, by how much of it is near one.
    Also worked out per spot: how big the open field is, how far it is to walk in from a path or road,
    and how high the skyline is towards the sunset (west-south-west to west-north-west, out to 2 km,
    hills, woods and buildings included).
@@ -198,12 +209,18 @@ seeds; places like your thumbs-down spots get pulled down.
    both drones. MOD land and danger areas are never suggested, and nor is anywhere a spot would
    reach onto them. National Trust, Forestry England, Woodland Trust, nature reserves, golf courses,
    cemeteries, railways (not ones in tunnels) and power lines are flagged.
-5. **Score**: a weighted rule score blended 60/40 with similarity to your seed spots. Spots are
+5. **Score**: a weighted rule score blended 60/40 with similarity to your seed spots. For the 5",
+   public land (parks, commons, country parks, beaches) and bridges and viaducts weigh in, and public
+   land is part of the taste match too: without it the taste part filled the top with private fields
+   that happen to look like the Town Moor. Bridges,
+   bandos, beaches and landmarks are measured from the middle of the spot, so the best cell is on
+   them, not 300 m away in the next field. Spots are
    suggestions to go and look at, so legality is a label rather than a filter: anywhere outside
    flight restriction zones and away from MOD land can be picked, and each spot says how much of it
    is A3-clear. `python -m spotfinder score --strict` brings back the old behaviour (the 5" only
    gets A3-clear ground). Spots are picked greedily with a minimum spacing (400 m for the 5", 600 m
-   for 5" cine, 250 m for the whoop).
+   for 5" cine, 250 m for the whoop). When a viaduct, bridge, landmark, bando or beach is within three
+   quarters of that and scores at most 6 points less, the pin goes on it.
    Each spot carries a "why" list: points out of 100 per reason, with the numbers behind it (e.g.
    "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
 6. **Parks**: the ranking alone favours woods and riversides out of town, so every named park,
@@ -212,10 +229,10 @@ seeds; places like your thumbs-down spots get pulled down.
    The app's "Parks" chip lists them all.
 7. **3D models**: every spot gets a 320 m square model at 2 m from the same heights (about 20 KB
    each); `score --previews N` limits them to the top N per drone.
-8. **Bandos**: `bandos.geojson` has every mapped bando as a point with what it was (from its OSM
-   tags), how tall the tallest solid thing on it is (LiDAR) and whether that counts as still
-   standing, for the app's bando layer. Each one still standing also gets a 3D close-up (160 m
-   square at 1 m) that opens from its card.
+8. **Bandos**: `bandos.geojson` has every bando as a point with what it was (from its OSM tags),
+   how tall its walls still stand (LiDAR, 95th percentile on the footprint, tree crowns left out) and
+   how much roof it has. Buildings of one site (a depot's sheds, a works) are one point. Each gets a 3D
+   close-up (160 m square at 1 m) that opens from its card.
 
 ## Be real about it
 

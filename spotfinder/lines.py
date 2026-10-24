@@ -5,6 +5,10 @@ skim is a node. Two nodes are linked when they're a sensible distance apart and 
 them is clear at low height (the 1 m height grid says nothing taller than ~3 m is in the way).
 From each node we walk the links greedily, preferring good obstacles, a change of move and a
 smooth heading, and keep the best run. A spot's line score is the best run that starts in it.
+
+Lines stay off people's homes and gardens, car parks and roads, and the 5 inch keeps clear of
+buildings altogether. A viaduct's arches are obstacles too: LiDAR only sees the deck, so where the
+deck stands high above the ground there's an arch every few metres to fly through.
 """
 
 from __future__ import annotations
@@ -15,10 +19,12 @@ import numpy as np
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
+from .rasterize import HOMES_CODE, PARKING_CODE
+
 # Node kinds and what each is worth in a run.
-GAP, LONE, DIVE, SKIM = 0, 1, 2, 3
-KIND_NAME = {GAP: "gap", LONE: "orbit", DIVE: "dive", SKIM: "skim"}
-VALUE = {GAP: 1.0, LONE: 0.8, DIVE: 1.0, SKIM: 0.45}
+GAP, LONE, DIVE, SKIM, ARCH = 0, 1, 2, 3, 4
+KIND_NAME = {GAP: "gap", LONE: "orbit", DIVE: "dive", SKIM: "skim", ARCH: "arch"}
+VALUE = {GAP: 1.0, LONE: 0.8, DIVE: 1.0, SKIM: 0.45, ARCH: 1.2}
 
 CLEAR_H = 3.0       # flying low between obstacles: anything taller than this blocks a link
 END_SKIP = 6.0      # metres at each end of a link that belong to a gap or tree line (trees use their crown)
@@ -26,6 +32,9 @@ SKIM_STEP = 25.0    # one skim node per this many metres of tree line
 DIVE_H = 18.0       # a lone tree or pillar this tall is a dive target too
 MAX_TURN = 115.0    # degrees: sharper than this and it's not a flowing line
 MAX_NODES = 12
+ARCH_MIN_H = 8.0    # a viaduct deck this high above the ground has arches you can fly through
+ARCH_STEP = 15.0    # one arch node per this many metres of deck
+ARCH_R = 8.0        # metres round an arch node that are the viaduct itself
 
 
 @dataclass(frozen=True)
@@ -33,16 +42,48 @@ class Style:
     min_link: float
     max_link: float
     gap_max_w: float
-    corridor: int  # metres of clear air across the flight path (a quad plus margin)
+    corridor: int      # metres of clear air across the flight path (a quad plus margin)
+    bld_clear: float   # metres a line keeps from any building (0: the whoop flies round architecture)
+    road_clear: float  # ...and from a road, where the cars are
 
 
-FREESTYLE = Style(min_link=10.0, max_link=70.0, gap_max_w=12.0, corridor=3)
-WHOOP = Style(min_link=5.0, max_link=35.0, gap_max_w=5.0, corridor=3)
+FREESTYLE = Style(min_link=10.0, max_link=70.0, gap_max_w=12.0, corridor=3, bld_clear=12.0, road_clear=6.0)
+WHOOP = Style(min_link=5.0, max_link=35.0, gap_max_w=5.0, corridor=3, bld_clear=0.0, road_clear=3.0)
 
 
-def nodes_from(gaps: list[tuple], lone: list[tuple], treeline: np.ndarray, style: Style) -> np.ndarray:
+def keep_out(land: np.ndarray | None, d_bld: np.ndarray | None, d_road: np.ndarray | None, style: Style) -> np.ndarray | None:
+    """Pixels a line can't use: homes and gardens, car parks, near a road, and for the 5 inch near any
+    building. d_bld / d_road are metres to the nearest building / road pixel (None: there's none)."""
+    out = None
+    for m in ((land == HOMES_CODE) | (land == PARKING_CODE) if land is not None else None,
+              d_road <= style.road_clear if d_road is not None else None,
+              d_bld <= style.bld_clear if d_bld is not None and style.bld_clear > 0 else None):
+        if m is not None:
+            out = m if out is None else out | m
+    return out
+
+
+def arches(deck: np.ndarray, ohm: np.ndarray) -> list[tuple]:
+    """Arch positions under a viaduct deck: (row, col, deck height) every ARCH_STEP metres where the deck
+    is ARCH_MIN_H or more above the ground."""
+    high = deck & (ohm >= ARCH_MIN_H)
+    if not high.any():
+        return []
+    # middle of the deck first, then keep any point ARCH_STEP from those already kept
+    mid = ndimage.distance_transform_edt(deck)
+    rr, cc = np.nonzero(high)
+    out: list[tuple] = []
+    for i in np.argsort(-mid[rr, cc], kind="stable"):
+        r, c = rr[i], cc[i]
+        if all((r - a) ** 2 + (c - b) ** 2 >= ARCH_STEP ** 2 for a, b, _ in out):
+            out.append((float(r), float(c), float(ohm[r, c])))
+    return out
+
+
+def nodes_from(gaps: list[tuple], lone: list[tuple], treeline: np.ndarray, style: Style,
+               blocked: np.ndarray | None = None, arch: list[tuple] = ()) -> np.ndarray:
     """(N, 5) array of row, col, kind, quality (0..1), radius (m around it that's the obstacle itself),
-    in tile pixels (1 m)."""
+    in tile pixels (1 m). Nothing inside `blocked`."""
     out = []
     for r, c, w, f, _a, th, _tf in gaps:
         if th and w <= style.gap_max_w:
@@ -56,11 +97,17 @@ def nodes_from(gaps: list[tuple], lone: list[tuple], treeline: np.ndarray, style
         key = (rr // SKIM_STEP).astype(np.int64) * 100000 + (cc // SKIM_STEP).astype(np.int64)
         _, first = np.unique(key, return_index=True)
         out.extend((float(rr[i]), float(cc[i]), SKIM, 1.0, END_SKIP) for i in first)
-    return np.array(out, dtype="float64").reshape(-1, 5)
+    out.extend((r, c, ARCH, float(np.clip((h - 4) / 12, 0.3, 1.0)), ARCH_R) for r, c, h in arch)
+    nodes = np.array(out, dtype="float64").reshape(-1, 5)
+    if blocked is not None and len(nodes):
+        ri = np.clip(np.rint(nodes[:, 0]).astype(int), 0, blocked.shape[0] - 1)
+        ci = np.clip(np.rint(nodes[:, 1]).astype(int), 0, blocked.shape[1] - 1)
+        nodes = nodes[~blocked[ri, ci]]
+    return nodes
 
 
-def links(nodes: np.ndarray, ohm: np.ndarray, style: Style) -> list[list[int]]:
-    """Neighbour lists: pairs within range with clear air between them."""
+def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray | None = None) -> list[list[int]]:
+    """Neighbour lists: pairs within range with clear air between them, and not over `blocked` ground."""
     n = len(nodes)
     nb: list[list[int]] = [[] for _ in range(n)]
     if n < 2:
@@ -70,12 +117,15 @@ def links(nodes: np.ndarray, ohm: np.ndarray, style: Style) -> list[list[int]]:
         return nb
     a, b = nodes[pairs[:, 0], :2], nodes[pairs[:, 1], :2]
     d = np.hypot(*(b - a).T)
-    keep = d >= style.min_link
+    # two arches of one viaduct sit side by side under the deck: there's no flying from one to the next
+    keep = (d >= style.min_link) & ~((nodes[pairs[:, 0], 2] == ARCH) & (nodes[pairs[:, 1], 2] == ARCH))
     pairs, a, b, d = pairs[keep], a[keep], b[keep], d[keep]
     if not len(pairs):
         return nb
     # Sample every metre along each link, skipping the ends, and check nothing tall is in the way across
     # the whole corridor: LiDAR speckle inside a wood leaves 1 m holes that aren't a way through.
+    if blocked is not None:
+        ohm = np.where(blocked, np.float32(99), ohm)
     ohm = ndimage.maximum_filter(ohm, size=style.corridor)
     steps = np.arange(0.0, style.max_link + 1.0)
     t = steps[None, :] / d[:, None]
