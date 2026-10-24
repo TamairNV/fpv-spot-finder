@@ -593,6 +593,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
     for s in seeds:
         res = results.get(s.profile)
         r, c = cell_of(region, s.bng)
+        if not (0 <= r < H and 0 <= c < W):
+            continue  # another region's seed: it still steers the ranking here, but isn't on this map
         entry = {"name": s.name, "profile": s.profile, "lon": s.lon, "lat": s.lat, "radius_m": s.radius_m,
                  "note": s.note, "a3_frac": round(float(cells["a3_frac"][r, c]), 2),
                  "a1_frac": round(float(cells["a1_frac"][r, c]), 2),

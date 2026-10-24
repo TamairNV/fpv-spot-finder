@@ -225,7 +225,8 @@ def rule_score(c: dict[str, np.ndarray], p: Profile) -> np.ndarray:
 def similarity(c: dict[str, np.ndarray], p: Profile, groups, valid: np.ndarray) -> np.ndarray | None:
     """0..1, how close each cell's style is to the nearest seed (robust z-space).
 
-    `groups` is a list of seeds, each a list of (row, col) cells; a flat list of cells is one seed.
+    `groups` is a list of seeds, each a list of (row, col) cells or, for a seed in another region, its
+    mean raw style vector (see `style_vector`); a flat list of cells is one seed.
     Each seed is compared on its own, so two different favourite spots don't blur into a third style."""
     if not groups:
         return None
@@ -239,9 +240,12 @@ def similarity(c: dict[str, np.ndarray], p: Profile, groups, valid: np.ndarray) 
     z = (feats - med) / iqr
     best = None
     for cells in groups:
-        if not cells:
+        if isinstance(cells, np.ndarray):
+            seed = (cells - med) / iqr  # raw features are in the same units in every region
+        elif not cells:
             continue
-        seed = np.mean([z[r, cc] for r, cc in cells], axis=0)
+        else:
+            seed = np.mean([z[r, cc] for r, cc in cells], axis=0)
         d = np.sqrt(((z - seed) ** 2).mean(axis=-1))
         scale = np.median(d[valid])
         sim = 1.0 / (1.0 + (d / max(scale, 1e-6)) ** 2)
@@ -279,3 +283,16 @@ def pick_spots(score: np.ndarray, eligible: np.ndarray, spacing_m: float, n: int
         if len(picked) >= n:
             break
     return picked
+
+
+def style_vector(c: dict[str, np.ndarray], p: Profile, cells) -> np.ndarray:
+    """A seed's mean raw style features over its cells, to carry it into another region."""
+    feats = np.stack([c[k] for k in p.style_features], axis=-1)
+    return np.mean([feats[r, cc] for r, cc in cells], axis=0)
+
+
+def soft_cap(x: np.ndarray, knee: float = 0.9) -> np.ndarray:
+    """Clip to 0..1 but bend smoothly above `knee`, so places better than the reference region's best
+    still rank above each other instead of all tying at 100."""
+    x = np.clip(x, 0, None)
+    return np.where(x <= knee, x, knee + (1 - knee) * (1 - np.exp(-(x - knee) / (1 - knee))))
