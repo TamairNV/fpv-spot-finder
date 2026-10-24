@@ -1146,6 +1146,35 @@ function renderBandoHits() {
     })));
 }
 
+// A close-up of the bando in the full-screen 3D view; closing it throws the view away.
+let bando3d = null;
+async function openBando3D(f, btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Loading 3D…';
+  try {
+    const { Preview3D } = await import('./preview3d.js');
+    bando3d?.dispose();
+    const host = el('div', { hidden: true });
+    document.body.append(host);
+    const pv = (bando3d = new Preview3D(host, {
+      spot: { title: f.properties.n || f.properties.k }, preview: { ...f.properties.p, center: f.geometry.coordinates },
+      center: f.geometry.coordinates, profile: state.profile, radiusM: 0,
+      onClose: () => setTimeout(() => {
+        pv.dispose();
+        host.remove();
+        if (bando3d === pv) bando3d = null;
+      }),
+    }));
+    await pv.load(`${BASE}/${f.properties.p.file}`);
+    if (!pv.disposed) pv.toggleFull(true);
+  } catch (e) {
+    btn.after(el('div', { class: 'check-note' }, `3D view unavailable (${e.message || e}).`));
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
 function bandosNear(c, maxD, n) {
   return (bandosData?.features || [])
     .map((f) => ({ f, d: haversine(c, f.geometry.coordinates) }))
@@ -1199,6 +1228,7 @@ function showBando(f) {
     },
     el('span', { class: 'score', style: `--c:${scoreColour(best.properties.score)}` }, best.properties.score),
     el('span', {}, el('small', {}, `Nearest ${who} spot, ${metres(bestD)} away`), el('br'), best.properties.title)) : null,
+    p.p ? el('button', { class: 'bando-3d', onclick: (e) => openBando3D(f, e.currentTarget) }, '⤢ See it in 3D (LiDAR close-up)') : null,
     el('div', { class: 'bando-links' },
       link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, 'Directions'),
       link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, 'Street View'),

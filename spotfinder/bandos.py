@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pandas as pd
 
-from . import context, export
+from . import context
 from .config import Region, bng_to_lonlat
 from .sources import osm
 
@@ -65,8 +67,9 @@ def _osm_url(osm_id: str) -> str | None:
     return None
 
 
-def write(region: Region) -> dict[str, int]:
-    """bandos.geojson next to the spot lists: one point per mapped bando with its kind, name and status."""
+def write(region: Region, out: Path, preview: Callable[[float, float, Path], dict] | None = None) -> dict[str, int]:
+    """bandos.geojson next to the spot lists: one point per mapped bando with its kind, name and status,
+    and a 3D model (preview(x, y, path) -> its metadata) of each one still standing."""
     o = osm.extract(region)
     frames = [f[f["tags"].map(context._is_bando)] for f in (o["areas"], o["nodes"])]
     b = pd.concat(frames, ignore_index=True)
@@ -90,11 +93,14 @@ def write(region: Region) -> dict[str, int]:
             props["n"] = t["name"]
         if url := _osm_url(str(osm_id)):
             props["osm"] = url
+        if preview and s == STANDING:
+            name = f"previews/b-{osm_id}.png"
+            props["p"] = {"file": name, **preview(p.x, p.y, out / name)}
         feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                       "properties": props})
     # standing ones last so they draw on top
     feats.sort(key=lambda f: f["properties"]["s"] == STANDING)
-    (export.web_dir(region) / "bandos.geojson").write_text(
+    (out / "bandos.geojson").write_text(
         json.dumps({"type": "FeatureCollection", "features": feats}, separators=(",", ":")))
     log.info("bandos: %d on the map (%d still standing, %d old sites, %d unchecked)", len(feats),
              counts["standing"], counts["site"], counts["unknown"])

@@ -49,7 +49,8 @@ Three profiles out of the box:
   searchable, and go in the ratings download.
 - **Bandos on the map**: every ruin and derelict building on OpenStreetMap as a purple dot (solid
   if LiDAR still sees something standing, a ring if little is left). Tap one for what it is, how
-  tall, the nearest spot, directions and Street View. On in Layers, and whenever the Bandos chip or
+  tall, the nearest spot, directions and Street View, and for the ones still standing a 3D
+  close-up from the LiDAR at 1 m. On in Layers, and whenever the Bandos chip or
   the bando filter is on. Search finds them by name or kind ("priory", "bunker"; "bandos" lists the
   lot), and each spot card lists the bandos within 1 km.
 - **Works offline** once loaded (add it to your home screen). When the online map can't load, it
@@ -180,7 +181,8 @@ seeds; places like your thumbs-down spots get pulled down.
    each); `score --previews N` limits them to the top N per drone.
 8. **Bandos**: `bandos.geojson` has every mapped bando as a point with what it was (from its OSM
    tags), how tall the tallest solid thing on it is (LiDAR) and whether that counts as still
-   standing, for the app's bando layer.
+   standing, for the app's bando layer. Each one still standing also gets a 3D close-up (160 m
+   square at 1 m) that opens from its card.
 
 ## Be real about it
 

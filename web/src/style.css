@@ -502,3 +502,6 @@ dialog#about li { margin: 4px 0; }
 .bando-hit:hover { background: var(--panel-2); }
 .bdot { width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box; border: 2px solid #c084fc; }
 .bdot.s1 { background: #c084fc; border-color: #1b1030; }
+.bando-3d { width: 100%; margin: 8px 0 0; padding: 7px 10px; border: 1px solid rgba(192, 132, 252, .5); border-radius: 10px; background: rgba(192, 132, 252, .12); color: #d8b4fe; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.bando-3d:hover { background: rgba(192, 132, 252, .2); }
+.bando-3d:disabled { opacity: .7; cursor: progress; }

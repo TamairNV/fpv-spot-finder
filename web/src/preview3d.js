@@ -54,8 +54,9 @@ async function loadPixels(url) {
 }
 
 export class Preview3D {
-  constructor(host, { spot, preview, center, profile, radiusM }) {
+  constructor(host, { spot, preview, center, profile, radiusM, onClose }) {
     this.host = host;
+    this.onClose = onClose;
     this.spot = spot;
     this.preview = preview;
     this.center = center;
@@ -122,7 +123,7 @@ export class Preview3D {
     this.buildLine();
     this.buildUI();
     this.setTime(this.defaultTime());
-    this.tag.textContent = `${this.preview.lidar ? 'EA LiDAR, 2 m blocks' : 'Tree model + building heights (no LiDAR yet)'} · ${n * res} m square`;
+    this.tag.textContent = `${this.preview.lidar ? `EA LiDAR, ${res} m blocks` : 'Tree model + building heights (no LiDAR yet)'} · ${n * res} m square`;
     this.render();
   }
 
@@ -534,12 +535,15 @@ export class Preview3D {
     const rowJump = el('div', { class: 'p3d-row p3d-chips' },
       jump('Golden AM', mid(t.sunrise, t.goldenHourEnd)), jump('Midday', t.solarNoon),
       jump('Golden PM', mid(t.goldenHour, t.sunset)), jump('Now', new Date()));
-    const legend = el('div', { class: 'p3d-legend' },
-      el('span', {}, el('b', { style: 'color:#ff3d7f' }, '◯'), ' gaps'),
-      el('span', {}, el('b', { style: 'color:#ffc400' }, '◯'), ' lone trees'),
-      el('span', {}, el('b', { style: 'color:#22c55e' }, '●'), ' take-off'),
+    // only what this model shows (a bando close-up has none of it)
+    const keys = [
+      this.spot.gaps_list?.length ? el('span', {}, el('b', { style: 'color:#ff3d7f' }, '◯'), ' gaps') : null,
+      this.spot.lone_list?.length ? el('span', {}, el('b', { style: 'color:#ffc400' }, '◯'), ' lone trees') : null,
+      this.spot.takeoff ? el('span', {}, el('b', { style: 'color:#22c55e' }, '●'), ' take-off') : null,
       this.line ? el('span', {}, el('b', { style: 'color:#5cc8ff' }, '━'), ' line to fly') : null,
-      el('span', {}, '- - spot area'));
+      this.radiusM ? el('span', {}, '- - spot area') : null,
+    ].filter(Boolean);
+    const legend = keys.length ? el('div', { class: 'p3d-legend' }, keys) : null;
     this.ui = el('div', { class: 'p3d-ui' }, rowSun, rowJump, legend);
     this.wrap.append(this.ui);
   }
@@ -560,6 +564,7 @@ export class Preview3D {
     if (!on && this.play) this.stopLine();
     this.applyMode();
     this.resize();
+    if (!on) this.onClose?.();
   }
 
   render() {
