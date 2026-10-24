@@ -91,3 +91,12 @@ def test_rerank_needs_a_prepared_region_and_ratings():
     assert c.post("/api/rerank", headers=auth(k), json={"region": "nowhere"}).status_code == 409
     st = c.get("/api/rerank?region=nowhere", headers=auth(k)).json()
     assert st == {"ready": False, "job": None, "copy": None}
+
+
+def test_models_on_request_need_the_region_rasters():
+    assert c.get("/api/models/newcastle/freestyle5/1-x").status_code == 400
+    assert c.get("/api/models/newcastle/nope/1-2").status_code in (400, 404)
+    # the test data folder has no rasters for the region
+    assert c.get("/api/models/newcastle/freestyle5/1-2").status_code == 404
+    assert c.get("/api/models/newcastle/1-2.png").status_code == 404
+    assert c.get("/api/models/newcastle/..%2F1-2.png").status_code in (400, 404)

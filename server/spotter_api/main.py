@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from . import forecast, photos
 from .db import DATA_DIR, DB
+from .models import Models, NotHere
 from .rerank import Busy, Reranker
 
 log = logging.getLogger("spotter")
@@ -27,6 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s
 
 db = DB()
 reranker = Reranker(db, DATA_DIR)
+models = Models(DATA_DIR)
 PHOTO_DIR = DATA_DIR / "photos"
 REGION_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
 KINDS = {"rating", "note", "flight"}
@@ -272,6 +274,41 @@ def rerank(body: Rerank, pid: int = Depends(profile)):
 def rerank_drop(region: str, pid: int = Depends(profile)):
     reranker.drop(pid, region_ok(region))
     return reranker.status(pid, region)
+
+
+# ---------------------------------------------------------------- 3D models on request
+
+SPOT_RE = re.compile(r"^(\d{1,4})-(\d{1,4})$")
+_models_made: dict[str, list[float]] = defaultdict(list)
+
+
+@app.get("/api/models/{region}/{profile_key}/{spot}")
+def get_model(region: str, profile_key: str, spot: str, req: Request):
+    m = SPOT_RE.match(spot)
+    if not m:
+        raise HTTPException(400, "bad spot")
+    region_ok(region)
+    if not models.png(region, spot).exists():  # only new ones cost anything, so only they're limited
+        ip, now = client_ip(req), time.time()
+        recent = _models_made[ip] = [t for t in _models_made[ip] if now - t < 3600]
+        if len(recent) >= 300:
+            raise HTTPException(429, "that's a lot of 3D models: try again in a bit")
+        recent.append(now)
+    try:
+        return models.get(region, profile_key, int(m[1]), int(m[2]))
+    except NotHere:
+        raise HTTPException(404, "the server doesn't have this region's height data yet")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/models/{region}/{name}")
+def get_model_png(region: str, name: str):
+    m = re.fullmatch(r"(\d{1,4}-\d{1,4})\.png", name)
+    path = models.png(region_ok(region), m[1]) if m else None
+    if not path or not path.exists():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
 
 
 # ---------------------------------------------------------------- push

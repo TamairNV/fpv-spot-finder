@@ -306,6 +306,39 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
     return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path)), "moves": moves}
 
 
+LINE_KEYS = {"freestyle5": "line5", "cine85": "linew"}
+_model_inputs: dict[str, tuple[HeightReader, np.ndarray]] = {}
+
+
+def can_model(region: Region) -> bool:
+    """Whether this machine has the region's rasters to build a 3D model from."""
+    return all((region.cache_dir / f).exists() for f in ("chm_1m.tif", "bld_dm_1m.tif", "water_1m.tif", "ways_1m.tif"))
+
+
+def spot_model(region: Region, r: int, c: int, profile_key: str, path: Path) -> dict:
+    """One spot's 3D model, made on request (the server does this for spots ranked below the
+    pre-made previews): writes the preview PNG to `path` and returns what a spot's "preview" and
+    "line" fields would hold. Keeps the last two regions' rasters open, so the next spot is quick."""
+    from .context import load_dtm
+
+    if region.key not in _model_inputs:
+        while len(_model_inputs) >= 2:
+            _model_inputs.pop(next(iter(_model_inputs)))
+        _model_inputs[region.key] = (HeightReader(region), load_dtm(region)[0])
+    reader, dtm = _model_inputs[region.key]
+    x, y = cell_center(region, r, c)
+    lon, lat = bng_to_lonlat(x, y)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{os.getpid()}-{path.name}")  # keeps .png for PIL
+    pm = write_preview(reader, dtm, region, x, y, tmp)
+    _flush_pngs()
+    tmp.replace(path)
+    line = None
+    if profile_key in LINE_KEYS:
+        line = spot_line(reader, x, y, LINE_KEYS[profile_key], (scoring.PROFILES[profile_key].radius_cells + 0.5) * CELL)
+    return {"preview": {**pm, "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}, "line": line}
+
+
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path,
                   size_m: int = PREVIEW_M, res_m: int = PREVIEW_RES) -> dict:
     """160 x 160 px at 2 m: R = class*64, G = height above ground (0.25 m), B = ground (0.5 m above min)."""
@@ -595,7 +628,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 preview = {"file": f"previews/{spot_id}.png", **done_previews[(r, c)],
                            "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
             line = None
-            line_key = {"freestyle5": "line5", "cine85": "linew"}.get(key)
+            line_key = LINE_KEYS.get(key)
             if line_key and rank <= previews:
                 line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL)
             gr = os_grid_ref(x, y)

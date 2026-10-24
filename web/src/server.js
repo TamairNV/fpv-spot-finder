@@ -646,6 +646,13 @@ export function flightBox(spot, profile, rerender) {
   return box;
 }
 
+// A spot's 3D model and line, built by the server the first time anyone opens it. null without a server.
+export async function fetchModel(region, profile, id) {
+  if (!S || !region || !/^\d+-\d+$/.test(id || '')) return null;
+  const m = await call(`models/${region}/${profile}/${id}`, { auth: false, timeout: 60000 });
+  return { ...m, url: new URL(m.preview.file, location.href.split('#')[0]).href };
+}
+
 // Called once the spots are loaded. Does nothing if there's no server behind the app.
 export async function attachServer(opts) {
   if (SANDBOXED) return null;
