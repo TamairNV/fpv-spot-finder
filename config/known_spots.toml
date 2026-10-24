@@ -420,13 +420,6 @@ radius_m = 60
 why = "Ruined lime kilns on the Wear, 7 m"
 
 [[bando]]
-name = "Old Hollinside manor ruins"
-lat = 54.93362
-lon = -1.71210
-radius_m = 60
-why = "Roofless medieval manor house by the Nine Arches"
-
-[[bando]]
 name = "Abandoned industrial, Derwenthaugh"
 lat = 54.96167
 lon = -1.71732
