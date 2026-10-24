@@ -124,21 +124,24 @@ const liked = (f) => ratings.get(state.profile, f.properties.id) > 0;
 const gapsOf = (s) => (isA3() ? s.gaps : s.gaps_whoop);
 const near = [100, 300, 1000];
 const dist = (v) => (v >= 1000 ? `${v / 1000} km` : `${v} m`);
-function upper(get) {
+function upper(get, step) {
   const xs = state.spots[state.profile].features.map((f) => get(f.properties.stats || {})).filter(Number.isFinite).sort((a, b) => a - b);
   const at = (q) => xs[Math.floor(q * (xs.length - 1))] ?? 0;
-  const round = (v) => (v >= 50 ? Math.round(v / 10) * 10 : Math.max(1, Math.round(v / 5) * 5));
+  const round = (v) => (step ? Math.round(v / step) * step : v >= 50 ? Math.round(v / 10) * 10 : Math.max(1, Math.round(v / 5) * 5));
   return [...new Set([round(at(0.5)), round(at(0.75))])].filter((v) => v > 0);
 }
+// chip: how the step reads on the Filters chip once the panel is shut
 const MORE = [
-  { key: 'bando', label: 'Bando within', title: 'A ruin or derelict building that LiDAR says is still standing', opts: () => near, fmt: dist, test: (s, v) => s.bando_m <= v },
-  { key: 'gaps', label: 'Gaps', title: 'Openings between trees or buildings to fly through', opts: () => upper(gapsOf), fmt: (v) => `${v}+`, test: (s, v) => gapsOf(s) >= v },
-  { key: 'lone', label: 'Lone trees', title: 'Single trees with room all round, to orbit and power loop', opts: () => upper((s) => s.lone_trees), fmt: (v) => `${v}+`, test: (s, v) => s.lone_trees >= v },
-  { key: 'water', label: 'Water within', title: 'A river, lake or the sea', opts: () => near, fmt: dist, test: (s, v) => s.water_m <= v },
-  { key: 'parking', label: 'Parking within', title: 'A car park, from the take-off', opts: () => near, fmt: dist, test: (s, v) => s.parking_m <= v },
-  { key: 'quiet', label: 'People about', title: 'Few shops, cafés and busy paths nearby', opts: () => [0.15], fmt: () => 'Quiet only', test: (s, v, p) => (p.components?.busy ?? 1) < v },
+  { key: 'bando', label: 'Bando within', title: 'A ruin or derelict building that LiDAR says is still standing', opts: () => near, fmt: dist, chip: (v) => `Bando ≤ ${dist(v)}`, test: (s, v) => s.bando_m <= v },
+  { key: 'gaps', label: 'Gaps', title: 'Openings between trees or buildings to fly through', opts: () => upper(gapsOf), fmt: (v) => `${v}+`, chip: (v) => `${v}+ gaps`, test: (s, v) => gapsOf(s) >= v },
+  { key: 'lone', label: 'Lone trees', title: 'Single trees with room all round, to orbit and power loop', opts: () => upper((s) => s.lone_trees), fmt: (v) => `${v}+`, chip: (v) => `${v}+ lone trees`, test: (s, v) => s.lone_trees >= v },
+  { key: 'tall', label: 'Tallest thing', title: 'The tallest tree or building in the spot, to dive', opts: () => upper((s) => s.max_height_m, 1), fmt: (v) => `${v} m+`, chip: (v) => `${v} m+ tall`, test: (s, v) => s.max_height_m >= v },
+  { key: 'water', label: 'Water within', title: 'A river, lake or the sea', opts: () => near, fmt: dist, chip: (v) => `Water ≤ ${dist(v)}`, test: (s, v) => s.water_m <= v },
+  { key: 'parking', label: 'Parking within', title: 'A car park, from the take-off', opts: () => near, fmt: dist, chip: (v) => `Parking ≤ ${dist(v)}`, test: (s, v) => s.parking_m <= v },
+  { key: 'quiet', label: 'People about', title: 'Few shops, cafés and busy paths nearby', opts: () => [0.15], fmt: () => 'Quiet only', chip: () => 'Quiet', test: (s, v, p) => (p.components?.busy ?? 1) < v },
 ];
-const moreActive = () => MORE.filter((m) => state.more[m.key] != null).length;
+const moreOn = () => MORE.filter((m) => state.more[m.key] != null);
+const moreActive = () => moreOn().length;
 
 // ---------------------------------------------------------------- boot
 
@@ -680,9 +683,12 @@ function renderFilters() {
   const chip = (key, on, title, label, n) => el('button', { class: 'fchip', 'data-filter': key, 'aria-pressed': String(on), title },
     label, n != null ? el('span', { class: 'n' }, n) : null);
   const saved = state.spots[state.profile].features.filter(liked).length;
-  const more = chip('more', moreActive() > 0, 'Filter by bandos nearby, gaps, lone trees, water, parking, people about',
-    [el('span', { class: 'ico', html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v2H3zm14 0h4v2h-4zm-3-2h2v6h-2zM3 16h5v2H3zm9 0h9v2h-9zm-3-2h2v6H9z"/></svg>' }), 'Filters'],
-    moreActive() || null);
+  // shut, the chip says which filters are on; open, the panel does
+  const on = moreOn();
+  const more = chip('more', on.length > 0, 'Filter by bandos nearby, gaps, lone trees, height, water, parking, people about',
+    [el('span', { class: 'ico', html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v2H3zm14 0h4v2h-4zm-3-2h2v6h-2zM3 16h5v2H3zm9 0h9v2h-9zm-3-2h2v6H9z"/></svg>' }),
+      on.length && !state.moreOpen ? on.map((m) => m.chip(state.more[m.key])).join(' · ') : 'Filters'],
+    on.length && state.moreOpen ? on.length : null);
   more.setAttribute('aria-expanded', String(state.moreOpen));
   more.classList.add('more');
   box.replaceChildren(...[
