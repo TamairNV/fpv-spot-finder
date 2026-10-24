@@ -16,6 +16,7 @@ landowner's OK before taking off.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 
@@ -27,6 +28,10 @@ from rasterio.transform import from_origin
 from scipy import ndimage
 
 from .config import BNG, Region
+try:
+    import edt as _edt
+except ImportError:  # optional: falls back to scipy's (slower) transform
+    _edt = None
 from .sources import airspace, osm, overture
 
 log = logging.getLogger(__name__)
@@ -167,7 +172,20 @@ def burn(geoms, shape_, transform, value=1, dtype="uint8", all_touched=True) -> 
 def dist(mask: np.ndarray) -> np.ndarray:
     if not mask.any():
         return np.full(mask.shape, 1e6, dtype="float32")
+    if _edt is not None:  # same exact distances as scipy, ~10x faster and multi-threaded
+        return _edt.edt(~mask, parallel=os.cpu_count() or 4) * np.float32(RES)
     return (ndimage.distance_transform_edt(~mask) * RES).astype("float32")
+
+
+def burn_points(pts: gpd.GeoSeries, shape_, transform) -> np.ndarray:
+    """1 in every pixel holding a point: what burn() gives for points, without a Python loop over them."""
+    out = np.zeros(shape_, dtype="uint8")
+    if len(pts):
+        cols = np.floor((pts.x.values - transform.c) / transform.a).astype(int)
+        rows = np.floor((pts.y.values - transform.f) / transform.e).astype(int)
+        ok = (rows >= 0) & (rows < shape_[0]) & (cols >= 0) & (cols < shape_[1])
+        out[rows[ok], cols[ok]] = 1
+    return out
 
 
 def _has(tags: dict, keys: tuple[str, ...], needle: str) -> bool:
@@ -219,7 +237,7 @@ def build_legal(region: Region) -> LegalGrids:
     # Built-up areas that aren't mapped as residential: 4+ buildings within ~75 m.
     real_bld = bld[bld.geom_type.isin(["Polygon", "MultiPolygon"]) & (bld.geometry.area >= 15)]
     bld_mask = burn(real_bld.geometry, shape_, transform).astype(bool)
-    centroids = burn(real_bld.geometry.centroid, shape_, transform)
+    centroids = burn_points(real_bld.geometry.centroid, shape_, transform)
     k = 31  # 155 m window
     density = ndimage.uniform_filter(centroids.astype("float32"), size=k) * k * k
     builtup = (density >= 4) & ndimage.binary_dilation(bld_mask, iterations=4)
