@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:artifact": "VITE_TARGET=artifact vite build --outDir dist-artifact --emptyOutDir && node scripts/artifact.mjs"
+    "build:artifact": "VITE_TARGET=artifact vite build --outDir dist-artifact --emptyOutDir && node scripts/artifact.mjs",
+    "deploy": "sh scripts/deploy-pages.sh"
   },
   "dependencies": {
     "maplibre-gl": "^4.7.1",

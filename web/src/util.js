@@ -58,9 +58,9 @@ export function circlePolygon([lon, lat], radiusM, n = 48) {
 }
 
 export function scoreColour(s) {
-  // teal -> amber -> pink, same ramp as the heatmap
-  const t = Math.max(0, Math.min(1, (s - 55) / 45));
-  const stops = [[43, 179, 192], [255, 194, 61], [255, 61, 127]];
+  // amber -> orange -> magenta, the same ramp as the heatmap
+  const t = Math.max(0, Math.min(1, (s - 65) / 30));
+  const stops = [[255, 196, 0], [255, 112, 48], [214, 36, 110]];
   const seg = Math.min(t * 2, 1.999);
   const i = Math.floor(seg), f = seg - i;
   const c = stops[i].map((v, k) => Math.round(v * (1 - f) + stops[i + 1][k] * f));

@@ -19,6 +19,7 @@ rmSync(join(dir, 'index.html'));
 
 for (const f of ['sw.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png']) rmSync(join(dir, f), { force: true });
 for (const region of readdirSync(join(dir, 'data'))) {
+  if (!statSync(join(dir, 'data', region)).isDirectory()) continue;
   for (const f of readdirSync(join(dir, 'data', region))) {
     if (f.endsWith('.gpx')) rmSync(join(dir, 'data', region, f));
   }

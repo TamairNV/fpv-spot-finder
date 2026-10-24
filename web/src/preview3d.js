@@ -24,6 +24,7 @@ const DRONES = {
   cine85: { name: '85 mm', twr: 2.4, drag: 0.15, rate: 450, expo: 0.35, uptilt: 12, radius: 0.06 },
 };
 const G = 9.81;
+const COARSE = matchMedia('(pointer: coarse)');
 const AXES_KEY = 'fpvspots:gamepad-axes';
 
 // The first connected radio/gamepad, or null. Embedded pages can be refused the Gamepad API
@@ -68,8 +69,30 @@ export class Preview3D {
     this.wrap = el('div', { class: 'p3d-wrap' });
     this.canvas = el('canvas', { class: 'p3d' });
     this.tag = el('div', { class: 'p3d-tag' }, 'Loading 3D…');
-    this.wrap.append(this.canvas, this.tag);
+    this.tools = el('div', { class: 'p3d-tools' },
+      el('button', { class: 'p3d-pill p3d-open', onclick: () => this.toggleFull(true) }, '⤢ Explore in 3D'));
+    const close = el('button', { class: 'p3d-close', onclick: () => this.toggleFull(false) }, '✕ Close');
+    this.stage = el('div', { class: 'p3d-stage' }, this.canvas, this.tag, this.tools);
+    // On touch screens the small view is a picture: dragging it would fight the page scroll,
+    // so a tap opens the full-screen view where every gesture moves the camera.
+    if (COARSE.matches) this.stage.append(el('button', { class: 'p3d-tap', 'aria-label': 'Explore in 3D', onclick: () => this.toggleFull(true) }));
+    this.wrap.append(this.stage, close);
     this.host.append(this.wrap);
+    this.onEsc = (e) => {
+      if (e.key === 'Escape' && !this.fly && this.wrap.classList.contains('full')) this.toggleFull(false);
+    };
+    window.addEventListener('keydown', this.onEsc);
+  }
+
+  // Small view: drag to orbit with a mouse, no wheel zoom (the wheel scrolls the card), no touch.
+  // Full screen: everything.
+  applyMode() {
+    const full = this.wrap.classList.contains('full');
+    if (this.controls) {
+      this.controls.enableZoom = full;
+      this.controls.enabled = !this.fly && (full || !COARSE.matches);
+    }
+    this.canvas.style.touchAction = full ? 'none' : 'pan-y';
   }
 
   async load(url) {
@@ -117,6 +140,7 @@ export class Preview3D {
     this.controls.maxDistance = 900;
     this.controls.enableDamping = true;
     this.controls.addEventListener('change', () => this.render());
+    this.applyMode();
     this.sun = new THREE.DirectionalLight(0xffffff, 2.6);
     this.sun.castShadow = true;
     const sc = this.sun.shadow.camera;
@@ -350,28 +374,41 @@ export class Preview3D {
     const span = Math.round((t.sunset - this.dayStart) / 60000 + 45);
     this.slider = el('input', { type: 'range', min: 0, max: span, step: 5, 'aria-label': 'Time of day' });
     this.slider.addEventListener('input', () => this.setTime(new Date(this.dayStart.getTime() + Number(this.slider.value) * 60000)));
-    this.timeLabel = el('span', { style: 'min-width:120px' });
+    this.timeLabel = el('span', { class: 'p3d-time' });
     const jump = (label, d) => el('button', { onclick: () => this.setTime(d) }, label);
     const mid = (a, b) => new Date((a.getTime() + b.getTime()) / 2);
-    const rowSun = el('div', { class: 'p3d-row' }, '☀', this.slider, this.timeLabel);
-    const rowJump = el('div', { class: 'p3d-row' },
+    const rowSun = el('div', { class: 'p3d-row' }, el('span', { 'aria-hidden': 'true' }, '☀'), this.slider, this.timeLabel);
+    // flying needs a keyboard or a radio, so no fly button on phones
+    if (!matchMedia('(hover: none)').matches) {
+      this.flyBtn = el('button', { class: 'p3d-pill', onclick: () => (this.fly ? this.stopFly() : this.startFly()) }, '✈ Fly it');
+      this.tools.prepend(this.flyBtn);
+    }
+    const rowJump = el('div', { class: 'p3d-row p3d-chips' },
       jump('Golden AM', mid(t.sunrise, t.goldenHourEnd)), jump('Midday', t.solarNoon),
-      jump('Golden PM', mid(t.goldenHour, t.sunset)), jump('Now', new Date()),
-      el('span', { style: 'flex:1' }),
-      (this.flyBtn = el('button', { onclick: () => (this.fly ? this.stopFly() : this.startFly()) }, 'Fly it')),
-      el('button', { onclick: () => this.toggleFull(), title: 'Full screen' }, '⤢'));
-    const legend = el('div', { class: 'p3d-row', style: 'justify-content:space-between' },
+      jump('Golden PM', mid(t.goldenHour, t.sunset)), jump('Now', new Date()));
+    const legend = el('div', { class: 'p3d-legend' },
       el('span', {}, el('b', { style: 'color:#ff3d7f' }, '◯'), ' gaps'),
-      el('span', {}, el('b', { style: 'color:#ffc23d' }, '◯'), ' lone trees'),
-      el('span', {}, el('b', { style: 'color:#3ddc84' }, '●'), ' take-off'),
+      el('span', {}, el('b', { style: 'color:#ffc400' }, '◯'), ' lone trees'),
+      el('span', {}, el('b', { style: 'color:#22c55e' }, '●'), ' take-off'),
       el('span', {}, '- - spot area'));
-    this.ui = el('div', { class: 'p3d-ui' }, legend, rowSun, rowJump);
+    this.ui = el('div', { class: 'p3d-ui' }, rowSun, rowJump, legend);
     this.wrap.append(this.ui);
   }
 
-  toggleFull() {
-    const on = this.wrap.classList.toggle('full');
+  // Full screen moves the view to <body>, so no scrolling or transformed parent can clip it.
+  toggleFull(want) {
+    const on = want ?? !this.wrap.classList.contains('full');
+    if (on === this.wrap.classList.contains('full')) return;
+    if (on) {
+      this.home = { parent: this.wrap.parentNode, next: this.wrap.nextSibling };
+      document.body.append(this.wrap);
+    } else if (this.home?.parent?.isConnected) {
+      this.home.parent.insertBefore(this.wrap, this.home.next);
+    }
+    this.wrap.classList.toggle('full', on);
     document.body.classList.toggle('p3d-full', on);
+    if (!on && this.fly) this.stopFly();
+    this.applyMode();
     this.resize();
   }
 
@@ -390,9 +427,9 @@ export class Preview3D {
   startFly() {
     const spec = DRONES[this.profile] || DRONES.freestyle5;
     this.controls.enabled = false;
-    this.flyBtn.classList.add('on');
-    this.flyBtn.textContent = 'Stop flying';
-    if (!this.wrap.classList.contains('full')) this.toggleFull();
+    this.flyBtn?.classList.add('on');
+    if (this.flyBtn) this.flyBtn.textContent = 'Stop flying';
+    if (!this.wrap.classList.contains('full')) this.toggleFull(true);
     this.camera.fov = 85;
     this.camera.near = 0.05;
     this.camera.updateProjectionMatrix();
@@ -432,13 +469,13 @@ export class Preview3D {
     window.removeEventListener('keyup', this.onKey);
     this.hud?.remove();
     this.reticle?.remove();
-    this.flyBtn.classList.remove('on');
-    this.flyBtn.textContent = 'Fly it';
+    this.flyBtn?.classList.remove('on');
+    if (this.flyBtn) this.flyBtn.textContent = '✈ Fly it';
     this.camera.fov = 45;
     this.camera.near = 0.1;
     this.camera.updateProjectionMatrix();
     this.camera.position.set(170, 190, 230);
-    this.controls.enabled = true;
+    this.applyMode();
     this.controls.target.set(0, this.groundAt(0, 0), 0);
     this.camera.lookAt(this.controls.target);
     this.gates.forEach((g) => { g.hit = false; g.ring.material.color.set(0xff3d7f); });
@@ -606,6 +643,8 @@ export class Preview3D {
   dispose() {
     this.disposed = true;
     this.stopFly();
+    window.removeEventListener('keydown', this.onEsc);
+    document.body.classList.remove('p3d-full');
     cancelAnimationFrame(this.raf);
     this.resizeObs?.disconnect();
     this.controls?.dispose();

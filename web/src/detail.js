@@ -1,7 +1,7 @@
-// The spot card: why it scored, what's there, can you fly it, the light, the wind, and a 3D look.
-import { el, metres, compass, SANDBOXED } from './util.js';
+// The spot card: a sticky header (back, name, score), then can you fly it, what's there, a 3D look,
+// the wind and the light, and the score breakdown.
+import { el, metres, compass, scoreColour, SANDBOXED } from './util.js';
 import { sunBox, weatherBox } from './conditions.js';
-import { Preview3D } from './preview3d.js';
 
 const NICE = {
   gaps: 'Gaps', lone: 'Lone trees', edges: 'Tree lines / edges', space: 'Open space', mix: 'Obstacle mix',
@@ -11,23 +11,41 @@ const NICE = {
   permission: 'Owner permission (minus)',
 };
 
-function statChips(s, profile) {
-  const chips = [];
-  const add = (v, label) => chips.push(el('span', { class: 'chip' }, el('b', {}, v), ` ${label}`));
-  if (profile === 'cine85') add(s.gaps_whoop, s.gaps_whoop === 1 ? 'whoop-size gap' : 'whoop-size gaps');
+const BACK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';
+
+// How the spot sits with the rules, as a short badge: the 5" needs Open A3, the whoop is A1 anywhere outside FRZs.
+export function legalBadge(p, a3, big = false) {
+  const L = p.legal;
+  if (!L) return null;
+  const cls = big ? ' big' : '';
+  if (!a3) {
+    return (L.flags || []).length
+      ? el('span', { class: `badge part${cls}`, title: L.flags.join(' · ') }, 'A1 · check owner')
+      : el('span', { class: `badge ok${cls}`, title: L.summary }, 'A1 ok');
+  }
+  const pct = L.a3_clear_pct ?? 0;
+  if (pct >= 90) return el('span', { class: `badge ok${cls}`, title: L.summary }, big ? 'A3-clear for the 5"' : 'A3 clear');
+  if (pct >= 30) return el('span', { class: `badge part${cls}`, title: L.summary }, big ? `Partly A3-clear (${pct}%)` : `A3 ${pct}%`);
+  return el('span', { class: `badge no${cls}`, title: L.summary }, big ? 'Not A3: sub-250 g only' : 'Sub-250');
+}
+
+function tiles(s, a3) {
+  const out = [];
+  const add = (v, label) => out.push(el('div', { class: 'tile' }, el('b', {}, v), el('span', {}, label)));
+  if (!a3) add(s.gaps_whoop, s.gaps_whoop === 1 ? 'whoop gap' : 'whoop gaps');
   else add(s.gaps, s.gaps === 1 ? 'gap' : 'gaps');
   add(s.lone_trees, s.lone_trees === 1 ? 'lone tree' : 'lone trees');
   add(metres(s.edge_m), 'of edges');
   add(`${s.open_pct}%`, 'open');
   add(`${s.tree_pct}%`, 'trees');
-  if (s.bld_pct) add(`${s.bld_pct}%`, 'buildings');
   add(`${Math.round(s.max_height_m)} m`, 'tallest');
+  if (s.bld_pct) add(`${s.bld_pct}%`, 'buildings');
   if (s.relief_m >= 8) add(`${Math.round(s.relief_m)} m`, 'of drop');
   if (s.water_m < 300) add(metres(s.water_m), 'to water');
   if (s.bando_m < 400) add(metres(s.bando_m), 'to a bando');
   if (s.bridge_m < 400) add(metres(s.bridge_m), 'to a bridge');
   if (s.hazard_m < 150) add(metres(s.hazard_m), 'to a mast/crane');
-  return el('div', { class: 'chips' }, chips);
+  return el('div', { class: 'tiles' }, out);
 }
 
 function compBars(comps, meta, profile) {
@@ -43,19 +61,28 @@ function compBars(comps, meta, profile) {
     ]));
 }
 
-function legalBox(p, profile, meta) {
+function whyList(p) {
+  // Newer pipelines explain the score in points; older ones just list what stands out.
+  if (Array.isArray(p.why) && p.why.length) {
+    return el('ul', { class: 'why' }, p.why.slice(0, 6).map((w) => (typeof w === 'string'
+      ? el('li', {}, w, el('span'))
+      : el('li', {}, w.text, el('span', { class: 'pts' }, w.pts != null ? `${w.pts > 0 ? '+' : ''}${Math.round(w.pts)}` : '')))));
+  }
+  if (p.drivers?.length) return el('ul', { class: 'why' }, p.drivers.map((d) => el('li', {}, d, el('span'))));
+  return null;
+}
+
+function legalBox(p, a3, cat) {
   const L = p.legal;
-  const cat = meta.profiles[profile].category;
   const flags = L.flags || [];
-  const status = profile === 'freestyle5'
-    ? (L.a3_clear_pct >= 90 ? 'ok' : 'warn')
-    : 'ok';
+  const pct = L.a3_clear_pct ?? 0;
+  const tone = a3 ? (pct >= 90 ? 'ok' : pct >= 30 ? 'warn' : 'bad') : 'ok';
   return el('div', { class: 'box' },
-    el('h4', {}, `Can you fly it? (${cat})`),
-    el('div', { class: status }, L.summary),
+    el('h4', {}, `Can you fly it? · ${cat}`),
+    el('div', { class: 'legal-status' }, el('span', { class: tone }, tone === 'ok' ? '✓' : '!'), el('span', {}, L.summary)),
     flags.length ? el('ul', { class: 'legal-flags' }, flags.map((f) => el('li', {}, f))) : null,
-    el('div', { class: 'muted', style: 'margin-top:6px;font-size:12.5px' },
-      'In goggles you need a spotter beside you who can see the quad. Rules and land owners change: check the ',
+    el('p', { class: 'muted small', style: 'margin-top:8px' },
+      'This is a place worth a look, not a permission. In goggles you need a spotter. Check the ',
       el('a', { href: 'https://dronesafetymap.co.uk/', target: '_blank', rel: 'noopener' }, 'drone safety map'),
       ' and the ', el('a', { href: 'https://register-drones.caa.co.uk/drone-code', target: '_blank', rel: 'noopener' }, 'Drone Code'),
       ' before you go.'));
@@ -68,97 +95,125 @@ function takeoffBox(p) {
   const where = d < 30 ? 'right by the pin' : `${metres(d)} ${compass(t.dx, t.dy)} of the pin`;
   return el('div', { class: 'box' },
     el('h4', {}, 'Getting there'),
-    el('div', {}, `Suggested take-off ${where} (green on the map).`),
-    el('div', { class: 'muted' }, `Nearest path ${metres(t.path_m)} · nearest car park ${metres(t.parking_m)}.`),
-    el('div', { class: 'links', style: 'margin-top:8px' },
-      el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions')));
+    el('p', {}, `Suggested take-off ${where} (the green dot).`),
+    el('p', { class: 'muted small' }, `Nearest path ${metres(t.path_m)} · nearest car park ${metres(t.parking_m)}.`),
+    el('div', { class: 'links' },
+      el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
 }
 
-export function renderDetail(host, { spot, meta, profile, ratings, base, onRate, onLike, isSeed = false }) {
+export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, onRate, onLike, onBack }) {
   const p = spot.properties;
   const [lon, lat] = spot.geometry.coordinates;
-  const rating = ratings.get(profile, p.id);
+  let rating = ratings.get(profile, p.id);
+  const { label, category } = meta.profiles[profile];
+  const a3 = /A3/.test(category || '');
+
+  // ---- header
+  const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the list', title: 'Back to the list', onclick: onBack });
+  back.innerHTML = BACK_ICON;
+  const score = p.score ?? null;
+  head.replaceChildren(back,
+    el('div', { class: 'sh-main' },
+      el('div', { class: 'sh-title', title: p.title }, p.title),
+      el('div', { class: 'sh-sub' },
+        isSeed ? 'Your spot' : `#${p.rank}${total ? ` of ${total}` : ''} for the ${label}`,
+        p.locality && !isSeed ? ` · ${p.locality}` : '', p.gridref ? ` · ${p.gridref}` : '')),
+    el('div', { class: 'sh-score', style: `--c:${scoreColour(score ?? 0)};--p:${score ?? 0}`, title: score != null ? `Score ${score} out of 100` : '' },
+      el('span', {}, score ?? '–')));
+
+  // ---- body
   const kids = [];
-  kids.push(el('div', { class: 'd-title' }, p.title));
-  kids.push(el('div', { class: 'd-sub' },
-    isSeed ? 'Your spot · ' : `#${p.rank} for ${meta.profiles[profile].label} · `,
-    p.locality ? `${p.locality} · ` : '', el('code', {}, p.gridref || '')));
-
-  kids.push(el('div', { class: 'scorebar' },
-    el('div', { class: 'big-score' }, p.score ?? '–'),
-    el('div', { class: 'score-split' },
-      p.rules != null ? `Rules ${p.rules} · ` : '',
-      p.taste != null ? `like your spots ${p.taste}` : 'no seed spots for this drone yet',
-      el('br'), 'out of 100, compared with everywhere else in the region')));
-
-  if (p.drivers?.length) {
-    kids.push(el('div', { class: 'muted', style: 'font-size:12.5px' }, 'Why it stands out'));
-    kids.push(el('ul', { class: 'why' }, p.drivers.map((d) => el('li', {}, d))));
-  }
-  if (p.stats) kids.push(statChips(p.stats, profile));
+  const badges = [legalBadge(p, a3, true)];
+  if (p.rules != null) badges.push(el('span', { class: 'badge plain big', title: 'How it scores on the rules alone' }, `Rules ${p.rules}`));
+  if (p.taste != null) badges.push(el('span', { class: 'badge plain big', title: 'How much it looks like your favourite spots' }, `Like your spots ${p.taste}`));
+  kids.push(el('div', { class: 'd-badges' }, badges));
 
   if (!isSeed) {
-    kids.push(el('div', { class: 'rate' },
-      el('button', { class: `up${rating > 0 ? ' on' : ''}`, onclick: () => onRate(rating > 0 ? 0 : 1) }, '👍 Good spot'),
-      el('button', { class: `down${rating < 0 ? ' on' : ''}`, onclick: () => onRate(rating < 0 ? 0 : -1) }, '👎 Not for me'),
-      el('button', { class: 'like', onclick: onLike }, 'More like this')));
-    const url = `${location.origin}${location.pathname}${location.search}#${profile}/${p.id}`;
-    const share = el('a', {
-      href: url,
-      onclick: async (e) => {
-        e.preventDefault();
+    const url = `${location.origin}${location.pathname}${location.search}#${profile}.${p.id}`;
+    const share = el('button', {
+      class: 'act',
+      onclick: async () => {
         try {
           if (navigator.share) await navigator.share({ title: `${p.title} (FPV spot)`, url });
           else {
             await navigator.clipboard.writeText(url);
-            share.textContent = 'Link copied';
+            share.lastChild.textContent = 'Copied';
           }
         } catch { /* share sheet closed */ }
       },
-    }, 'Share this spot');
-    if (!SANDBOXED) kids.push(el('div', { style: 'font-size:13px;margin:2px 0 4px' }, share));
+    }, el('span', { class: 'ico' }, '↗'), el('span', {}, 'Share'));
+    const dest = p.takeoff ? `${p.takeoff.lat},${p.takeoff.lon}` : `${lat},${lon}`;
+    const rate = (v) => {
+      rating = rating === v ? 0 : v;
+      up.classList.toggle('on', rating > 0);
+      down.classList.toggle('on', rating < 0);
+      up.setAttribute('aria-pressed', String(rating > 0));
+      down.setAttribute('aria-pressed', String(rating < 0));
+      onRate(rating);
+    };
+    const up = el('button', { class: `act up${rating > 0 ? ' on' : ''}`, 'aria-pressed': String(rating > 0), onclick: () => rate(1) },
+      el('span', { class: 'ico' }, '👍'), el('span', {}, 'Good'));
+    const down = el('button', { class: `act down${rating < 0 ? ' on' : ''}`, 'aria-pressed': String(rating < 0), onclick: () => rate(-1) },
+      el('span', { class: 'ico' }, '👎'), el('span', {}, 'Not for me'));
+    kids.push(el('div', { class: 'actions' }, up, down,
+      el('button', { class: 'act', onclick: onLike, title: 'List the spots most like this one' },
+        el('span', { class: 'ico' }, '≈'), el('span', {}, 'Similar')),
+      el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
+        el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
+      SANDBOXED ? null : share));
   }
 
   const p3dHost = el('div');
   kids.push(p3dHost);
-  if (p.legal) kids.push(legalBox(p, profile, meta));
+
+  const why = whyList(p);
+  if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
+  if (p.stats) kids.push(tiles(p.stats, a3));
+
+  if (p.legal) kids.push(legalBox(p, a3, category));
   kids.push(takeoffBox(p));
   kids.push(weatherBox(lon, lat, profile));
   kids.push(sunBox(lon, lat));
 
   if (p.components) {
-    kids.push(el('div', { class: 'box' }, el('h4', {}, 'Score breakdown'), compBars(p.components, meta, profile)));
+    kids.push(el('details', { class: 'box' }, el('summary', {}, 'Score breakdown'), compBars(p.components, meta, profile)));
   }
   if (p.links) {
     kids.push(el('div', { class: 'box' },
       el('h4', {}, 'See it for real'),
-      el('div', { class: 'muted', style: 'font-size:12.5px;margin-bottom:6px' },
-        'Geograph has people\'s ground-level photos of this 1 km square: often the quickest way to judge a spot.'),
+      el('p', { class: 'muted small' }, 'Geograph has ground-level photos of this 1 km square: often the quickest way to judge a spot.'),
       el('div', { class: 'links' },
         el('a', { href: p.links.geograph, target: '_blank', rel: 'noopener' }, 'Geograph photos'),
         el('a', { href: p.links.streetview, target: '_blank', rel: 'noopener' }, 'Street View'),
         el('a', { href: p.links.satellite, target: '_blank', rel: 'noopener' }, 'Satellite'),
         el('a', { href: p.links.osmaps, target: '_blank', rel: 'noopener' }, 'OS map'))));
   }
-  const src = p.stats?.lidar_pct >= 50 ? 'EA LiDAR (1 m)' : 'a 1 m tree-height model + building heights (LiDAR not loaded here yet)';
-  kids.push(el('div', { class: 'muted', style: 'font-size:12px' }, `Heights from ${src}.`));
+  const src = p.stats?.lidar_pct >= 50 ? 'EA LiDAR (1 m)' : 'a 1 m tree-height model and building heights (no LiDAR here yet)';
+  kids.push(el('div', { class: 'd-foot' }, `Heights from ${src}.`));
 
-  host.replaceChildren(...kids.filter(Boolean));
+  body.replaceChildren(...kids.filter(Boolean));
 
+  // The 3D view (and three.js with it) loads only when a spot is opened.
   let preview = null;
+  let gone = false;
   if (p.preview) {
-    preview = new Preview3D(p3dHost, {
-      spot: p, preview: p.preview, center: p.preview.center, profile,
-      radiusM: meta.profiles[profile].radius_m,
-    });
-    preview.load(`${base}/${p.preview.file}`).catch((e) => {
-      p3dHost.replaceChildren(el('div', { class: 'muted' }, `3D view unavailable (${e.message || e}).`));
+    p3dHost.append(el('div', { class: 'p3d-wrap' }, el('div', { class: 'p3d' }), el('div', { class: 'p3d-tag' }, 'Loading 3D…')));
+    import('./preview3d.js').then(({ Preview3D }) => {
+      if (gone) return;
+      p3dHost.replaceChildren();
+      preview = new Preview3D(p3dHost, {
+        spot: p, preview: p.preview, center: p.preview.center, profile,
+        radiusM: meta.profiles[profile].radius_m,
+      });
+      return preview.load(`${base}/${p.preview.file}`);
+    }).catch((e) => {
+      p3dHost.replaceChildren(el('div', { class: 'muted small', style: 'margin:0 0 12px' }, `3D view unavailable (${e.message || e}).`));
     });
   } else {
-    p3dHost.append(el('div', { class: 'muted', style: 'font-size:12.5px;margin:10px 0' },
-      '3D view is made for the top spots only. Re-run the pipeline with more --previews to get one here.'));
+    p3dHost.append(el('div', { class: 'muted small', style: 'margin:0 0 12px' },
+      'The 3D view is made for the top spots only.'));
   }
-  return { dispose: () => preview?.dispose() };
+  return { dispose: () => { gone = true; preview?.dispose(); } };
 }
 
 export function nice(k) {

@@ -164,9 +164,9 @@ def write_legal_layers(region: Region) -> list:
 
     def overlay(nogo_a3: bool) -> np.ndarray:
         rgba = np.zeros(code.shape + (4,), dtype="uint8")
-        if nogo_a3:
-            rgba[code >= 10] = [245, 158, 11, 70]
-        rgba[np.isin(code, [CODE_FRZ, CODE_RESTRICTED])] = [220, 38, 38, 120]
+        if nogo_a3:  # greyed out: not A3-clear, so sub-250 g only
+            rgba[code >= 10] = [71, 85, 105, 90]
+        rgba[np.isin(code, [CODE_FRZ, CODE_RESTRICTED])] = [220, 38, 38, 110]
         return rgba
 
     Image.fromarray(overlay(True), "RGBA").save(out / "legal_freestyle5.png", optimize=True)
@@ -291,14 +291,17 @@ def _heat_png(region: Region, final: np.ndarray, eligible: np.ndarray, path: Pat
         h, w = s.shape
         s = s[: h - h % block, : w - w % block].reshape(h // block, block, w // block, block).max(axis=(1, 3))
     s, corners = to_mercator(region, s, CELL * block, CELL * block / 2, Resampling.nearest)
-    t = np.clip((s - 0.7) / 0.3, 0, 1)  # top 30% of the region gets colour
-    # dark teal -> amber -> hot pink, transparent below the cut
-    stops = np.array([[20, 120, 140], [250, 190, 40], [240, 40, 120]], dtype=float)
+    # only the best 12% of the land gets colour; the zoomed-out layer keeps the max of each block,
+    # so it cuts higher to colour about as much ground
+    cut = 0.88 if block == 1 else 0.95
+    t = np.clip((s - cut) / (1 - cut), 0, 1)
+    # amber -> orange -> magenta, fading in from transparent so the map stays readable
+    stops = np.array([[255, 196, 0], [255, 112, 48], [214, 36, 110]], dtype=float)
     seg = np.clip(t * 2, 0, 2)
     i = np.minimum(seg.astype(int), 1)
     f = (seg - i)[..., None]
     rgb = stops[i] * (1 - f) + stops[i + 1] * f
-    alpha = np.where(t > 0, 60 + 170 * t, 0)
+    alpha = np.where(t > 0, 30 + 190 * t ** 1.2, 0)
     rgba = np.concatenate([rgb, alpha[..., None]], axis=-1).astype("uint8")
     Image.fromarray(rgba, "RGBA").save(path, optimize=True)
     return corners
