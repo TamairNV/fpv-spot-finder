@@ -153,9 +153,10 @@ def foreign_ratings(region: Region) -> dict[str, tuple[list, list]]:
 
 def score_scale(region: Region, key: str, mode: str, own_top: float) -> float:
     """The rule score that reads as 100. Every region uses the reference region's (the first in
-    regions.toml) once it has one, so a 90 in Durham means the same as a 90 in Newcastle."""
+    regions.toml) once it has one, so a 90 in Durham means the same as a 90 in Newcastle.
+    Kept in config/score_scale.json so a fresh clone scores other regions on the same scale."""
     ref = next(iter(load_regions().values()))
-    path = ref.out_dir / "score_scale.json"
+    path = CONFIG_DIR / "score_scale.json"
     scale = json.loads(path.read_text()) if path.exists() else {}
     if region.key == ref.key:
         scale.setdefault(mode, {})[key] = own_top
