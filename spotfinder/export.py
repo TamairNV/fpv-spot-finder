@@ -501,12 +501,17 @@ def _grid_name(r: Region, cx: float, cy: float) -> str:
 
 
 def write_regions_index() -> list[dict]:
-    """web/public/data/regions.json: every region that has web data, for the app's region picker."""
-    from .config import load_regions
+    """web/public/data/regions.json: every region that has web data, for the app's region picker, or only
+    the ones config/app.toml lists."""
+    import tomllib
 
+    from .config import CONFIG_DIR, load_regions
+
+    app = CONFIG_DIR / "app.toml"
+    shown = tomllib.loads(app.read_text()).get("regions") if app.exists() else None
     out = []
     for key, r in load_regions().items():
-        if not (WEB_DATA_DIR / key / "meta.json").exists():
+        if not (WEB_DATA_DIR / key / "meta.json").exists() or (shown and key not in shown):
             continue
         w, s, e, n = r.lonlat_bbox()
         cx, cy = bng_to_lonlat((r.bbox[0] + r.bbox[2]) / 2, (r.bbox[1] + r.bbox[3]) / 2)

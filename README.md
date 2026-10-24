@@ -156,7 +156,8 @@ seeds; places like your thumbs-down spots get pulled down.
 
   `--region` also takes a comma list (`--region durham,leeds`) or `all`. Each `score` rewrites
   `web/public/data/regions.json`, the list the app's region picker reads; `python -m spotfinder regions`
-  rewrites just that. Open a region in the app with `?region=<key>`.
+  rewrites just that. `config/app.toml` can narrow it (for now it's Newcastle only: the other regions
+  were scored with the old bando and line rules). Open a region in the app with `?region=<key>`.
 - Your spots: add them to `config/seeds.toml` with a profile; the ranking looks for places with a
   similar mix of features. A seed doesn't need to be legal for that drone (the Nuns Moor seed isn't,
   for the 5"); it only describes style. Each seed is matched on its own, so a woodland seed and a
