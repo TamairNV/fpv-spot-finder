@@ -375,9 +375,10 @@ function addOverlays() {
   map.addLayer({
     id: 'spots-dots', type: 'circle', source: 'spots',
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 14, 6.5],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 2.2, 12, 4, 15, 6.5],
       'circle-color': ['interpolate', ['linear'], ['get', 'score'], 65, '#ffc400', 80, '#ff7030', 95, '#d6246e'],
-      'circle-stroke-color': '#14191d', 'circle-stroke-width': 1.2,
+      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0.75, 12, 1],
+      'circle-stroke-color': '#14191d', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 12, 1.2],
     },
   });
   map.on('mouseenter', 'spots-dots', () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
@@ -651,12 +652,12 @@ function openSeed(s) {
 
 // ---------------------------------------------------------------- list <-> spot
 
-function select(id, fromList) {
+function select(id, fromList, push = true) {
   const f = feature(id);
   if (!f) return;
   const wasOpen = !$('#view-spot').hidden;
   state.selected = id;
-  setHash(`${state.profile}.${id}`, !wasOpen);
+  setHash(`${state.profile}.${id}`, push && !wasOpen);
   markSelected(id);
   showSelection(f);
   showSpot(f, false);
@@ -747,7 +748,7 @@ function openFromHash() {
   const [profile, id] = location.hash.slice(1).split(/[./]/);
   if (state.spots[profile]) {
     if (profile !== state.profile) setProfile(profile);
-    if (id) select(id, true);
+    if (id) select(id, true, false);
   }
 }
 
@@ -861,6 +862,17 @@ function wireUI() {
   $('#spot-list').addEventListener('click', (e) => {
     const li = e.target.closest('.row-item');
     if (li) select(li.dataset.id, true);
+  });
+  // hovering a row lights up its pin on the map
+  $('#spot-list').addEventListener('mouseover', (e) => {
+    const id = e.target.closest('.row-item')?.dataset.id;
+    if (id === state.hover) return;
+    state.hover = id;
+    state.pins.forEach((m) => m.getElement().classList.toggle('hover', m.getElement().dataset.id === id));
+  });
+  $('#spot-list').addEventListener('mouseleave', () => {
+    state.hover = null;
+    state.pins.forEach((m) => m.getElement().classList.remove('hover'));
   });
   const pop = $('#layers-pop');
   $('#btn-layers').addEventListener('click', (e) => {
