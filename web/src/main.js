@@ -1009,6 +1009,10 @@ if ('serviceWorker' in navigator && import.meta.env.PROD && !SANDBOXED) {
   // Once it's running, have it fetch this region's map data so the app works offline in the field.
   navigator.serviceWorker.register('./sw.js')
     .then(() => navigator.serviceWorker.ready)
-    .then((reg) => reg.active?.postMessage({ precache: `${BASE}/offline.json` }))
+    .then((reg) => reg.active?.postMessage({
+      precache: `${BASE}/offline.json`,
+      // this first visit loaded the app before the worker was running, so hand it what was loaded
+      urls: performance.getEntriesByType('resource').map((r) => r.name).filter((u) => u.includes('/assets/')),
+    }))
     .catch(() => {});
 }

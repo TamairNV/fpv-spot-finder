@@ -18,7 +18,11 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('message', (e) => {
   const list = e.data?.precache;
   if (typeof list !== 'string') return;
-  e.waitUntil(precache(new URL(list, self.location.href)));
+  const urls = (e.data.urls || []).filter((u) => new URL(u).origin === self.location.origin);
+  e.waitUntil(Promise.all([
+    caches.open(CACHE).then((c) => Promise.all(urls.map((u) => c.match(u).then((hit) => hit || c.add(u).catch(() => {}))))),
+    precache(new URL(list, self.location.href)),
+  ]));
 });
 
 async function precache(listUrl) {
