@@ -20,6 +20,11 @@ from tqdm import tqdm
 from .config import Region
 from .heights import HeightReader, Tile
 
+try:
+    import edt as _edt_mod
+except ImportError:
+    _edt_mod = None
+
 log = logging.getLogger(__name__)
 
 CELL = 50        # metres per output cell
@@ -33,12 +38,15 @@ GAP_MIN_W = 2.0
 GAP_MAX_W = 12.0
 GAP_MIN_FLANK = 5.0
 LONE_RING = 10.0
+THROUGH_R = 8     # metres out from a gap's middle that must be open on both sides to fly through it
+TREELINE_MIN_LEN = 40.0  # a tree belt this long and...
+TREELINE_MAX_W = 15.0    # ...this narrow is a tree line / hedgerow to skim
 
 CELL_FEATURES = [
     "tall_frac", "open_frac", "tree_frac", "bld_frac", "water_frac", "road_frac", "path_frac", "lowobs_frac",
     "h_p90", "tree_h_p90", "bld_h_mean", "bld_h_max", "bld_h_std",
     "edge_tree_m", "edge_bld_m", "gaps", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max",
-    "under_frac", "lidar_frac",
+    "under_frac", "lidar_frac", "gaps_all", "treeline_m", "edge_w_m",
 ]
 
 _reader: HeightReader | None = None
@@ -54,6 +62,39 @@ def _blocks(a: np.ndarray, n: int) -> np.ndarray:
     """(H, W) -> (H/n, W/n, n*n) so we can reduce per cell."""
     h, w = a.shape
     return a.reshape(h // n, n, w // n, n).transpose(0, 2, 1, 3).reshape(h // n, w // n, n * n)
+
+
+def _edt(mask: np.ndarray) -> np.ndarray:
+    """Distance to the nearest False pixel; the edt package is the same transform, several times faster."""
+    if _edt_mod is not None:
+        return _edt_mod.edt(mask, black_border=False, parallel=1)
+    return ndimage.distance_transform_edt(mask)
+
+
+class _Labels:
+    """Per-label count / max / mean / centre from ndimage.label output with bincount, which beats
+    ndimage.sum/maximum/center_of_mass several times over (they sort or loop per call)."""
+
+    def __init__(self, lab: np.ndarray, n: int):
+        self.rows, self.cols = np.nonzero(lab)
+        self.lab = lab[self.rows, self.cols]
+        self.n = n
+        self.count = np.bincount(self.lab, minlength=n + 1)[1:].astype("float64")
+
+    def _vals(self, a):
+        return a[self.rows, self.cols]
+
+    def max(self, a: np.ndarray) -> np.ndarray:
+        out = np.full(self.n + 1, -np.inf)
+        np.maximum.at(out, self.lab, self._vals(a))
+        return out[1:]
+
+    def mean(self, a: np.ndarray) -> np.ndarray:
+        return np.bincount(self.lab, weights=self._vals(a), minlength=self.n + 1)[1:] / self.count
+
+    def centre(self) -> tuple[np.ndarray, np.ndarray]:
+        w = lambda v: np.bincount(self.lab, weights=v, minlength=self.n + 1)[1:] / self.count
+        return w(self.rows), w(self.cols)
 
 
 @dataclass
@@ -78,36 +119,38 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
 
     # --- Gaps: morphological closing of the tall mask, minus the tall mask itself.
     dil = dt_tall <= GAP_FILL_R
-    closed = ndimage.distance_transform_edt(dil) > GAP_FILL_R
+    closed = _edt(dil) > GAP_FILL_R
     gap = closed & ~tall & (ohm < 2.5) & ~t.water & (dt_tall >= GAP_MIN_W / 2)
     glab, gn = ndimage.label(gap, structure=np.ones((3, 3)))
     gaps = []
     if gn:
-        idx = np.arange(1, gn + 1)
-        area = ndimage.sum(np.ones_like(ohm), glab, idx)
-        width = 2 * ndimage.maximum(dt_tall, glab, idx)
+        g = _Labels(glab, gn)
+        area = g.count
+        width = 2 * g.max(dt_tall)
         flank_src = ndimage.grey_dilation(np.where(tall, ohm, 0), size=(7, 7))
-        flank = ndimage.mean(flank_src, glab, idx)
-        com = ndimage.center_of_mass(gap, glab, idx)
-        for a, w, f, (r, c) in zip(area, width, flank, com):
+        flank = g.mean(flank_src)
+        tree_frac = g.mean(ndimage.grey_dilation((trees >= TALL_M).astype("float32"), size=(7, 7)))
+        com = list(zip(*g.centre()))
+        through = _through(open_ | (ohm < OPEN_M), com, ohm.shape)
+        for a, w, f, (r, c), th, tf in zip(area, width, flank, com, through, tree_frac):
             if 3 <= a <= 400 and GAP_MIN_W <= w <= GAP_MAX_W and f >= GAP_MIN_FLANK:
-                gaps.append((r, c, float(w), float(f), float(a)))
+                gaps.append((r, c, float(w), float(f), float(a), bool(th), float(tf)))
 
     # --- Lone tall objects with open space all round (trees to power-loop, pillars, towers).
     tlab, tn = ndimage.label(tall, structure=np.ones((3, 3)))
     lone = []
     if tn:
-        idx = np.arange(1, tn + 1)
-        area = ndimage.sum(np.ones_like(ohm), tlab, idx)
-        hmax = ndimage.maximum(ohm, tlab, idx)
+        tl = _Labels(tlab, tn)
+        area = tl.count
+        hmax = tl.max(ohm)
         nearest = tlab[inds[0], inds[1]]
         ring = (dt_tall > 0) & (dt_tall <= LONE_RING)
         ring_n = np.bincount(nearest[ring], minlength=tn + 1)[1:]
         ring_open = np.bincount(nearest[ring & open_], minlength=tn + 1)[1:]
         cand = (area >= 4) & (area <= 300) & (hmax >= 5) & (ring_n > 0) & (ring_open >= 0.8 * np.maximum(ring_n, 1))
         if cand.any():
-            com = ndimage.center_of_mass(tall, tlab, idx[cand])
-            for (r, c), h, a in zip(com, hmax[cand], area[cand]):
+            cr, cc = tl.centre()
+            for r, c, h, a in zip(cr[cand], cc[cand], hmax[cand], area[cand]):
                 lone.append((r, c, float(h), float(a)))
 
     # --- Edges: tall pixels touching open ground (tree lines, building walls).
@@ -120,6 +163,26 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
     is_tree = trees >= TALL_M
     edge_tree = edge & is_tree
     edge_bld = edge & t.bld
+    # Edges lit by the setting sun with open ground in front to film from: open to the west.
+    west_open = np.zeros_like(open_)
+    west_open[:, 3:] = open_[:, :-3]
+    edge_w = tall & west_open
+
+    # --- Tree lines: long, narrow belts of trees (hedgerow trees, avenues, wood edges along a field).
+    tree_tall = is_tree & ~t.bld
+    blab, bn = ndimage.label(tree_tall, structure=np.ones((3, 3)))
+    treeline = np.zeros_like(tree_tall)
+    if bn:
+        objs = ndimage.find_objects(blab)
+        b_area = np.bincount(blab.ravel(), minlength=bn + 1)[1:]
+        line_ids = np.zeros(bn + 1, dtype=bool)
+        for i, sl in enumerate(objs):
+            if sl is None or b_area[i] < 40:
+                continue
+            length = float(np.hypot(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start))
+            if length >= TREELINE_MIN_LEN and b_area[i] / length <= TREELINE_MAX_W:
+                line_ids[i + 1] = True
+        treeline = edge_tree & line_ids[blab]
 
     # --- Under-canopy room (LiDAR only): last returns reach well below the canopy top.
     if t.porosity is not None:
@@ -159,20 +222,24 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
         "edge_tree_m": ssum(edge_tree), "edge_bld_m": ssum(edge_bld),
         "under_frac": np.nan_to_num(ssum(under) / np.maximum(ssum(tree_px), 1)),
         "lidar_frac": mean(t.lidar),
+        "treeline_m": ssum(treeline), "edge_w_m": ssum(edge_w),
     }
     grid_n = size // n
-    for key in ("gaps", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max"):
+    for key in ("gaps", "gaps_all", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max"):
         cells[key] = np.zeros((grid_n, grid_n), dtype="float32")
     keep_gaps, keep_lone = [], []
-    for r, c, w, f, a in gaps:
+    for r, c, w, f, a, th, tf in gaps:
         rr, cc = r - m, c - m
         if 0 <= rr < size and 0 <= cc < size:
             i, j = int(rr // n), int(cc // n)
-            cells["gaps"][i, j] += 1
-            if w <= 6:
-                cells["gaps_whoop"][i, j] += 1
-            cells["gap_flank_h"][i, j] = max(cells["gap_flank_h"][i, j], f)
-            keep_gaps.append((t.x0 + c + 0.5, t.y1 - r - 0.5, w, f, a))
+            cells["gaps_all"][i, j] += 1
+            # Only gaps with open air on both sides count: a hole in a wood's canopy isn't a line.
+            if th:
+                cells["gaps"][i, j] += 1
+                if w <= 6:
+                    cells["gaps_whoop"][i, j] += 1
+                cells["gap_flank_h"][i, j] = max(cells["gap_flank_h"][i, j], f)
+            keep_gaps.append((t.x0 + c + 0.5, t.y1 - r - 0.5, w, f, a, th, tf))
     for r, c, h, a in lone:
         rr, cc = r - m, c - m
         if 0 <= rr < size and 0 <= cc < size:
@@ -181,6 +248,24 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
             cells["lone_h_max"][i, j] = max(cells["lone_h_max"][i, j], h)
             keep_lone.append((t.x0 + c + 0.5, t.y1 - r - 0.5, h, a))
     return {k: v.astype("float32") for k, v in cells.items()}, keep_gaps, keep_lone
+
+
+def _through(open_: np.ndarray, com, shape) -> np.ndarray:
+    """For each gap centre: is there open ground THROUGH_R m out on both sides along some axis?"""
+    if not com:
+        return np.zeros(0, dtype=bool)
+    rc = np.rint(np.array(com)).astype(int)
+    h, w = shape
+    ok = np.zeros(len(rc), dtype=bool)
+    for dy, dx in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        k = THROUGH_R if dy == 0 or dx == 0 else int(round(THROUGH_R / 1.414))
+        hit = np.ones(len(rc), dtype=bool)
+        for sgn in (1, -1):
+            rr = np.clip(rc[:, 0] + sgn * dy * k, 0, h - 1)
+            cc = np.clip(rc[:, 1] + sgn * dx * k, 0, w - 1)
+            hit &= open_[rr, cc]
+        ok |= hit
+    return ok
 
 
 def _work(args) -> TileResult:
@@ -205,6 +290,6 @@ def run(region: Region, workers: int = 4, use_lidar: bool = True) -> tuple[dict[
                 out[k][sl] = res.cells[k]
             gaps.extend(res.gaps)
             lone.extend(res.lone)
-    gaps_df = pd.DataFrame(gaps, columns=["x", "y", "width_m", "flank_h_m", "area_m2"])
+    gaps_df = pd.DataFrame(gaps, columns=["x", "y", "width_m", "flank_h_m", "area_m2", "through", "tree_frac"])
     lone_df = pd.DataFrame(lone, columns=["x", "y", "height_m", "area_m2"])
     return out, gaps_df, lone_df

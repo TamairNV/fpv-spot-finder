@@ -24,14 +24,22 @@ K = int(CELL / RES)  # 10 pixels per cell
 
 # Old structures pilots call bandos. Castles and manors are left out: they're landmarks with
 # owners and visitors, not derelict buildings.
-BANDO_HISTORIC = {"ruins", "fort", "mine", "mine_shaft", "monastery", "tower", "city_gate", "bunker",
-                  "aircraft", "wreck", "lime_kiln", "kiln", "industrial"}
+# Town-wall towers, gates, forts and abbeys are landmarks with visitors, not bandos.
+BANDO_HISTORIC = {"ruins", "mine", "mine_shaft", "bunker", "aircraft", "wreck", "lime_kiln", "kiln", "industrial",
+                  "coaldrop"}
+BANDO_MIN_H = 2.5   # something at least this tall must still be standing (LiDAR) to count as a real bando
+BANDO_LOOK_M = 15   # ...within this far of the mapped outline
 # Lifecycle-prefixed keys that mean a disused *structure*. A closed shop or car park
 # (disused:amenity=parking, disused:shop=...) isn't one.
 BANDO_PREFIXED = {f"{life}:{key}" for life in ("abandoned", "disused", "ruins")
                   for key in ("building", "man_made", "industrial", "power", "military", "aeroway", "bridge")}
 BANDO_STRUCTURE_KEYS = {"building", "man_made", "industrial", "power", "military", "bridge"}
 LANDMARK_MAN_MADE = {"lighthouse", "water_tower", "chimney", "windmill", "tower", "obelisk"}
+LANDMARK_HISTORIC = {"castle", "monument", "fort", "ruins", "city_gate", "tower", "monastery", "abbey", "citywalls"}
+# Land you can usually walk onto and fly from, if the rules allow: parks, commons, open access grass.
+PUBLIC_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "dog_park", "village_green"}
+PUBLIC_LANDUSE = {"recreation_ground", "village_green"}
+FARM_LANDUSE = {"farmland", "farmyard", "orchard", "greenhouse_horticulture", "plant_nursery", "allotments"}
 HAZARD_MAN_MADE = {"mast", "communications_tower", "crane"}
 
 
@@ -61,6 +69,11 @@ def _is_bando(t: dict) -> bool:
         return True
     # brownfield is left out on purpose: in OSM it's mostly cleared land or building sites
     return t.get("historic") in BANDO_HISTORIC
+
+
+def _is_pit_marker(t: dict) -> bool:
+    return t.get("historic") in {"mine", "mine_shaft"} and t.get("building") not in osm.BUILDING_BANDO \
+        and not any(k.startswith(("ruins", "abandoned:", "disused:")) for k in t)
 
 
 def load_dtm(region: Region) -> tuple[np.ndarray, str]:
@@ -118,13 +131,24 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     seg = overture.load_layer(region, "segments")
     bridges_seg = seg[seg["is_bridge"].fillna(False).astype(bool) & (seg.geometry.length >= 25)]
     bridge_lines = lines[lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct", "yes", "boardwalk"})]
+    # A bridge worth filming crosses water or is a viaduct; a 60 m flyover across a dual carriageway isn't.
+    water_union = pd.concat([big_water.geometry, rivers.geometry]).union_all()
+    long_seg = bridges_seg[bridges_seg.geometry.length >= 60]
     big_bridges = pd.concat([
-        bridges_seg[bridges_seg.geometry.length >= 60].geometry,
+        long_seg[long_seg.geometry.distance(water_union) <= 30].geometry,
+        bridges_seg[bridges_seg.geometry.length >= 150].geometry,
         bridge_lines[bridge_lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"})].geometry,
     ])
 
-    bando_areas = areas[areas["tags"].map(_is_bando)]
-    bando_nodes = nodes[nodes["tags"].map(_is_bando)]
+    b_tags = pd.concat([areas["tags"][areas["tags"].map(_is_bando)], nodes["tags"][nodes["tags"].map(_is_bando)]])
+    bando_all = pd.concat([areas[areas["tags"].map(_is_bando)].geometry, nodes[nodes["tags"].map(_is_bando)].geometry])
+    standing = _standing_height(region, bando_all)
+    # A pit or shaft marker is where a colliery was; whatever LiDAR sees there now is usually a new shed.
+    standing[b_tags.map(_is_pit_marker).to_numpy() & (bando_all.geom_type == "Point").to_numpy()] = 0.0
+    log.info("bandos: %d mapped, %d with something still standing", len(bando_all), int((standing >= BANDO_MIN_H).sum()))
+    # Mapped with no LiDAR to check (NaN) still count; mapped but flat (an old pit site) only as a "site".
+    bando_real = bando_all[~(standing < BANDO_MIN_H)]
+    bando_site = bando_all[standing < BANDO_MIN_H]
 
     land = overture.load_layer(region, "land")
     cliffs = pd.concat([
@@ -137,8 +161,8 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     landmarks = pd.concat([
         nodes[nodes["tags"].map(lambda t: t.get("tourism") in {"viewpoint", "attraction"}
                                 or t.get("man_made") in LANDMARK_MAN_MADE
-                                or t.get("historic") in {"castle", "monument", "fort", "ruins"})].geometry,
-        polys(areas[areas["tags"].map(lambda t: t.get("historic") in {"castle", "fort", "monument", "ruins"}
+                                or t.get("historic") in LANDMARK_HISTORIC)].geometry,
+        polys(areas[areas["tags"].map(lambda t: t.get("historic") in LANDMARK_HISTORIC
                                       or t.get("tourism") == "attraction")]).geometry,
     ])
     hazards = pd.concat([
@@ -155,11 +179,22 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     roads_minor = seg[(seg["subtype"] == "road") & seg["class"].isin(
         ["residential", "service", "unclassified", "living_street", "tertiary", "secondary", "primary", "trunk"])]
 
+    roads_busy = seg[(seg["subtype"] == "road") & seg["class"].isin(["motorway", "trunk", "primary"])]
+    pa = polys(areas)
+    public = pa[pa["tags"].map(lambda t: t.get("leisure") in PUBLIC_LEISURE or t.get("landuse") in PUBLIC_LANDUSE
+                               or t.get("designation") == "common"
+                               or t.get("access") in {"yes", "permissive"})].geometry
+    farm = pa[pa["tags"].map(lambda t: t.get("landuse") in FARM_LANDUSE)].geometry
+
+    def frac_of(geoms) -> np.ndarray:
+        return _cell_mean(legal.burn(list(geoms), shape_, transform, all_touched=False).astype("float32"))
+
     out = {
         "dist_water": dist_to(pd.concat([big_water.geometry, rivers.geometry])),
         "dist_bridge": dist_to(big_bridges),
         "dist_footbridge": dist_to(bridge_lines.geometry),
-        "dist_bando": dist_to(pd.concat([bando_areas.geometry, bando_nodes.geometry])),
+        "dist_bando": dist_to(bando_real),
+        "dist_bando_site": dist_to(bando_site),
         "dist_cliff": dist_to(cliffs),
         "dist_quarry": dist_to(quarry.geometry),
         "dist_landmark": dist_to(landmarks),
@@ -167,6 +202,9 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
         "dist_parking": dist_to(parking),
         "dist_path": dist_to(paths.geometry),
         "dist_road_minor": dist_to(roads_minor.geometry),
+        "dist_road_busy": dist_to(roads_busy.geometry),
+        "public_frac": frac_of(public),
+        "farm_frac": frac_of(farm),
     }
 
     # Busyness: shops/cafes/etc. and buildings nearby, as counts per cell.
@@ -175,6 +213,38 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     out["places_n"] = _counts(places.geometry, region)
     b = overture.load_layer(region, "buildings")
     out["bld_n"] = _counts(b.geometry.centroid, region)
+    return out
+
+
+def _standing_height(region: Region, geoms: gpd.GeoSeries) -> np.ndarray:
+    """Tallest solid thing (LiDAR, low first-minus-last return so not a tree) on or next to each geometry.
+    NaN where there's no LiDAR to look at."""
+    from .heights import lidar_paths
+
+    out = np.full(len(geoms), np.nan, dtype="float32")
+    lp = lidar_paths(region)
+    if not lp or len(geoms) == 0:
+        return out
+    from rasterio.windows import from_bounds
+
+    with rasterio.open(lp["ndsm"]) as nd:
+        por = rasterio.open(lp["porosity"]) if "porosity" in lp else None
+        for i, g in enumerate(geoms):
+            if g is None or g.is_empty:
+                continue
+            x0, y0, x1, y1 = g.buffer(BANDO_LOOK_M).bounds
+            win = from_bounds(x0, y0, x1, y1, nd.transform).round_offsets().round_lengths()
+            h = nd.read(1, window=win, boundless=True, fill_value=255)
+            valid = h != 255
+            if valid.mean() < 0.5:
+                continue
+            hm = np.where(valid, h / 4.0, 0)
+            if por is not None:
+                p = por.read(1, window=win, boundless=True, fill_value=255)
+                hm = np.where((p != 255) & (p / 4.0 > 0.5 * hm) & (hm > 3), 0, hm)  # see-through: a tree
+            out[i] = float(hm.max())
+        if por is not None:
+            por.close()
     return out
 
 

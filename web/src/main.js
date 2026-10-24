@@ -4,16 +4,21 @@ import './style.css';
 import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save, SANDBOXED } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
-import { renderDetail, nice } from './detail.js';
+import { renderSpot, legalBadge, nice } from './detail.js';
+import { nowConditions, sunTimes } from './conditions.js';
+import { watchThumbs } from './thumbs.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
-const BASE = `${import.meta.env.BASE_URL}data/${REGION}`;
+const DATA = `${import.meta.env.BASE_URL}data`;
+const BASE = `${DATA}/${REGION}`;
 const PREFS_KEY = 'fpvspots:prefs';
+const PHONE = matchMedia('(max-width: 820px)');
+const TOUCH = matchMedia('(hover: none)');
 
 const abs = (path) => new URL(path, location.href).href;
 
-const BASEMAP_URL = 'https://tiles.openfreemap.org/styles/liberty';
+const BASEMAP_URL = 'https://tiles.openfreemap.org/styles/positron';
 // The bundled basemap: water, woods, built-up land, main roads and place names from the pipeline.
 // Used offline, when the tile server can't be reached, and in sandboxed hosts.
 function liteStyle() {
@@ -23,34 +28,32 @@ function liteStyle() {
     version: 8,
     sources: {
       lite: {
-        type: 'geojson', data: abs(`${BASE}/basemap.json`), tolerance: 0.5,
+        type: 'vector', tiles: [`${abs(`${BASE}/tiles/`)}{z}/{x}/{y}.pbf`], minzoom: 8, maxzoom: 12, bounds: regionBounds(),
         attribution: '© OpenStreetMap contributors, Overture Maps',
       },
     },
     layers: [
-      { id: 'bg', type: 'background', paint: { 'background-color': '#eef0e8' } },
-      { id: 'lite-built', type: 'fill', source: 'lite', filter: k('built'), paint: { 'fill-color': '#e1dcd3' } },
-      { id: 'lite-green', type: 'fill', source: 'lite', filter: k('green'), paint: { 'fill-color': '#d5e6c4' } },
-      { id: 'lite-wood', type: 'fill', source: 'lite', filter: k('wood'), paint: { 'fill-color': '#b5d09c' } },
-      { id: 'lite-water', type: 'fill', source: 'lite', filter: k('water'), paint: { 'fill-color': '#a6c8e2' } },
-      { id: 'lite-waterline', type: 'line', source: 'lite', filter: k('waterline'), paint: { 'line-color': '#a6c8e2', 'line-width': w(1, 5) } },
-      { id: 'lite-rail', type: 'line', source: 'lite', filter: k('rail'), paint: { 'line-color': '#8f8f8f', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
+      { id: 'bg', type: 'background', paint: { 'background-color': '#f2f2ee' } },
+      { id: 'lite-built', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('built'), paint: { 'fill-color': '#e7e4de' } },
+      { id: 'lite-green', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('green'), paint: { 'fill-color': '#e0eadb' } },
+      { id: 'lite-wood', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('wood'), paint: { 'fill-color': '#d2e2c8' } },
+      { id: 'lite-water', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('water'), paint: { 'fill-color': '#c2d8e8' } },
+      { id: 'lite-waterline', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('waterline'), paint: { 'line-color': '#c2d8e8', 'line-width': w(1, 5) } },
+      { id: 'lite-rail', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('rail'), paint: { 'line-color': '#a9a9a9', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
       {
-        id: 'lite-road-case', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#bdb6aa', 'line-width': w(['match', ['get', 'r'], 1, 2.6, 2, 1.8, 1.2], ['match', ['get', 'r'], 1, 10, 2, 8, 6]) },
+        id: 'lite-road-case', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#d3cfc8', 'line-width': w(['match', ['get', 'r'], 1, 2.6, 2, 1.8, 1.2], ['match', ['get', 'r'], 1, 10, 2, 8, 6]) },
       },
       {
-        id: 'lite-road', type: 'line', source: 'lite', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        id: 'lite-road', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
-          'line-color': ['match', ['get', 'r'], 1, '#f3bd5d', 2, '#fbe19a', '#ffffff'],
+          'line-color': ['match', ['get', 'r'], 1, '#f7dca6', 2, '#fbefcf', '#ffffff'],
           'line-width': w(['match', ['get', 'r'], 1, 1.6, 2, 1, 0.6], ['match', ['get', 'r'], 1, 8, 2, 6, 4.5]),
         },
       },
     ],
   };
 }
-let liteActive = false;
-let placeLabels = [];
 const SATELLITE = {
   type: 'raster', tileSize: 256, maxzoom: 19,
   tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
@@ -64,19 +67,39 @@ const state = {
   sort: 'score',
   like: null,
   query: '',
+  a3only: false,
   selected: null,
   detail: null,
   pins: [],
   seedMarkers: [],
   me: null,
   base: 'map',
+  sheet: 'half',
+  checking: false,
+  listScroll: 0,
   ...store(PREFS_KEY, {}),
 };
-let map, lookup, ratings;
+let map, lookup, ratings, checkPopup;
+let liteActive = false;
+let placeLabels = [];
+let heatHiLoaded = false;
+const heatHiWanted = () => heatHiLoaded || map.getZoom() >= 11;
+const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+// The basemap tiles stop at the region's edge; asking for ones outside would only 404.
+function regionBounds() {
+  const lons = state.meta.region.corners.map((c) => c[0]), lats = state.meta.region.corners.map((c) => c[1]);
+  return [Math.min(...lons) - 0.01, Math.min(...lats) - 0.01, Math.max(...lons) + 0.01, Math.max(...lats) + 0.01];
+}
+
+const profiles = () => Object.keys(state.meta.profiles);
+const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.category || '');
 
 // ---------------------------------------------------------------- boot
 
 async function boot() {
+  // The last-used drone's spots download alongside meta.json rather than after it.
+  const early = fetch(`${BASE}/spots_${state.profile}.geojson`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const metaRes = await fetch(`${BASE}/meta.json`);
   if (!metaRes.ok) {
     document.body.innerHTML = `<div style="padding:40px;color:#eee;font:16px system-ui">No data for “${esc(REGION)}” yet.
@@ -85,19 +108,183 @@ async function boot() {
   }
   state.meta = await metaRes.json();
   ratings = new Ratings(REGION);
-  $('#region-name').textContent = `· ${state.meta.region.name}`;
-  const [a, b] = await Promise.all(['freestyle5', 'cine85'].map((k) => fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
-  state.spots = { freestyle5: a, cine85: b };
-  if (!state.spots[state.profile]) state.profile = 'freestyle5';
+  $('#region-name').textContent = state.meta.region.name;
+  const keys = profiles();
+  const loaded = await Promise.all(keys.map(async (k) => (k === state.profile && await early)
+    || fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
+  keys.forEach((k, i) => {
+    loaded[i].features.forEach((f) => { f.properties.a3 = f.properties.legal?.a3_clear_pct ?? 0; });
+    state.spots[k] = loaded[i];
+  });
+  if (!state.spots[state.profile]) state.profile = keys[0];
+  buildProfileSwitch();
 
   lookup = new LegalLookup(state.meta);
   lookup.load(`${BASE}/legal_lookup.png`).catch(() => {});
 
+  applySheet();
   initMap();
   wireUI();
+  wireSheet();
   renderList();
-  renderSeeds();
-  syncSegs();
+  renderNow();
+  syncControls();
+  if (!SANDBOXED) loadRegions();
+  setTimeout(() => loadDetails(state.profile), 300);
+}
+
+// The spot card's extras (gap and tree positions, the why breakdown, links) come in a second file
+// per drone, fetched once the list is up, so the list itself shows sooner. Older data has them inline.
+const detailsLoad = {}, detailsDone = new Set();
+function loadDetails(key) {
+  detailsLoad[key] ||= fetch(`${BASE}/spot_details_${key}.json`)
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((byId) => {
+      state.spots[key]?.features.forEach((f) => Object.assign(f.properties, byId[f.properties.id]));
+      detailsDone.add(key);
+    });
+  return detailsLoad[key];
+}
+
+// "Now" banner: wind and rain for the next hour at the middle of the region, and today's light.
+async function renderNow() {
+  const box = $('#now-box');
+  const [lon, lat] = state.meta.region.center;
+  const hm = (d) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const t = sunTimes(lon, lat);
+  const light = Date.now() < t.sunset.getTime()
+    ? `Golden hour from ${hm(t.goldenEveningStart)} · sunset ${hm(t.sunset)}`
+    : `Sunrise tomorrow about ${hm(new Date(t.sunrise.getTime() + 86400e3))}`;
+  box.replaceChildren(el('span', {}, light));
+  box.hidden = false;
+  if (SANDBOXED) return;
+  const profile = state.profile;
+  try {
+    const w = await nowConditions(lon, lat, profile);
+    if (profile !== state.profile) return;
+    const who = state.meta.profiles[profile].short || state.meta.profiles[profile].label;
+    const verdict = { go: `good for the ${who}`, meh: `marginal for the ${who}`, no: `not great for the ${who}` }[w.cls];
+    box.replaceChildren(
+      el('span', { class: w.cls }, el('b', {}, 'Now: '), `wind ${Math.round(w.wind)} mph, gusts ${Math.round(w.gust)}, rain ${w.rain}% · `, el('b', { class: 'v' }, verdict)),
+      el('span', {}, light));
+  } catch {
+    /* no forecast: the light still shows */
+  }
+}
+
+function buildProfileSwitch() {
+  const box = $('#profile-switch');
+  box.replaceChildren(...profiles().map((k) => {
+    const p = state.meta.profiles[k];
+    return el('button', { 'data-profile': k, role: 'tab', title: p.drone || p.label },
+      el('span', { class: 'long' }, p.label), el('span', { class: 'short' }, p.short || p.label));
+  }));
+  $$('#profile-switch button').forEach((b) => b.addEventListener('click', () => setProfile(b.dataset.profile)));
+}
+
+// Other regions, when the pipeline has made more than one.
+async function loadRegions() {
+  try {
+    const res = await fetch(`${DATA}/regions.json`);
+    if (!res.ok) return;
+    const regions = await res.json();
+    if (!Array.isArray(regions) || regions.length < 2) return;
+    const sel = el('select', { 'aria-label': 'Region' },
+      regions.map((g) => el('option', { value: g.key, selected: g.key === REGION }, g.name)));
+    sel.addEventListener('change', () => {
+      const u = new URL(location.href);
+      u.searchParams.set('region', sel.value);
+      u.hash = '';
+      location.href = u.href;
+    });
+    $('#region-name').replaceChildren(sel);
+  } catch {
+    /* one region only */
+  }
+}
+
+// ---------------------------------------------------------------- bottom sheet (phones)
+
+function sheetHeights() {
+  const vh = window.innerHeight;
+  return { peek: Math.round(Math.min(170, vh * 0.3)), half: Math.round(vh * 0.5), full: vh - 58 };
+}
+
+function applySheet(px) {
+  if (!PHONE.matches) {
+    document.documentElement.style.removeProperty('--sheet-h');
+    return;
+  }
+  const h = px ?? sheetHeights()[state.sheet];
+  document.documentElement.style.setProperty('--sheet-h', `${Math.round(h)}px`);
+}
+
+function setSheet(name) {
+  state.sheet = name;
+  applySheet();
+}
+
+// Drag the handle or either header to resize; a flick moves one step; a tap on the handle toggles.
+function wireSheet() {
+  const panel = $('#panel');
+  let drag = null;
+  const zones = [$('#sheet-handle'), ...$$('.drag-zone')];
+  zones.forEach((z) => z.addEventListener('pointerdown', (e) => {
+    if (!PHONE.matches || e.button > 0) return;
+    if (e.target.closest('input')) return;
+    const now = performance.now();
+    drag = { id: e.pointerId, zone: z, y0: e.clientY, h0: panel.getBoundingClientRect().height, moved: false, lastY: e.clientY, lastT: now, v: 0 };
+  }));
+  window.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dy = e.clientY - drag.y0;
+    if (!drag.moved) {
+      if (Math.abs(dy) < 8) return;
+      drag.moved = true;
+      panel.classList.add('dragging');
+      document.documentElement.classList.add('sheet-dragging');
+      try { drag.zone.setPointerCapture(e.pointerId); } catch { /* fine without */ }
+    }
+    const now = performance.now();
+    drag.v = 0.7 * drag.v + 0.3 * ((e.clientY - drag.lastY) / Math.max(1, now - drag.lastT));
+    drag.lastY = e.clientY;
+    drag.lastT = now;
+    const H = sheetHeights();
+    applySheet(Math.max(H.peek - 50, Math.min(H.full, drag.h0 - dy)));
+  });
+  const end = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    if (!d.moved) return; // a tap: let the click through
+    panel.classList.remove('dragging');
+    document.documentElement.classList.remove('sheet-dragging');
+    const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    window.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 60);
+    const H = sheetHeights();
+    const h = panel.getBoundingClientRect().height;
+    let name;
+    if (d.v < -0.45) name = h > H.half ? 'full' : 'half';
+    else if (d.v > 0.45) name = h < H.half ? 'peek' : 'half';
+    else name = Object.entries(H).sort((a, b) => Math.abs(a[1] - h) - Math.abs(b[1] - h))[0][0];
+    setSheet(name);
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+  $('#sheet-handle').addEventListener('click', () => setSheet(state.sheet === 'half' ? 'full' : 'half'));
+  $('#sheet-handle').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setSheet(state.sheet === 'half' ? 'full' : 'half');
+    }
+  });
+  window.addEventListener('resize', () => applySheet());
+  PHONE.addEventListener('change', () => {
+    applySheet();
+    map?.resize();
+  });
 }
 
 // ---------------------------------------------------------------- map
@@ -110,13 +297,15 @@ function initMap() {
     container: 'map',
     style: offline ? liteStyle() : BASEMAP_URL,
     center: [lon, lat],
-    zoom: 10.2,
+    zoom: PHONE.matches ? 9.4 : 10.2,
     maxZoom: 18.5,
-    attributionControl: { compact: true, customAttribution: 'Heights © Environment Agency (OGL)' },
+    attributionControl: false,
     hash: false,
+    dragRotate: !TOUCH.matches,
   });
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
-  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+  if (params.has('bench')) window.__map = map;  // for scripts/bench.mjs
+  map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: 'Heights © Environment Agency (OGL)' }), 'bottom-right');
+  if (!PHONE.matches) map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   if (!SANDBOXED) {
     const geo = new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false });
     map.addControl(geo, 'top-right');
@@ -125,6 +314,7 @@ function initMap() {
       if (state.sort === 'near') renderList();
     });
   }
+  map.addControl(new maplibregl.ScaleControl({ unit: 'metric', maxWidth: 90 }), 'bottom-left');
 
   // If the online basemap can't be reached, switch to the bundled one; overlays work either way.
   let loaded = offline, fellBack = offline;
@@ -143,8 +333,41 @@ function initMap() {
     updatePlaceLabels();
   });
   map.on('zoom', updatePlaceLabels);
+  map.on('zoom', () => {
+    if (heatHiLoaded || !heatHiWanted() || !map.getSource('heat')) return;
+    heatHiLoaded = true;
+    map.getSource('heat').updateImage({ url: `${BASE}/heat_${state.profile}.png`, coordinates: state.meta.region.heat_corners });
+  });
   map.on('click', onMapClick);
+  map.on('contextmenu', (e) => {
+    e.preventDefault();
+    showCheck(e.lngLat, e.point);
+  });
+  wireLongPress();
   loadPlaceLabels();
+}
+
+// Long-press on a touch screen = "can I fly here?" at that point.
+function wireLongPress() {
+  let timer = null, start = null;
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = null;
+  };
+  map.on('touchstart', (e) => {
+    cancel();
+    if (e.originalEvent.touches.length !== 1) return;
+    start = e.point;
+    timer = setTimeout(() => {
+      timer = null;
+      showCheck(e.lngLat, e.point);
+    }, 550);
+  });
+  map.on('touchmove', (e) => {
+    if (timer && start && Math.hypot(e.point.x - start.x, e.point.y - start.y) > 10) cancel();
+  });
+  map.on('touchend', cancel);
+  map.on('touchcancel', cancel);
 }
 
 // Place names for the bundled basemap, as plain HTML labels (no font files needed).
@@ -180,59 +403,63 @@ function addOverlays() {
     if (!map.getSource('sat')) map.addSource('sat', SATELLITE);
     map.addLayer({ id: 'sat', type: 'raster', source: 'sat', layout: { visibility: state.base === 'satellite' ? 'visible' : 'none' } }, before);
   }
-  // Zoomed out: a coarse heatmap (100 m, max of the cells) so good areas stay visible.
-  // Zoomed in: the 25 m heatmap plus the legal overlay, which is too busy to read from far out.
+  // Zoomed out: a coarse heatmap (max of 4 x 4 cells) so good areas stay visible.
+  // Zoomed in: the fine heatmap, fading as the streets get readable, plus the legal overlay.
   map.addSource('heatlo', { type: 'image', url: `${BASE}/heatlo_${state.profile}.png`, coordinates: m.heat_lo_corners || m.heat_corners });
-  map.addLayer({ id: 'heatlo', type: 'raster', source: 'heatlo', maxzoom: 12, paint: { 'raster-opacity': 0.8, 'raster-fade-duration': 0 } }, before);
-  map.addSource('heat', { type: 'image', url: `${BASE}/heat_${state.profile}.png`, coordinates: m.heat_corners });
-  map.addLayer({ id: 'heat', type: 'raster', source: 'heat', minzoom: 12, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.75, 16, 0.35], 'raster-fade-duration': 0 } }, before);
+  map.addLayer({ id: 'heatlo', type: 'raster', source: 'heatlo', maxzoom: 12, paint: { 'raster-opacity': 0.85, 'raster-fade-duration': 0 } }, before);
+  // The fine heatmap only draws from zoom 12, so it isn't fetched until the map gets close.
+  heatHiLoaded = heatHiWanted();
+  map.addSource('heat', { type: 'image', url: heatHiLoaded ? `${BASE}/heat_${state.profile}.png` : BLANK_PNG, coordinates: m.heat_corners });
+  map.addLayer({ id: 'heat', type: 'raster', source: 'heat', minzoom: 12, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 0.3], 'raster-fade-duration': 0 } }, before);
   map.addSource('legal', { type: 'image', url: `${BASE}/legal_${state.profile}.png`, coordinates: m.legal_corners });
-  map.addLayer({ id: 'legal', type: 'raster', source: 'legal', minzoom: 11.5, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 11.5, 0, 12.5, 0.8], 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } }, before);
+  map.addLayer({ id: 'legal', type: 'raster', source: 'legal', minzoom: 11.5, paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 11.5, 0, 12.5, 0.85], 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } }, before);
   map.addSource('zones', { type: 'geojson', data: `${BASE}/zones.geojson` });
   map.addLayer({
     id: 'zones-fill', type: 'fill', source: 'zones',
-    paint: { 'fill-color': ['match', ['get', 'kind'], 'Danger area', '#ff9f1c', '#e5383b'], 'fill-opacity': 0.08 },
+    paint: { 'fill-color': ['match', ['get', 'kind'], 'Danger area', '#ff9f1c', '#e5383b'], 'fill-opacity': 0.06 },
   });
   map.addLayer({
     id: 'zones-line', type: 'line', source: 'zones',
-    paint: { 'line-color': ['match', ['get', 'kind'], 'Danger area', '#ff9f1c', '#e5383b'], 'line-width': 1.6, 'line-dasharray': [3, 2] },
+    paint: { 'line-color': ['match', ['get', 'kind'], 'Danger area', '#ff9f1c', '#e5383b'], 'line-width': 1.5, 'line-dasharray': [3, 2] },
   });
   map.addSource('sel', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addLayer({ id: 'sel-area', type: 'fill', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.08 } });
-  map.addLayer({ id: 'sel-line', type: 'line', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-dasharray': [2, 1.5] } });
+  map.addLayer({ id: 'sel-area', type: 'fill', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.1 } });
+  map.addLayer({ id: 'sel-halo', type: 'line', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'line-color': '#ffffff', 'line-width': 3.5, 'line-opacity': 0.8 } });
+  map.addLayer({ id: 'sel-line', type: 'line', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'line-color': '#1b2328', 'line-width': 1.5, 'line-dasharray': [3, 2] } });
   map.addLayer({
-    id: 'sel-pts', type: 'circle', source: 'sel', filter: ['!=', ['get', 'k'], 'area'],
+    id: 'sel-pts', type: 'circle', source: 'sel', filter: ['!=', ['get', 'k'], 'area'], minzoom: 12.5,
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 2.5, 17, 7],
-      'circle-color': ['match', ['get', 'k'], 'gap', '#ff3d7f', 'lone', '#ffc23d', 'takeoff', '#3ddc84', '#fff'],
-      'circle-stroke-color': '#111', 'circle-stroke-width': 1,
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, ['match', ['get', 'k'], 'takeoff', 5, 2], 17, ['match', ['get', 'k'], 'takeoff', 9, 5.5]],
+      'circle-color': ['match', ['get', 'k'], 'gap', '#ff3d7f', 'lone', '#ffc400', 'takeoff', '#22c55e', '#fff'],
+      'circle-stroke-color': ['match', ['get', 'k'], 'takeoff', '#ffffff', '#1b2328'],
+      'circle-stroke-width': ['match', ['get', 'k'], 'takeoff', 2.5, 1],
     },
   });
-  map.addSource('spots', { type: 'geojson', data: state.spots[state.profile] });
+  map.addSource('spots', { type: 'geojson', data: { type: 'FeatureCollection', features: state.visible || [] } });
   map.addLayer({
     id: 'spots-dots', type: 'circle', source: 'spots',
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 14, 7],
-      'circle-color': ['interpolate', ['linear'], ['get', 'score'], 55, '#2bb3c0', 77, '#ffc23d', 100, '#ff3d7f'],
-      'circle-stroke-color': '#111', 'circle-stroke-width': 1,
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 2.2, 12, 4, 15, 6.5],
+      'circle-color': ['interpolate', ['linear'], ['get', 'score'], 65, '#ffc400', 80, '#ff7030', 95, '#d6246e'],
+      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0.75, 12, 1],
+      'circle-stroke-color': '#14191d', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 12, 1.2],
     },
   });
-  map.on('mouseenter', 'spots-dots', () => (map.getCanvas().style.cursor = 'pointer'));
-  map.on('mouseleave', 'spots-dots', () => (map.getCanvas().style.cursor = ''));
+  map.on('mouseenter', 'spots-dots', () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'spots-dots', () => { map.getCanvas().style.cursor = ''; });
   applyLayerToggles();
   drawPins();
   drawSeeds();
-  addLegend();
-  if (location.hash.length > 1) openFromHash();
-}
-
-function addLegend() {
-  if ($('.legend')) return;
-  const box = el('div', { class: 'legend' },
-    el('div', {}, el('i', { style: 'background:linear-gradient(90deg,#2bb3c0,#ffc23d,#ff3d7f)' }), 'Better spots (heatmap)'),
-    el('div', { id: 'legend-a3' }, el('i', { style: 'background:rgba(245,158,11,.55)' }), 'A3 no-go for the 5" (zoom in to see)'),
-    el('div', {}, el('i', { style: 'background:rgba(220,38,38,.6)' }), 'No-fly zone (airport, prison…)'));
-  $('#map').append(box);
+  if (state.selected) {
+    const f = feature(state.selected);
+    if (f) showSelection(f);
+  }
+  if (!state.booted) {
+    state.booted = true;
+    if (location.hash.length > 1) openFromHash();
+  }
+  // Start with the attribution folded away; the (i) button opens it.
+  $('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
 }
 
 function applyLayerToggles() {
@@ -245,31 +472,31 @@ function applyLayerToggles() {
   vis('spots-dots', $('#lyr-spots').checked);
   vis('sat', state.base === 'satellite');
   state.pins.forEach((p) => (p.getElement().style.display = $('#lyr-spots').checked ? '' : 'none'));
-  const a3 = $('#legend-a3');
-  if (a3) a3.style.display = state.profile === 'freestyle5' ? '' : 'none';
+  $('#lyr-legal-row').hidden = !isA3();
 }
 
 function setProfile(key) {
-  if (key === state.profile) return;
+  if (key === state.profile || !state.spots[key]) return;
   state.profile = key;
   state.like = null;
   savePrefs();
-  closeDetail();
+  loadDetails(key);
+  showList();
+  const m = state.meta.region;
   if (map.getSource('heat')) {
-    map.getSource('heat').updateImage({ url: `${BASE}/heat_${key}.png`, coordinates: state.meta.region.heat_corners });
-    map.getSource('heatlo').updateImage({ url: `${BASE}/heatlo_${key}.png`, coordinates: state.meta.region.heat_lo_corners || state.meta.region.heat_corners });
-    map.getSource('legal').updateImage({ url: `${BASE}/legal_${key}.png`, coordinates: state.meta.region.legal_corners });
-    map.getSource('spots').setData(state.spots[key]);
+    if (heatHiLoaded) map.getSource('heat').updateImage({ url: `${BASE}/heat_${key}.png`, coordinates: m.heat_corners });
+    map.getSource('heatlo').updateImage({ url: `${BASE}/heatlo_${key}.png`, coordinates: m.heat_lo_corners || m.heat_corners });
+    map.getSource('legal').updateImage({ url: `${BASE}/legal_${key}.png`, coordinates: m.legal_corners });
   }
   applyLayerToggles();
-  syncSegs();
+  syncControls();
   renderList();
-  renderSeeds();
+  renderNow();
   drawSeeds();
 }
 
 function savePrefs() {
-  save(PREFS_KEY, { profile: state.profile, sort: state.sort === 'near' ? 'score' : state.sort, base: state.base });
+  save(PREFS_KEY, { profile: state.profile, sort: state.sort === 'near' ? 'score' : state.sort, base: state.base, a3only: state.a3only });
 }
 
 // ---------------------------------------------------------------- list
@@ -279,33 +506,36 @@ function orderedSpots() {
   let note = '';
   let key = (f) => f.properties.rank;
   let desc = false;
+  let label = 'Best spots';
   if (state.like) {
     const target = feats.find((f) => f.properties.id === state.like);
     if (target) {
       const sim = likeThis(feats, target);
       key = (f) => sim(f);
       desc = true;
-      note = `Spots most like “${target.properties.title}”. <a href="#" data-clear-like>Back to best</a>`;
+      label = 'Most like it';
+      note = `Spots most like “${esc(target.properties.title)}”. <button class="linklike" data-clear-like>Back to best</button>`;
     }
   } else if (state.sort === 'taste') {
     const model = learnTaste(feats, ratings, state.profile);
+    label = 'By your taste';
     if (model.ready) {
       key = (f) => model.predict(f) * 0.7 + (f.properties.score / 100) * 0.3;
       desc = true;
       const top = Object.entries(model.weights).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k);
       note = `Learned from your ${model.pos} 👍 and ${model.neg} 👎. You seem to like: ${top.map(nice).join(', ').toLowerCase()}. `
         + (SANDBOXED
-          ? 'To teach the whole-region ranking, copy your ratings (bottom left) and paste them back to Claude.'
-          : 'To teach the whole-region ranking, download your ratings (bottom left) into config/ratings/ and re-run the scorer.');
+          ? 'To teach the whole-region ranking, copy your ratings (bottom of the list) and paste them back to Claude.'
+          : 'To teach the whole-region ranking, download your ratings (bottom of the list) into config/ratings/ and re-run the scorer.');
     } else {
       note = `Rate a few spots 👍 / 👎 (at least 2 good, 1 not) and this list sorts itself by your taste. So far: ${model.pos} 👍, ${model.neg} 👎.`;
     }
   } else if (state.sort === 'near') {
+    label = 'Closest first';
     if (state.me) {
       key = (f) => haversine(state.me, f.geometry.coordinates);
-      note = 'Closest first.';
     } else {
-      note = 'Finding you… (allow location, or tap the locate button on the map)';
+      note = 'Finding you… (allow location access)';
       if (!state.locating && navigator.geolocation) {
         state.locating = true;
         navigator.geolocation.getCurrentPosition((pos) => {
@@ -315,7 +545,7 @@ function orderedSpots() {
         }, () => {
           state.locating = false;
           state.sort = 'score';
-          syncSegs();
+          syncControls();
           renderList();
         });
       }
@@ -323,61 +553,107 @@ function orderedSpots() {
   }
   const q = state.query.trim().toLowerCase();
   let list = feats.filter((f) => !q || `${f.properties.title} ${f.properties.locality} ${f.properties.gridref}`.toLowerCase().includes(q));
+  if (state.a3only && isA3()) list = list.filter((f) => f.properties.a3 >= 50);
   list.sort((a, b) => (desc ? key(b) - key(a) : key(a) - key(b)));
   // spots you've binned sink to the bottom
   list = [...list.filter((f) => ratings.get(state.profile, f.properties.id) >= 0), ...list.filter((f) => ratings.get(state.profile, f.properties.id) < 0)];
-  return { list, note };
-}
-
-function renderList() {
-  const { list, note } = orderedSpots();
-  const ol = $('#spot-list');
-  const noteBox = $('#taste-note');
-  noteBox.hidden = !note;
-  noteBox.innerHTML = note;
-  noteBox.querySelector('[data-clear-like]')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    state.like = null;
-    renderList();
-  });
-  ol.replaceChildren(...list.map((f, i) => {
-    const p = f.properties;
-    const r = ratings.get(state.profile, p.id);
-    const sub = [p.locality, state.me ? metres(haversine(state.me, f.geometry.coordinates)) : null, subline(p)].filter(Boolean).join(' · ');
-    const li = el('li', { class: `${state.selected === p.id ? 'on' : ''} ${r < 0 ? 'rated-down' : ''}`, 'data-id': p.id },
-      el('span', { class: 'rank' }, i + 1),
-      el('div', {}, el('div', { class: `spot-name${r > 0 ? ' rated-up' : ''}` }, p.title), el('div', { class: 'spot-sub' }, sub)),
-      el('span', { class: 'score-pill', style: `color:${scoreColour(p.score)}` }, p.score));
-    li.addEventListener('click', () => select(p.id, true));
-    return li;
-  }));
-  state.order = list;
-  drawPins();
+  return { list, note, label };
 }
 
 function subline(p) {
   const s = p.stats;
   if (!s) return '';
-  if (state.profile === 'cine85') return `${s.gaps_whoop} gaps · ${s.bld_pct}% buildings`;
+  if (!isA3()) return `${s.gaps_whoop} whoop gaps · ${s.bld_pct}% buildings`;
   return `${s.gaps} gaps · ${s.lone_trees} lone trees`;
+}
+
+function spotRow(f, i) {
+  const p = f.properties;
+  const r = ratings.get(state.profile, p.id);
+  const sub = [p.locality, state.me ? metres(haversine(state.me, f.geometry.coordinates)) : null, subline(p)].filter(Boolean).join(' · ');
+  return el('li', { class: `row-item${state.selected === p.id ? ' on' : ''}${r < 0 ? ' rated-down' : ''}`, 'data-id': p.id },
+    thumbBox(p.preview, el('i', {}, i + 1)),
+    el('div', {},
+      el('div', { class: 'spot-name' }, p.title, r > 0 ? el('span', { class: 'rated-up', title: 'You rated it good' }, '▲') : null),
+      el('div', { class: 'spot-sub' }, sub)),
+    el('div', { class: 'row-side' },
+      el('span', { class: 'score', style: `--c:${scoreColour(p.score)}` }, p.score),
+      isA3() ? legalBadge(p, true) : null));
+}
+
+// The spot's little top-down picture (top spots only), with the rank or a star on it.
+function thumbBox(preview, tag) {
+  return el('span', { class: `thumb${preview ? '' : ' none'}` },
+    preview ? el('img', { alt: '', 'data-thumb': `${BASE}/${preview.file}`, decoding: 'async' }) : null, tag);
+}
+
+function renderList() {
+  const { list, note, label } = orderedSpots();
+  const noteBox = $('#taste-note');
+  noteBox.hidden = !note;
+  noteBox.innerHTML = note;
+  noteBox.querySelector('[data-clear-like]')?.addEventListener('click', () => {
+    state.like = null;
+    syncControls();
+    renderList();
+  });
+  renderSeeds(label);
+  $('#spot-list').replaceChildren(...list.map(spotRow));
+  const empty = $('#list-empty');
+  empty.hidden = list.length > 0;
+  if (!list.length) {
+    empty.replaceChildren(state.query ? `No spots match “${state.query}”.` : 'No spots with these filters.',
+      el('br'), el('button', { class: 'linklike', onclick: clearFilters }, 'Clear filters'));
+  }
+  const total = state.spots[state.profile].features.length;
+  $('#list-count').textContent = list.length === total ? `${total} spots` : `${list.length} of ${total}`;
+  renderFoot();
+  state.order = list;
+  state.visible = list;
+  map?.getSource('spots')?.setData({ type: 'FeatureCollection', features: list });
+  drawPins();
+  watchThumbs($('#list-scroll'), $('#list-scroll'));
+}
+
+function clearFilters() {
+  state.query = '';
+  state.a3only = false;
+  $('#search').value = '';
+  $('#search-clear').hidden = true;
+  savePrefs();
+  syncControls();
+  renderList();
+}
+
+function renderFoot() {
+  $('#list-foot').replaceChildren(...[
+    SANDBOXED ? null : el('a', { href: `${BASE}/spots_${state.profile}.gpx`, download: `fpv-spots-${REGION}-${state.profile}.gpx` }, 'Spots as GPX'),
+    el('button', { class: 'linklike', onclick: exportRatings }, SANDBOXED ? 'Copy my ratings' : 'Download my ratings'),
+    el('button', { class: 'linklike', onclick: openAbout }, 'How it works'),
+  ].filter(Boolean));
 }
 
 function drawPins() {
   if (!map || !map.getSource?.('spots')) return;
   state.pins.forEach((m) => m.remove());
   state.pins = [];
-  const top = (state.order || []).slice(0, 40);
-  top.forEach((f, i) => {
+  const show = $('#lyr-spots').checked;
+  (state.order || []).slice(0, 40).forEach((f, i) => {
     const p = f.properties;
-    const node = el('div', { class: `pin${state.selected === p.id ? ' on' : ''}`, style: `background:${scoreColour(p.score)}`, title: p.title, 'data-id': p.id }, i + 1);
+    const node = el('div', { class: `mk${state.selected === p.id ? ' on' : ''}`, title: p.title, 'data-id': p.id },
+      el('div', { class: 'pin', style: `--c:${scoreColour(p.score)}` }, i + 1));
     node.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (state.checking) return;
       select(p.id, false);
     });
-    const mk = new maplibregl.Marker({ element: node }).setLngLat(f.geometry.coordinates).addTo(map);
-    if (!$('#lyr-spots').checked) node.style.display = 'none';
-    state.pins.push(mk);
+    if (!show) node.style.display = 'none';
+    state.pins.push(new maplibregl.Marker({ element: node }).setLngLat(f.geometry.coordinates).addTo(map));
   });
+}
+
+function feature(id) {
+  return state.spots[state.profile].features.find((x) => x.properties.id === id);
 }
 
 // ---------------------------------------------------------------- seeds ("your spots")
@@ -386,74 +662,103 @@ function seedsFor(profile) {
   return (state.meta.seeds || []).filter((s) => s.profile === profile);
 }
 
-function renderSeeds() {
+function seedSpot(s) {
+  const a3 = isA3(s.profile);
+  return {
+    type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
+    properties: {
+      id: `seed-${s.name}`, title: s.name, locality: 'your spot', score: s.score, rules: null, taste: null,
+      components: s.components, drivers: s.note ? [s.note] : [],
+      legal: {
+        summary: a3
+          ? (s.a3_frac >= 0.9 ? 'Clear of the A3 distances.' : 'Not A3-clear for an 800 g quad: it\'s within 150 m of a park or houses. Fine for a sub-250 g drone under A1.')
+          : 'Open A1: fine for a sub-250 g drone outside restriction zones; never over crowds.',
+        flags: s.flags, a3_clear_pct: Math.round(100 * (s.a3_frac ?? 0)),
+      },
+      preview: s.preview, gaps_list: [], lone_list: [],
+    },
+  };
+}
+
+function renderSeeds(label) {
   const box = $('#seeds-box');
   const seeds = seedsFor(state.profile);
-  const tools = el('div', { style: 'margin-top:8px;display:flex;gap:12px;flex-wrap:wrap' },
-    SANDBOXED ? null : el('a', { href: `${BASE}/spots_${state.profile}.gpx`, download: `fpv-spots-${REGION}-${state.profile}.gpx` }, 'Spots as GPX'),
-    el('a', { href: '#', onclick: exportRatings }, SANDBOXED ? 'Copy my ratings' : 'Download my ratings'));
-  if (!seeds.length) {
-    box.replaceChildren(el('div', {}, 'No seed spots for this drone. Add your favourite spots to config/seeds.toml and the ranking learns their style.'), tools);
-    return;
-  }
-  box.replaceChildren(el('div', {}, el('b', {}, 'Your spots'), ' (the style the ranking looks for)'),
-    ...seeds.map((s) => el('div', { style: 'margin-top:4px' },
-      el('button', { onclick: () => openSeed(s) }, `★ ${s.name}`),
-      ` scores ${s.score ?? '–'}`,
-      state.profile === 'freestyle5' && s.a3_frac < 0.6 ? el('span', { class: 'warn' }, ' · not A3-legal for the 5"') : null)),
-    tools);
+  const showSeeds = seeds.length && !state.query && !state.like;
+  box.replaceChildren(...[
+    showSeeds ? el('div', { class: 'section-label' }, 'Your spots') : null,
+    showSeeds ? el('ol', { class: 'seed-list' }, seeds.map((s) => {
+      const f = seedSpot(s);
+      const li = el('li', { class: 'row-item', title: 'One of your favourite spots: the ranking looks for places like it' },
+        thumbBox(s.preview, el('i', { class: 'star' }, '★')),
+        el('div', {}, el('div', { class: 'spot-name' }, s.name), el('div', { class: 'spot-sub' }, 'Your spot · the style it looks for')),
+        el('div', { class: 'row-side' },
+          el('span', { class: 'score', style: `--c:${scoreColour(s.score ?? 0)}` }, s.score ?? '–'),
+          isA3() ? legalBadge(f.properties, true) : null));
+      li.addEventListener('click', () => openSeed(s));
+      return li;
+    })) : null,
+    el('div', { class: 'section-label' }, label),
+  ].filter(Boolean));
 }
 
 function drawSeeds() {
   state.seedMarkers.forEach((m) => m.remove());
   state.seedMarkers = seedsFor(state.profile).map((s) => {
-    const node = el('div', { class: 'seed-pin', title: s.name });
+    const node = el('div', { class: 'mk', title: `Your spot: ${s.name}` }, el('div', { class: 'seed-pin' }));
     node.addEventListener('click', (e) => {
       e.stopPropagation();
-      openSeed(s);
+      if (!state.checking) openSeed(s);
     });
     return new maplibregl.Marker({ element: node }).setLngLat([s.lon, s.lat]).addTo(map);
   });
 }
 
 function openSeed(s) {
-  const fake = {
-    type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
-    properties: {
-      id: `seed-${s.name}`, title: s.name, locality: 'your spot', score: s.score, rules: null, taste: null,
-      components: s.components, drivers: s.note ? [s.note] : [],
-      legal: {
-        summary: state.profile === 'freestyle5'
-          ? (s.a3_frac >= 0.6 ? 'Clear of the A3 distances.' : 'Not A3-legal for an 800 g quad: it\'s within 150 m of a park or houses. Fine for a sub-250 g whoop.')
-          : 'Open A1: fine for a sub-250 g whoop outside restriction zones; never over crowds.',
-        flags: s.flags, a3_clear_pct: Math.round(100 * s.a3_frac),
-      },
-      preview: s.preview, gaps_list: [], lone_list: [],
-    },
-  };
-  showDetail(fake, true);
-  map.flyTo({ center: [s.lon, s.lat], zoom: 16, essential: true });
+  const f = seedSpot(s);
+  state.selected = null;
+  markSelected(null);
+  map.getSource('sel')?.setData({ type: 'FeatureCollection', features: [] });
+  showSpot(f, true);
+  if (PHONE.matches) setSheet('half');
+  flyToSpot(f, 16);
 }
 
-// ---------------------------------------------------------------- selection + detail
+// ---------------------------------------------------------------- list <-> spot
 
-function select(id, fly) {
-  const f = state.spots[state.profile].features.find((x) => x.properties.id === id);
+function select(id, fromList, push = true) {
+  const f = feature(id);
   if (!f) return;
+  const wasOpen = !$('#view-spot').hidden;
   state.selected = id;
-  history.replaceState(null, '', `#${state.profile}.${id}`);
-  $$('#spot-list li').forEach((li) => li.classList.toggle('on', li.dataset.id === id));
-  $(`#spot-list li[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
-  state.pins.forEach((m) => m.getElement().classList.toggle('on', m.getElement().dataset.id === id));
+  setHash(`${state.profile}.${id}`, push && !wasOpen);
+  markSelected(id);
   showSelection(f);
-  showDetail(f, false);
-  if (fly) {
-    const narrow = window.innerWidth <= 820;
-    map.flyTo({
-      center: f.geometry.coordinates, zoom: 15.5, essential: true,
-      padding: narrow ? { bottom: window.innerHeight * 0.45 } : { right: 440 },
+  showSpot(f, false);
+  const key = state.profile;
+  if (!detailsDone.has(key)) {
+    loadDetails(key).then(() => {
+      if (state.selected === id && state.profile === key) {
+        showSelection(f);
+        showSpot(f, false);
+      }
     });
   }
+  if (PHONE.matches) setSheet('half');
+  flyToSpot(f, fromList ? 15.5 : Math.max(map.getZoom(), 14.5));
+}
+
+function flyToSpot(f, zoom) {
+  const H = sheetHeights();
+  map.flyTo({
+    center: f.geometry.coordinates, zoom, essential: true,
+    padding: PHONE.matches ? { top: 40, bottom: H.half, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 },
+    duration: 1400,
+  });
+}
+
+function markSelected(id) {
+  $$('#spot-list .row-item').forEach((li) => li.classList.toggle('on', li.dataset.id === id));
+  state.pins.forEach((m) => m.getElement().classList.toggle('on', m.getElement().dataset.id === id));
 }
 
 function showSelection(f) {
@@ -465,125 +770,227 @@ function showSelection(f) {
   map.getSource('sel')?.setData({ type: 'FeatureCollection', features: feats });
 }
 
-function showDetail(f, isSeed) {
+function showSpot(f, isSeed) {
+  if ($('#view-spot').hidden) state.listScroll = $('#list-scroll').scrollTop;
   state.detail?.dispose();
-  const host = $('#detail-body');
-  $('#detail').hidden = false;
-  $('#detail .detail-scroll').scrollTop = 0;
-  state.detail = renderDetail(host, {
+  $('#view-list').hidden = true;
+  $('#view-spot').hidden = false;
+  $('#panel').dataset.view = 'spot';
+  state.detail = renderSpot({
+    head: $('#spot-head'), body: $('#detail-body'),
     spot: f, meta: state.meta, profile: state.profile, ratings, base: BASE, isSeed,
+    total: state.spots[state.profile].features.length,
     onRate: (v) => {
       ratings.set(state.profile, f.properties.id, v, { title: f.properties.title });
-      showDetail(f, isSeed);
       renderList();
     },
     onLike: () => {
       state.like = f.properties.id;
+      showList();
       renderList();
-      $('#spot-list').scrollTop = 0;
+      syncControls();
+      $('#list-scroll').scrollTop = 0;
     },
+    onBack: () => goBack(),
   });
+  $('#spot-scroll').scrollTop = 0;
 }
 
-function closeDetail() {
+function goBack() {
+  if (!SANDBOXED && history.state?.spot) history.back();
+  else showList();
+}
+
+function showList() {
   state.detail?.dispose();
   state.detail = null;
   state.selected = null;
-  $('#detail').hidden = true;
+  $('#view-spot').hidden = true;
+  $('#view-list').hidden = false;
+  $('#panel').dataset.view = 'list';
+  $('#list-scroll').scrollTop = state.listScroll || 0;
   map?.getSource('sel')?.setData({ type: 'FeatureCollection', features: [] });
-  $$('#spot-list li.on').forEach((li) => li.classList.remove('on'));
-  state.pins.forEach((m) => m.getElement().classList.remove('on'));
-  history.replaceState(null, '', location.pathname + location.search);
+  markSelected(null);
+  setHash('', false);
+}
+
+// Spot links look like #freestyle5.123-456. Opening a spot adds a history entry so the
+// phone's back button returns to the list.
+function setHash(h, push) {
+  const url = location.pathname + location.search + (h ? `#${h}` : '');
+  try {
+    if (push && !SANDBOXED) history.pushState({ spot: true }, '', url);
+    else history.replaceState(h ? history.state : null, '', url);
+  } catch {
+    /* some embeds refuse history changes */
+  }
 }
 
 function openFromHash() {
   const [profile, id] = location.hash.slice(1).split(/[./]/);
-  if (state.spots[profile]) {
-    if (profile !== state.profile) setProfile(profile);
-    if (id) select(id, true);
+  if (!state.spots[profile]) return;
+  if (profile !== state.profile) setProfile(profile);
+  if (!id) return;
+  if (feature(id)) select(id, true, false);
+  else {
+    // an old link: the spot isn't in this ranking any more
+    setHash('', false);
+    const note = $('#taste-note');
+    note.hidden = false;
+    note.textContent = 'That shared spot isn\'t in the latest ranking (the scores have been updated since). Here are the best ones now.';
   }
 }
 
+window.addEventListener('popstate', () => {
+  if (!state.meta) return;
+  if (location.hash.length > 1) openFromHash();
+  else if (!$('#view-spot').hidden) showList();
+});
+
 // ---------------------------------------------------------------- can I fly here?
 
+function setChecking(on) {
+  state.checking = on;
+  $('#btn-check').setAttribute('aria-pressed', String(on));
+  $('#check-hint').hidden = !on;
+  $('#map').classList.toggle('checking', on);
+  if (!on) closeCheck();
+}
+
 function onMapClick(e) {
-  const hitSpot = map.queryRenderedFeatures(e.point, { layers: ['spots-dots'] })[0];
-  if (hitSpot) {
-    select(hitSpot.properties.id, false);
+  if (state.checking) {
+    showCheck(e.lngLat, e.point);
     return;
   }
-  const { lng, lat } = e.lngLat;
-  const toast = $('#fly-check');
-  const zones = map.queryRenderedFeatures(e.point, { layers: ['zones-fill'] }).map((z) => z.properties.name);
-  const hit = lookup?.at(lng, lat);
-  const v = verdicts(state.meta, hit, [...new Set(zones)]);
-  if (!v) {
-    toast.hidden = false;
-    toast.replaceChildren(el('div', {}, 'Outside the area this region covers.'));
-    return;
-  }
-  toast.hidden = false;
-  toast.replaceChildren(...[
+  const hit = map.getLayer('spots-dots') && map.queryRenderedFeatures(e.point, { layers: ['spots-dots'] })[0];
+  if (hit) select(hit.properties.id, false);
+}
+
+// The answer goes in a card under the button (a popup on the map gets cut off on phones),
+// with a dot where you checked.
+function showCheck(lngLat, point) {
+  const { lng, lat } = lngLat;
+  const zones = map.getLayer('zones-fill') ? map.queryRenderedFeatures(point, { layers: ['zones-fill'] }).map((z) => z.properties.name) : [];
+  const v = verdicts(state.meta, lookup?.at(lng, lat), [...new Set(zones)]);
+  const card = $('#check-card');
+  card.replaceChildren(...[
+    el('button', { class: 'x', 'aria-label': 'Close', onclick: () => (state.checking ? closeCheck() : setChecking(false)) }, '×'),
     el('h4', {}, 'Can I fly here?'),
-    ...v.verdicts.map((x) => el('div', { class: 'row' }, el('span', { class: x.ok ? 'ok' : 'bad' }, x.ok ? '✓' : '✗'),
-      el('span', {}, el('b', {}, x.who), ': ', x.text))),
-    v.flags.length ? el('ul', { class: 'legal-flags' }, v.flags.map((t) => el('li', {}, t))) : null,
-    el('div', { class: 'muted', style: 'font-size:12px;margin-top:6px' },
-      'From OpenStreetMap land use and the NATS restriction zones, at 20 m. Always double-check on the ground.'),
+    ...(v
+      ? [...v.verdicts.map((x) => el('div', { class: 'check-row' },
+        el('span', { class: `ico ${x.ok ? 'ok' : 'bad'}` }, x.ok ? '✓' : '✕'),
+        el('span', {}, el('b', {}, x.who), el('br'), x.text))),
+      v.flags.length ? el('ul', { class: 'legal-flags' }, v.flags.map((t) => el('li', {}, t))) : null,
+      el('div', { class: 'check-note' }, 'From OpenStreetMap land use and the NATS restriction zones, at 20 m. Always check on the ground.')]
+      : [el('div', { class: 'muted' }, 'Outside the area this region covers.')]),
   ].filter(Boolean));
+  card.hidden = false;
+  if (!checkPopup) checkPopup = new maplibregl.Marker({ element: el('div', { class: 'check-dot' }) });
+  checkPopup.setLngLat(lngLat).addTo(map);
+}
+
+function closeCheck() {
+  $('#check-card').hidden = true;
+  checkPopup?.remove();
 }
 
 // ---------------------------------------------------------------- UI wiring
 
-function syncSegs() {
+function syncControls() {
   $$('#profile-switch button').forEach((b) => b.classList.toggle('on', b.dataset.profile === state.profile));
   $$('#list-sort button').forEach((b) => b.classList.toggle('on', b.dataset.sort === state.sort && !state.like));
   $$('#basemap-switch button').forEach((b) => b.classList.toggle('on', b.dataset.base === state.base));
+  $('#filters').hidden = !isA3();
+  $('#filters [data-filter="a3"]').setAttribute('aria-pressed', String(state.a3only));
 }
 
 function wireUI() {
   if (SANDBOXED) {
     $('#list-sort button[data-sort="near"]')?.remove();
-    $('#basemap-switch')?.previousElementSibling?.remove();
+    $('#basemap-title')?.remove();
     $('#basemap-switch')?.remove();
   }
-  $$('#profile-switch button').forEach((b) => b.addEventListener('click', () => setProfile(b.dataset.profile)));
   $$('#list-sort button').forEach((b) => b.addEventListener('click', () => {
     state.sort = b.dataset.sort;
     state.like = null;
     savePrefs();
-    syncSegs();
+    syncControls();
     renderList();
+    $('#list-scroll').scrollTop = 0;
   }));
   $$('#basemap-switch button').forEach((b) => b.addEventListener('click', () => {
     state.base = b.dataset.base;
     savePrefs();
-    syncSegs();
+    syncControls();
     applyLayerToggles();
   }));
-  $('#search').addEventListener('input', (e) => {
-    state.query = e.target.value;
+  $('#filters [data-filter="a3"]').addEventListener('click', () => {
+    state.a3only = !state.a3only;
+    savePrefs();
+    syncControls();
     renderList();
   });
+  const search = $('#search');
+  search.addEventListener('input', () => {
+    state.query = search.value;
+    $('#search-clear').hidden = !search.value;
+    renderList();
+  });
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') search.blur();
+  });
+  search.addEventListener('focus', () => {
+    if (PHONE.matches && state.sheet !== 'full') setSheet('full');
+  });
+  $('#search-clear').addEventListener('click', () => {
+    search.value = '';
+    state.query = '';
+    $('#search-clear').hidden = true;
+    renderList();
+  });
+  $('#spot-list').addEventListener('click', (e) => {
+    const li = e.target.closest('.row-item');
+    if (li) select(li.dataset.id, true);
+  });
+  // hovering a row lights up its pin on the map
+  $('#spot-list').addEventListener('mouseover', (e) => {
+    const id = e.target.closest('.row-item')?.dataset.id;
+    if (id === state.hover) return;
+    state.hover = id;
+    state.pins.forEach((m) => m.getElement().classList.toggle('hover', m.getElement().dataset.id === id));
+  });
+  $('#spot-list').addEventListener('mouseleave', () => {
+    state.hover = null;
+    state.pins.forEach((m) => m.getElement().classList.remove('hover'));
+  });
+  const pop = $('#layers-pop');
   $('#btn-layers').addEventListener('click', (e) => {
     e.stopPropagation();
-    $('#layers-pop').hidden = !$('#layers-pop').hidden;
+    pop.hidden = !pop.hidden;
+    $('#btn-layers').setAttribute('aria-expanded', String(!pop.hidden));
   });
   document.addEventListener('click', (e) => {
-    if (!$('#layers-pop').contains(e.target)) $('#layers-pop').hidden = true;
-    if (!$('#fly-check').contains(e.target) && !$('#map').contains(e.target)) $('#fly-check').hidden = true;
+    if (!pop.hidden && !pop.contains(e.target)) {
+      pop.hidden = true;
+      $('#btn-layers').setAttribute('aria-expanded', 'false');
+    }
   });
   $$('#layers-pop input').forEach((i) => i.addEventListener('change', applyLayerToggles));
-  $('#detail-close').addEventListener('click', closeDetail);
-  $('#btn-about').addEventListener('click', () => {
-    $('#about-body').innerHTML = aboutHtml();
-    $('#about-body [data-export]')?.addEventListener('click', exportRatings);
-    $('#about-body [data-import]')?.addEventListener('change', importRatings);
-    $('#about').showModal();
-  });
+  $('#btn-about').addEventListener('click', openAbout);
+  $('#btn-check').addEventListener('click', () => setChecking(!state.checking));
+  $('#check-done').addEventListener('click', () => setChecking(false));
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('#detail').hidden && !document.querySelector('.p3d-wrap.full')) closeDetail();
+    if (e.key !== 'Escape' || document.querySelector('.p3d-wrap.full') || $('#about').open) return;
+    if (state.checking) setChecking(false);
+    else if (!$('#view-spot').hidden) goBack();
   });
+}
+
+function openAbout() {
+  $('#about-body').innerHTML = aboutHtml();
+  $('#about-body [data-export]')?.addEventListener('click', exportRatings);
+  $('#about-body [data-import]')?.addEventListener('change', importRatings);
+  $('#about').showModal();
 }
 
 function exportRatings(e) {
@@ -591,7 +998,7 @@ function exportRatings(e) {
   if (SANDBOXED) {
     const link = e.currentTarget;
     const json = ratings.export();
-    const showText = () => {  // no clipboard here: put the text where it can be selected and copied by hand
+    const showText = () => { // no clipboard here: put the text where it can be selected and copied by hand
       link.textContent = 'Copy this text into config/ratings/<region>.json:';
       const box = el('textarea', { class: 'ratings-json', readonly: true, rows: 4 }, json);
       link.after(box);
@@ -618,18 +1025,20 @@ function aboutHtml() {
   const s = state.meta.sources || {};
   return `
   <h2>How it works</h2>
-  <p>No satellite photos and no AI image guessing. Every 50 m square of the region gets measured from <b>1 m height data</b>
-  and map data, then scored on what FPV pilots actually look for:</p>
+  <p>No satellite photos and no AI image guessing. Every 50 m square of the region is measured from <b>1 m height data</b>
+  and map data, then scored on what FPV pilots look for:</p>
   <ul>
     <li><b>Gaps</b>: openings 2–12 m wide between trees or buildings at least 5 m tall (whoop gaps up to 6 m).</li>
     <li><b>Lone trees</b>: single trees with open ground all round, for orbits and power loops.</li>
     <li><b>Edges, open space, tall stuff, slopes, water, bridges, bandos</b> nearby, and for the whoop: architecture, plazas, landmarks and under-canopy space.</li>
-    <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ seeds), and with your 👍 / 👎 ratings in “My taste”.</li>
+    <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
   </ul>
-  <p><b>Legal first.</b> A spot can't be picked unless it's legal for that drone: the 800 g 5" is Open <b>A3</b>
-  (150 m from houses, businesses, schools and parks; 50 m from buildings and busy roads), the 85 mm is <b>A1</b>.
-  Airport and prison flight restriction zones block both. MOD land is excluded. Land-owner rules (National Trust,
-  Forestry England, Woodland Trust, nature reserves) show up as warnings. Tap anywhere on the map for “can I fly here?”.</p>
+  <h3>Places worth a look, not permission</h3>
+  <p>Spots are suggestions to go and check. Each one says how it sits with the rules: the 800 g 5" flies Open <b>A3</b>
+  (150 m from houses, businesses, schools and parks; 50 m from buildings and busy roads), so parks show up but are marked
+  <b>sub-250 g only</b> unless they're A3-clear; the 85 mm flies <b>A1</b>. Airport and prison flight restriction zones and
+  MOD land are left out. Land-owner rules (National Trust, Forestry England, Woodland Trust, nature reserves) show as warnings.
+  Use <b>Can I fly here?</b>, right-click or long-press the map to check any point.</p>
   <h3>Be real about it</h3>
   <ul>
     <li>Heights: ${esc(s.heights || '')}. ${s.lidar_coverage ? `LiDAR covers ${Math.round(s.lidar_coverage * 100)}% of the region.` : 'Without LiDAR, small trees and gaps under 4 m get missed and building heights are estimates.'}</li>
@@ -641,11 +1050,19 @@ function aboutHtml() {
   <p>Kept in this browser only. <a href="#" data-export>${SANDBOXED ? 'Copy them' : 'Download them'}</a> to keep or feed back into the pipeline, or
   load a file: <input type="file" accept="application/json" data-import /></p>
   <p class="muted">Data: OpenStreetMap contributors (ODbL), Overture Maps, Meta/WRI canopy height, Environment Agency LiDAR (OGL),
-  NATS UAS restriction zones, Open-Meteo. Built ${esc(state.meta.generated_at || '')}.</p>`;
+  NATS UAS restriction zones, Open-Meteo. Base map © OpenFreeMap, OpenMapTiles. Built ${esc(state.meta.generated_at || '')}.</p>`;
 }
 
 boot();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD && !SANDBOXED) {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // Once it's running, have it fetch this region's map data so the app works offline in the field.
+  navigator.serviceWorker.register('./sw.js')
+    .then(() => navigator.serviceWorker.ready)
+    .then((reg) => reg.active?.postMessage({
+      precache: `${BASE}/offline.json`,
+      // this first visit loaded the app before the worker was running, so hand it what was loaded
+      urls: performance.getEntriesByType('resource').map((r) => r.name).filter((u) => u.includes('/assets/')),
+    }))
+    .catch(() => {});
 }

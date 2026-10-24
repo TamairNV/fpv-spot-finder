@@ -102,3 +102,77 @@ def test_two_seeds_are_matched_separately():
     comps["architecture"][20, 20] = 1.0  # one among buildings
     sim = scoring.similarity(comps, p, [[(5, 5)], [(20, 20)]], np.ones((30, 30), bool))
     assert sim[5, 5] == sim.max() and sim[20, 20] == sim.max()
+
+
+def test_gap_counts_only_when_you_can_fly_through_it():
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    ohm[500:530, 500:520] = 10
+    ohm[500:530, 526:546] = 10  # a gap between two stands, open field both sides
+    cells, gaps, _ = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert cells["gaps"].sum() >= 1 and any(g[5] for g in gaps)
+    # a clearing in the middle of a wood is a hole, not a line
+    wood = np.full((n, n), 12.0)
+    wood[500:506, 500:506] = 0
+    cells2, gaps2, _ = features.analyse(make_tile(wood), margin=m, size=1000)
+    assert cells2["gaps"].sum() == 0 and not any(g[5] for g in gaps2)
+
+
+def test_tree_line_vs_wood_block():
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    ohm[300:308, 200:400] = 10  # 200 m x 8 m tree line
+    ohm[600:700, 600:700] = 10  # 100 m square wood
+    cells, _, _ = features.analyse(make_tile(ohm), margin=m, size=1000)
+    line = cells["treeline_m"][(300 - m) // 50, (300 - m) // 50]
+    wood = cells["treeline_m"][(650 - m) // 50, (600 - m) // 50]
+    assert line > 20 and wood == 0
+    # west-facing edges: the wood's west side, not its east side
+    assert cells["edge_w_m"][(650 - m) // 50, (600 - m) // 50] > 0
+    assert cells["edge_w_m"][(650 - m) // 50, (699 - m) // 50] == 0
+
+
+def _flat_cells(n=60):
+    z = lambda v=0.0: np.full((n, n), v, dtype="float32")
+    return {"elev": z(), "tall_frac": z(), "h_p90": z(), "open_frac": z(1.0), "water_frac": z(), "road_frac": z(),
+            "bld_frac": z()}
+
+
+def test_sunset_view_sees_a_hill_to_the_west_not_the_east():
+    from spotfinder import derived
+
+    cells = _flat_cells()
+    cells["elev"][:, :10] = 200.0  # a big ridge along the west side
+    hz = derived.sunset_view(cells)["sunset_horizon"]
+    assert hz[30, 20] > 10          # just east of the ridge: the sunset is behind the hill
+    assert hz[30, 59] < hz[30, 20]  # further away it sits lower
+    cells2 = _flat_cells()
+    cells2["elev"][:, 50:] = 200.0  # same ridge in the east doesn't matter for sunset
+    assert derived.sunset_view(cells2)["sunset_horizon"][30, 40] < 1
+
+
+def test_open_room_grows_away_from_the_wood():
+    from spotfinder import derived
+
+    cells = _flat_cells(20)
+    cells["open_frac"][:, 0] = 0.0  # a wood along the west edge
+    room = derived.field_size(cells)["open_r_m"]
+    assert room[10, 0] == 0 and room[10, 1] == 50 and room[10, 10] == 500
+
+
+def test_why_points_add_up_to_the_score():
+    from spotfinder import export
+
+    p = scoring.PROFILES["freestyle5"]
+    comp = {k: 0.5 for k in p.weights}
+    stats = {k: 1 for k in ("gaps", "gaps_whoop", "lone_trees", "edge_m", "treeline_m", "open_pct", "tree_pct",
+                            "bld_pct", "water_m", "bridge_m", "places", "hazard_m", "access_m", "road_busy_m",
+                            "bando_m", "bando_site_m", "landmark_m", "west_edge_m")}
+    stats.update(lone_h_max=10.0, open_r_m=100, max_height_m=12.0, relief_m=20.0, sunset_deg=1.0, bld_h_max=0.0)
+    sim = np.full((3, 3), 0.5)
+    res = {"top": 0.4, "sim": sim}
+    out = export.why(comp, p, stats, res, 1, 1)
+    rule = scoring.rule_score({k: np.array(v) for k, v in comp.items()}, p)
+    expected = 100 * (0.6 * float(rule) / 0.4 + 0.4 * 0.5)
+    assert abs(sum(d["pts"] for d in out) - expected) < 1.5
+    assert out[0]["pts"] >= out[-1]["pts"] and all(d["text"] for d in out)

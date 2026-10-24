@@ -1,6 +1,6 @@
 // Turns `vite build --outDir dist-artifact` (with VITE_TARGET=artifact) into a page for a sandboxed
 // host that wraps it in its own <html>/<head>/<body>: page.html holds the title, the asset tags and
-// the app markup, and the files the host can't use (service worker, install icons, GPX) are dropped.
+// the app markup, and the files the host can't use (service worker and its offline list, install icons, GPX) are dropped.
 import { readFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -19,8 +19,9 @@ rmSync(join(dir, 'index.html'));
 
 for (const f of ['sw.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png']) rmSync(join(dir, f), { force: true });
 for (const region of readdirSync(join(dir, 'data'))) {
+  if (!statSync(join(dir, 'data', region)).isDirectory()) continue;
   for (const f of readdirSync(join(dir, 'data', region))) {
-    if (f.endsWith('.gpx')) rmSync(join(dir, 'data', region, f));
+    if (f.endsWith('.gpx') || f === 'offline.json') rmSync(join(dir, 'data', region, f));
   }
 }
 

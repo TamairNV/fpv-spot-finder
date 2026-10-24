@@ -1,25 +1,30 @@
 # FPV Spot Finder
 
-Finds places worth flying an FPV quad in the UK, and tells you straight away whether you're allowed to.
+Finds places worth flying an FPV quad in the UK, and tells you straight away how each one sits with the rules.
+
+**Open it:** https://tamairnv.github.io/fpv-spot-finder/ (Newcastle upon Tyne for now).
 
 It doesn't look at satellite photos. Every 50 m square of a region gets measured from 1 m height data
 (trees, buildings, gaps between them) and map data (land use, water, bridges, bandos, airspace),
 then scored on the things pilots actually look for. Spots you already like steer the ranking, and so
 do your 👍 / 👎 in the app.
 
-Two drone profiles out of the box:
+Three profiles out of the box:
 
 | Profile | Drone | UK category | What it hunts for |
 |---|---|---|---|
-| `freestyle5` | 5", 800 g with battery and action cam, no class mark | Open **A3** | gaps, lone trees, tree lines, open ground, drops, bandos, all on A3-legal ground |
+| `freestyle5` | 5", 800 g with battery and action cam, no class mark | Open **A3** | gaps, lone trees, tree lines, open ground, drops, bandos; each spot says whether it's A3-clear |
+| `cine5` | the same 5", flown smooth and cinematic | Open **A3** | rivers and coast, viaducts, hills and banks, landmarks and ruins, big fields, a clear view of the sunset; each spot says whether it's A3-clear |
 | `cine85` | 85 mm cinewhoop, under 250 g | Open **A1** | architecture, whoop-sized gaps, plazas, trees, water, bridges, landmarks |
 
 ![Spot card with the 3D model](docs/spot-card.png)
 
 ## What's in the app
 
-- **Map** with a heatmap of good areas, numbered pins for the top spots, airport/prison flight
-  restriction zones, and (zoomed in) where the 5" can't fly under A3.
+- **Map** with a heatmap of the best 12% of the ground, numbered pins for the top spots, airport/prison
+  flight restriction zones, and (zoomed in, greyed out) where the 5" isn't A3-clear.
+- **List and spot card in one panel** beside the map on a computer, and in a bottom sheet you drag
+  up and down on a phone. Every spot has a badge: A3 clear, partly A3, or sub-250 g only.
 - **Spot cards**: why it scored (in words and as a breakdown), what's there (gaps, lone trees,
   edges, tallest thing, drop, distance to water/bando/bridge), a suggested take-off point, the
   legal picture for that drone, land-owner warnings, sunrise/golden hour, and an 18-hour wind and
@@ -30,7 +35,8 @@ Two drone profiles out of the box:
 - **Fly it**: a tiny sim inside the 3D model. Keyboard flies in angle mode with climb-rate hold;
   plug your radio in as a USB joystick (EdgeTX/OpenTX "USB Joystick") and it flies acro on the sticks,
   with 5" or whoop-ish rates. Fly through the gap rings to tick them off.
-- **Can I fly here?**: tap anywhere on the map for a verdict for both drones, with reasons.
+- **Can I fly here?**: press the button and tap the map, or right-click / long-press anywhere, for a
+  verdict for both drones, with reasons.
 - **Ratings**: 👍 / 👎 any spot. "My taste" re-ranks the list with a small model trained on your
   ratings; "More like this" finds spots similar to one you like. Ratings stay in your browser and can
   be exported and fed back into the pipeline.
@@ -53,6 +59,10 @@ npm run dev          # http://localhost:5173
 
 `npm run build` makes a static site in `web/dist/` you can host anywhere (GitHub Pages, Netlify, a
 phone on the same Wi-Fi with `npm run preview -- --host`).
+
+`npm run deploy` builds it and force-pushes `web/dist` to the `gh-pages` branch, which GitHub Pages
+serves at https://tamairnv.github.io/fpv-spot-finder/ (it takes a minute or two to go live). The
+branch only ever holds the latest build.
 
 ### The pipeline (to re-score, change rules, or add a region)
 
@@ -123,20 +133,33 @@ seeds; places like your thumbs-down spots get pulled down.
 1. **Heights at 1 m**: EA LiDAR first-return surface minus bare earth where available; otherwise
    Meta's tree-height model plus Overture building heights.
 2. **Geometry per 1 km tile**: tall = 4 m and up. Gaps are found by closing the tall mask (5 m) and
-   keeping the bits that were open: 2-12 m wide, both sides at least 5 m tall. Lone trees are tall
-   blobs with at least 80% open ground in a 10 m ring. Edges are tall pixels touching open ground.
-   With LiDAR, the difference between first and last returns finds room under the canopy.
+   keeping the bits that were open: 2-12 m wide, both sides at least 5 m tall, and open ground 8 m out
+   on both sides so you can actually fly through (a hole in a wood's canopy doesn't count). Gaps score
+   by width and how tall their sides are. Lone trees are tall blobs with at least 80% open ground in a
+   10 m ring. Edges are tall pixels touching open ground; tree lines are long, narrow belts of trees
+   (40 m+ long, under 15 m wide). With LiDAR, the difference between first and last returns finds
+   room under the canopy.
 3. **Context** from OSM and Overture: distance to water, bridges and viaducts, bandos (ruins,
-   abandoned/disused structures), cliffs and quarries, landmarks, masts and cranes, paths, car parks;
-   and how busy a place is.
+   abandoned/disused structures), cliffs and quarries, landmarks, masts and cranes, paths, car parks,
+   fast main roads, farmland and public open space; and how busy a place is. A mapped bando only counts
+   in full if LiDAR shows something solid still standing there; old pit and shaft markers with nothing
+   left count a little. Town-wall towers, gates and abbeys are landmarks, not bandos.
+   Also worked out per spot: how big the open field is, how far it is to walk in from a path or road,
+   and how high the skyline is towards the sunset (west-south-west to west-north-west, out to 2 km,
+   hills, woods and buildings included).
 4. **Legal grid at 5 m**: A3 needs 150 m from residential, commercial, industrial and recreational
    land and 50 m from buildings and busy roads; flight restriction zones and restricted areas block
    both drones. MOD land and danger areas are never suggested, and nor is anywhere a spot would
    reach onto them. National Trust, Forestry England, Woodland Trust, nature reserves, golf courses,
    cemeteries, railways (not ones in tunnels) and power lines are flagged.
-5. **Score**: a weighted rule score (only counting features on ground the drone may legally use),
-   blended 60/40 with similarity to your seed spots. Legality is a gate, not a weight. Spots are
-   picked greedily with a minimum spacing (400 m for the 5", 250 m for the whoop).
+5. **Score**: a weighted rule score blended 60/40 with similarity to your seed spots. Spots are
+   suggestions to go and look at, so legality is a label rather than a filter: anywhere outside
+   flight restriction zones and away from MOD land can be picked, and each spot says how much of it
+   is A3-clear. `python -m spotfinder score --strict` brings back the old behaviour (the 5" only
+   gets A3-clear ground). Spots are picked greedily with a minimum spacing (400 m for the 5", 600 m
+   for 5" cine, 250 m for the whoop).
+   Each spot carries a "why" list: points out of 100 per reason, with the numbers behind it (e.g.
+   "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
 
 ## Be real about it
 

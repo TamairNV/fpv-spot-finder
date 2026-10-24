@@ -8,7 +8,7 @@ profile = "freestyle5"
 lat = 54.9808
 lon = -1.6400
 radius_m = 180
-note = "Weaving in and around the tree clumps on the Town Moor edge, near Hunters Moor Hospital. Style seed only: the moor counts as a recreational area, so it isn't A3-legal for an 800 g quad."
+note = "Weaving in and around the tree clumps on the Town Moor edge, near Hunters Moor Hospital. The moor counts as a recreational area, so it isn't A3-clear for an 800 g quad."
 
 [[seed]]
 name = "Newcastle Helix: Urban Sciences Building and Frederick Douglass Centre"

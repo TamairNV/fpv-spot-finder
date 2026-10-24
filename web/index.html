@@ -4,29 +4,37 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>FPV Spot Finder</title>
-  <meta name="theme-color" content="#0f1417" />
+  <meta name="description" content="Finds spots worth a look for 5&quot; freestyle and cinewhoop FPV flying, from 1 m LiDAR heights and map data." />
+  <meta name="theme-color" content="#101519" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23ff3d7f' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ffc23d'/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23ff5a8a' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23ffc400'/%3E%3C/svg%3E" />
 </head>
 <body>
   <div id="app">
     <header id="topbar">
-      <div class="brand"><span class="logo"></span><span>FPV Spot Finder</span><span id="region-name" class="muted"></span></div>
-      <div class="seg" id="profile-switch" role="tablist" aria-label="Drone">
-        <button data-profile="freestyle5" role="tab">5" freestyle</button>
-        <button data-profile="cine85" role="tab">85 mm cine</button>
+      <div class="brand"><span class="logo" aria-hidden="true"></span><span class="brand-name">FPV Spot Finder</span><span id="region-name"></span></div>
+      <div class="seg" id="profile-switch" role="tablist" aria-label="Which drone">
+        <button data-profile="freestyle5" role="tab"><span class="long">5" freestyle</span><span class="short">5"</span></button>
+        <button data-profile="cine85" role="tab"><span class="long">85 mm cine</span><span class="short">85 mm</span></button>
       </div>
       <div class="top-actions">
-        <button id="btn-layers" class="ghost" aria-haspopup="true">Layers</button>
-        <button id="btn-about" class="ghost">How it works</button>
+        <button id="btn-layers" class="tb-btn" aria-haspopup="true" aria-expanded="false" title="Map layers">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5Zm-7.6 8.8L2 13l10 5 10-5-2.4-1.2L12 15.6l-7.6-3.8Zm0 4.4L2 17.4l10 5 10-5-2.4-1.2L12 20l-7.6-3.8Z"/></svg>
+          <span class="lbl">Layers</span>
+        </button>
+        <button id="btn-about" class="tb-btn" title="How it works">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-6h2v6Zm0-8h-2V7h2v2Z"/></svg>
+          <span class="lbl">How it works</span>
+        </button>
       </div>
       <div id="layers-pop" class="pop" hidden>
-        <label><input type="checkbox" id="lyr-heat" checked /> Spot heatmap</label>
-        <label><input type="checkbox" id="lyr-legal" checked /> Where you can't fly (this drone)</label>
-        <label><input type="checkbox" id="lyr-zones" checked /> Airport / prison no-fly zones</label>
-        <label><input type="checkbox" id="lyr-spots" checked /> Spot pins</label>
-        <hr />
+        <div class="pop-title">On the map</div>
+        <label><input type="checkbox" id="lyr-heat" checked /><i class="sw sw-heat"></i><span>Best areas <small>(top 12%, hotter is better)</small></span></label>
+        <label id="lyr-legal-row"><input type="checkbox" id="lyr-legal" checked /><i class="sw sw-a3"></i><span>Not A3-clear <small>(5" needs 150 m from houses and parks)</small></span></label>
+        <label><input type="checkbox" id="lyr-zones" checked /><i class="sw sw-frz"></i><span>No-fly zones <small>(airports, prisons)</small></span></label>
+        <label><input type="checkbox" id="lyr-spots" checked /><i class="sw sw-pin"></i><span>Spot pins</span></label>
+        <div class="pop-title" id="basemap-title">Base map</div>
         <div class="seg small" id="basemap-switch">
           <button data-base="map">Map</button>
           <button data-base="satellite">Satellite</button>
@@ -34,33 +42,57 @@
       </div>
     </header>
 
-    <aside id="sidebar">
-      <div class="side-head">
-        <div class="side-tabs seg small" id="list-sort">
-          <button data-sort="score">Best</button>
-          <button data-sort="taste">My taste</button>
-          <button data-sort="near">Near me</button>
+    <main id="map" aria-label="Map"></main>
+
+    <div id="map-tools">
+      <button id="btn-check" class="map-btn" aria-pressed="false" title="Check whether you can fly at a point (or right-click / long-press the map)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>
+        <span>Can I fly here?</span>
+      </button>
+      <div id="check-hint" class="hint" hidden><span>Tap the map anywhere to check it.</span><button id="check-done">Done</button></div>
+      <div id="check-card" class="check-card" role="status" hidden></div>
+    </div>
+
+    <aside id="panel" data-view="list" aria-label="Spots">
+      <div id="sheet-handle" class="sheet-handle" role="button" tabindex="0" aria-label="Drag to resize"><span></span></div>
+
+      <section id="view-list" class="view">
+        <div class="list-head drag-zone">
+          <div class="list-head-row">
+            <div class="seg small" id="list-sort" role="tablist" aria-label="Sort spots">
+              <button data-sort="score" role="tab">Best</button>
+              <button data-sort="taste" role="tab">My taste</button>
+              <button data-sort="near" role="tab">Near me</button>
+            </div>
+            <span id="list-count" class="muted"></span>
+          </div>
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3Zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z"/></svg>
+            <input id="search" type="search" placeholder="Search spots or places" autocomplete="off" enterkeyhint="search" />
+            <button id="search-clear" class="search-clear" aria-label="Clear search" hidden>×</button>
+          </div>
+          <div class="filters" id="filters">
+            <button class="fchip" data-filter="a3" aria-pressed="false" title="Only spots where the 800 g quad is clear of the A3 distances">A3-clear only</button>
+          </div>
         </div>
-        <input id="search" type="search" placeholder="Filter by name or place" autocomplete="off" />
-      </div>
-      <div id="taste-note" class="note" hidden></div>
-      <ol id="spot-list"></ol>
-      <div id="seeds-box"></div>
+        <div class="scroll" id="list-scroll">
+          <div id="now-box" class="now" hidden></div>
+          <div id="taste-note" class="note" hidden></div>
+          <div id="seeds-box"></div>
+          <ol id="spot-list"></ol>
+          <div id="list-empty" class="empty" hidden></div>
+          <div id="list-foot"></div>
+        </div>
+      </section>
+
+      <section id="view-spot" class="view" hidden>
+        <div id="spot-head" class="spot-head drag-zone"></div>
+        <div class="scroll" id="spot-scroll"><div id="detail-body"></div></div>
+      </section>
     </aside>
 
-    <main id="map"></main>
-
-    <section id="detail" hidden>
-      <div class="detail-scroll">
-        <button class="close" id="detail-close" aria-label="Close">×</button>
-        <div id="detail-body"></div>
-      </div>
-    </section>
-
-    <div id="fly-check" class="toast" hidden></div>
-
     <dialog id="about">
-      <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+      <form method="dialog"><button class="dlg-close" aria-label="Close">×</button></form>
       <div id="about-body"></div>
     </dialog>
   </div>

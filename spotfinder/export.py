@@ -6,11 +6,14 @@ import datetime as dt
 import json
 import logging
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely
 from PIL import Image
 from shapely import STRtree
 from shapely.geometry import Point, mapping
@@ -26,6 +29,10 @@ CELL = 50
 LEGAL_RES = 20  # metres per pixel in the legal lookup/overlay images
 PREVIEW_M = 320
 PREVIEW_RES = 2
+
+# Spot fields only the spot card uses (gap and tree positions, the why breakdown, outside links):
+# written to spot_details_<profile>.json so the list's file stays small.
+DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links")
 
 # Codes in the legal lookup image (blue channel).
 CODE_CLEAR, CODE_FRZ, CODE_RESTRICTED = 0, 1, 2
@@ -159,18 +166,27 @@ def write_legal_layers(region: Region) -> list:
         code20, flags20 = z["code"], z["flags"]
     lookup = np.stack([flags20 & 0xFF, flags20 >> 8, code20], axis=-1).astype("uint8")
     lookup, corners = to_mercator(region, lookup, LEGAL_RES, LEGAL_RES, Resampling.nearest)
-    Image.fromarray(lookup, "RGB").save(out / "legal_lookup.png", optimize=True)
+    # Exact palette when the codes fit in 256 colours (they nearly always do): ~30% smaller, same pixels.
+    packed = lookup.astype("uint32") @ np.array([1 << 16, 1 << 8, 1], dtype="uint32")
+    colours, inv = np.unique(packed, return_inverse=True)
+    if len(colours) <= 256:
+        im = Image.fromarray(inv.reshape(lookup.shape[:2]).astype("uint8"), "P")
+        im.putpalette(np.stack([colours >> 16, (colours >> 8) & 0xFF, colours & 0xFF], axis=-1).ravel().tolist())
+    else:
+        im = Image.fromarray(lookup, "RGB")
+    im.save(out / "legal_lookup.png", optimize=True)
     code = lookup[..., 2]
 
     def overlay(nogo_a3: bool) -> np.ndarray:
-        rgba = np.zeros(code.shape + (4,), dtype="uint8")
-        if nogo_a3:
-            rgba[code >= 10] = [245, 158, 11, 70]
-        rgba[np.isin(code, [CODE_FRZ, CODE_RESTRICTED])] = [220, 38, 38, 120]
-        return rgba
+        idx = np.zeros(code.shape, dtype="uint8")
+        if nogo_a3:  # greyed out: not A3-clear, so sub-250 g only
+            idx[code >= 10] = 1
+        idx[np.isin(code, [CODE_FRZ, CODE_RESTRICTED])] = 2
+        return idx
 
-    Image.fromarray(overlay(True), "RGBA").save(out / "legal_freestyle5.png", optimize=True)
-    Image.fromarray(overlay(False), "RGBA").save(out / "legal_cine85.png", optimize=True)
+    colours = [(0, 0, 0, 0), (71, 85, 105, 90), (220, 38, 38, 110)]
+    for key, p in scoring.PROFILES.items():
+        _palette_png(overlay("A3" in p.category), colours, out / f"legal_{key}.png")
     (out / "zones.geojson").write_text((region.out_dir / "zones.geojson").read_text())
     return corners
 
@@ -240,6 +256,23 @@ class Namer:
 
 # ---------------------------------------------------------------- previews
 
+# zlib releases the GIL, so the ~250 preview PNGs encode on a few threads while the next spot is built.
+_png_pool: ThreadPoolExecutor | None = None
+_png_jobs: list = []
+
+
+def _save_png(im: Image.Image, path: Path) -> None:
+    global _png_pool
+    if _png_pool is None:
+        _png_pool = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
+    _png_jobs.append(_png_pool.submit(im.save, path, optimize=True))
+
+
+def _flush_pngs() -> None:
+    while _png_jobs:
+        _png_jobs.pop().result()
+
+
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path) -> dict:
     """160 x 160 px at 2 m: R = class*64, G = height above ground (0.25 m), B = ground (0.5 m above min)."""
     half = PREVIEW_M // 2
@@ -275,7 +308,7 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
         np.clip(np.round(h * 4), 0, 255),
         np.clip(np.round((ground - gmin) * 2), 0, 255),
     ], axis=-1).astype("uint8")
-    Image.fromarray(rgb, "RGB").save(path, optimize=True)
+    _save_png(Image.fromarray(rgb, "RGB"), path)
     return {"size": n, "res": PREVIEW_RES, "ground_min": round(gmin, 1),
             "lidar": bool(t.lidar.mean() > 0.5)}
 
@@ -291,17 +324,30 @@ def _heat_png(region: Region, final: np.ndarray, eligible: np.ndarray, path: Pat
         h, w = s.shape
         s = s[: h - h % block, : w - w % block].reshape(h // block, block, w // block, block).max(axis=(1, 3))
     s, corners = to_mercator(region, s, CELL * block, CELL * block / 2, Resampling.nearest)
-    t = np.clip((s - 0.7) / 0.3, 0, 1)  # top 30% of the region gets colour
-    # dark teal -> amber -> hot pink, transparent below the cut
-    stops = np.array([[20, 120, 140], [250, 190, 40], [240, 40, 120]], dtype=float)
-    seg = np.clip(t * 2, 0, 2)
+    # only the best 12% of the land gets colour; the zoomed-out layer keeps the max of each block,
+    # so it cuts higher to colour about as much ground
+    cut = 0.88 if block == 1 else 0.95
+    t = np.clip((s - cut) / (1 - cut), 0, 1)
+    # Palette PNG: index 0 is transparent, 1..255 run along the ramp. Far smaller than RGBA, and
+    # no visible banding, since the ramp only has 255 steps on screen anyway.
+    idx = np.where(t > 0, 1 + np.round(t * 254), 0).astype("uint8")
+    lv = np.linspace(0, 1, 255)
+    # amber -> orange -> magenta, fading in from transparent so the map stays readable
+    stops = np.array([[255, 196, 0], [255, 112, 48], [214, 36, 110]], dtype=float)
+    seg = np.clip(lv * 2, 0, 2)
     i = np.minimum(seg.astype(int), 1)
     f = (seg - i)[..., None]
-    rgb = stops[i] * (1 - f) + stops[i + 1] * f
-    alpha = np.where(t > 0, 60 + 170 * t, 0)
-    rgba = np.concatenate([rgb, alpha[..., None]], axis=-1).astype("uint8")
-    Image.fromarray(rgba, "RGBA").save(path, optimize=True)
+    rgb = np.round(stops[i] * (1 - f) + stops[i + 1] * f)
+    alpha = np.round(30 + 190 * lv ** 1.2)
+    _palette_png(idx, [(0, 0, 0, 0)] + [(*c, a) for c, a in zip(rgb.astype(int), alpha.astype(int))], path)
     return corners
+
+
+def _palette_png(idx: np.ndarray, colours: list[tuple], path: Path) -> None:
+    """Indexed PNG with per-entry alpha (tRNS): far smaller than RGBA for overlays with few colours."""
+    im = Image.fromarray(idx, "P")
+    im.putpalette([v for c in colours for v in c[:3]])
+    im.save(path, optimize=True, transparency=bytes(int(c[3]) for c in colours))
 
 
 def _gpx(feats: list[dict], title: str) -> str:
@@ -328,6 +374,65 @@ def _drivers(comp_vals: dict[str, float], profile: scoring.Profile) -> list[str]
     return [scoring.COMPONENT_TEXT[k] for k, v in pos[:3] if v > 0.02]
 
 
+def _why_text(k: str, key: str, s: dict) -> str:
+    """One line per reason, with the numbers that earned it."""
+    plural = lambda n, one, many: f"{n} {one if n == 1 else many}"
+    away = lambda m: "right here" if m < 25 else f"{m} m away"
+    bando = (f"Ruin or abandoned structure {away(s['bando_m'])}" if s["bando_m"] <= s["bando_site_m"]
+             else f"Old industrial site {away(s['bando_site_m'])} (not much left standing)")
+    texts = {
+        "gaps": (plural(s["gaps_whoop"], "whoop-sized gap", "whoop-sized gaps") + " to thread" if key == "cine85"
+                 else plural(s["gaps"], "fly-through gap", "fly-through gaps") + " between trees or buildings"),
+        "lone": plural(s["lone_trees"], "lone tree", "lone trees") + f" to orbit, tallest {s['lone_h_max']:.0f} m",
+        "edges": f"{s['treeline_m']} m of tree line to skim" if s["treeline_m"] >= 30
+        else f"{s['edge_m']} m of tree and building edges",
+        "space": f"Open ground {s['open_r_m']} m out from the middle to carry speed" if s["open_r_m"] >= 50
+        else f"{s['open_pct']}% open ground",
+        "mix": f"Good mix: {s['tree_pct']}% trees, {s['open_pct']}% open",
+        "vertical": f"Tall stuff to dive, up to {s['max_height_m']:.0f} m",
+        "relief": f"{s['relief_m']:.0f} m of height change: banks and slopes to dive",
+        "bando": bando,
+        "water": f"Water {s['water_m']} m away" if s["water_m"] >= 25 else "Right by the water",
+        "bridge": f"Bridge or viaduct {away(s['bridge_m'])}",
+        "architecture": f"Buildings up to {s['bld_h_max']:.0f} m, {s['bld_pct']}% built up",
+        "trees": f"{s['tree_pct']}% trees to weave through",
+        "under": "Room to fly under the canopy",
+        "landmark": f"Landmark {away(s['landmark_m'])}",
+        "plaza": "Open plaza between buildings",
+        "sunset": f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"
+        if s["sunset_deg"] <= -1 else f"{s['west_edge_m']} m of trees and walls facing the sunset, open ground in front",
+        "public": "Public open space to fly from",
+        "busy": f"Busy: {s['places']} shops, cafés and the like nearby, plus paths" if s["places"]
+        else "Busy footpaths: expect walkers",
+        "hazard": f"Power line, mast or crane {away(s['hazard_m'])}",
+        "permission": "Land that needs the owner's permission",
+        "wet": "Mostly water",
+        "remote": f"{s['access_m']} m from the nearest path or road",
+        "farm": "Farmland: crops or livestock, ask the farmer first",
+        "road": f"Fast main road {away(s['road_busy_m'])}",
+        "crowds": "Crowded place: never fly over people",
+    }
+    return texts.get(k, scoring.COMPONENT_TEXT.get(k, k))
+
+
+def why(comp_vals: dict[str, float], profile: scoring.Profile, stats: dict, res: dict, r: int, c: int) -> list[dict]:
+    """The score taken apart: points (out of 100) per reason, biggest first, penalties last.
+    The rule part is 60% of the score when there are seed spots (100% without), shared out by weight."""
+    pos = sum(w for w in profile.weights.values() if w > 0)
+    has_taste = res["sim"] is not None
+    scale = 100 * (0.6 if has_taste else 1.0) / (pos * max(res["top"], 1e-6))
+    out = []
+    for k, w in profile.weights.items():
+        pts = scale * w * comp_vals.get(k, 0.0)
+        if abs(pts) >= 0.5:
+            out.append({"key": k, "text": _why_text(k, profile.key, stats), "pts": round(pts, 1)})
+    if has_taste:
+        out.append({"key": "taste", "text": "Like your favourite spots and 👍 ratings",
+                    "pts": round(40 * float(res["sim"][r, c]), 1)})
+    out.sort(key=lambda d: -d["pts"])
+    return out
+
+
 def _flags_text(flag_bits: int) -> list[str]:
     return [txt for bit, txt in legal.FLAG_TEXT.items() if flag_bits & bit and bit != legal.FLAG_COMMON]
 
@@ -340,8 +445,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
     namer = Namer(region)
     gaps = pd.read_parquet(region.out_dir / "gaps.parquet")
     lone = pd.read_parquet(region.out_dir / "lone.parquet")
-    gap_tree = STRtree([Point(xy) for xy in zip(gaps.x, gaps.y)]) if len(gaps) else None
-    lone_tree = STRtree([Point(xy) for xy in zip(lone.x, lone.y)]) if len(lone) else None
+    gap_tree = STRtree(shapely.points(gaps.x.values, gaps.y.values)) if len(gaps) else None
+    lone_tree = STRtree(shapely.points(lone.x.values, lone.y.values)) if len(lone) else None
     reader = HeightReader(region)
     from .context import load_dtm
 
@@ -366,14 +471,15 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             wmax = lambda k: float(cells[k][win].max())
             wmin = lambda k: float(cells[k][win].min())
             flag_bits = int(np.bitwise_or.reduce(cells["flags"][win].astype("int64").ravel()))
-            # Take-off: the most open, legal, path-adjacent cell in the window.
+            # Take-off: an open, path-adjacent cell in the window, legal for this drone if there is one.
             best, best_cost = (r, c), 1e9
             for rr in range(win[0].start, win[0].stop):
                 for cc in range(win[1].start, win[1].stop):
-                    legal_frac = cells[profile.legal_key][rr, cc]
-                    if cells["open_frac"][rr, cc] < 0.5 or legal_frac < 0.9:
+                    if cells["open_frac"][rr, cc] < 0.5 or cells["a1_frac"][rr, cc] < 0.9:
                         continue
                     cost = cells["dist_path"][rr, cc] + 0.5 * CELL * math.hypot(rr - r, cc - c)
+                    if cells[profile.legal_key][rr, cc] < 0.9:
+                        cost += 300
                     if cost < best_cost:
                         best, best_cost = (rr, cc), cost
             tx, ty = cell_center(region, *best)
@@ -404,10 +510,16 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                            "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
             gr = os_grid_ref(x, y)
             a3_clear = wm("a3_frac")
-            if key == "freestyle5":
-                a_txt = (f"Open A3: {round(100 * a3_clear)}% of this spot is clear of the A3 distances (150 m from "
-                         "houses, businesses and parks; 50 m from buildings and busy roads). Take off and fly in the "
-                         "clear part; the amber overlay shows the no-go edges.")
+            if profile.legal_key == "a3_frac":
+                if a3_clear >= 0.9:
+                    a_txt = ("Open A3: clear of the A3 distances (150 m from houses, businesses and parks; 50 m from "
+                             "buildings and busy roads).")
+                elif a3_clear >= 0.3:
+                    a_txt = (f"Partly A3-clear ({round(100 * a3_clear)}%). Keep the 5\" in the clear part; the grey "
+                             "overlay shows where it isn't. The rest is fine for a sub-250 g drone under A1.")
+                else:
+                    a_txt = ("Not A3-clear: houses, businesses or a park within 150 m, so an 800 g quad is outside "
+                             "the Open A3 rules here. A sub-250 g drone can fly it under A1.")
             else:
                 a_txt = "Open A1 (under 250 g): outside flight restriction zones. Never fly over crowds."
             props = {
@@ -416,6 +528,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 "taste": None if res["sim"] is None else round(100 * float(res["sim"][r, c])),
                 "title": title, "locality": locality, "gridref": gr,
                 "components": comp_vals, "drivers": _drivers(comp_vals, profile),
+                "why": None,
                 "stats": {
                     "gaps": int(ws("gaps")), "gaps_whoop": int(ws("gaps_whoop")), "lone_trees": int(ws("lone")),
                     "edge_m": int(ws("edge_tree_m") + ws("edge_bld_m")), "open_pct": round(100 * wm("open_frac")),
@@ -426,6 +539,12 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "parking_m": int(wmin("dist_parking")), "hazard_m": int(wmin("dist_hazard")),
                     "places": int(ws("places_n")), "buildings": int(ws("bld_n")),
                     "lidar_pct": round(100 * wm("lidar_frac")),
+                    "gaps_all": int(ws("gaps_all")), "west_edge_m": int(ws("edge_w_m")), "treeline_m": int(ws("treeline_m")),
+                    "open_r_m": int(wmax("open_r_m")), "sunset_deg": round(wmin("sunset_horizon"), 1),
+                    "access_m": int(wmin("dist_access")), "road_busy_m": int(wmin("dist_road_busy")),
+                    "bando_site_m": int(wmin("dist_bando_site")), "landmark_m": int(wmin("dist_landmark")),
+                    "lone_h_max": round(wmax("lone_h_max"), 1), "bld_h_max": round(wmax("bld_h_max"), 1),
+                    "gap_q": round(ws("gq5" if key != "cine85" else "gqw"), 1),
                 },
                 "legal": {"summary": a_txt, "flags": _flags_text(flag_bits), "a3_clear_pct": round(100 * a3_clear),
                           "a3_edge_m": int(wmin("dist_a3_edge"))},
@@ -440,10 +559,16 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "dronemap": "https://dronesafetymap.co.uk/",
                 },
             }
+            props["why"] = why(comp_vals, profile, props["stats"], res, r, c)
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
-        (out / f"spots_{key}.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
         (out / f"spots_{key}.gpx").write_text(_gpx(feats, f"{profile.label} spots, {region.name}"))
+        # The list only needs the summary; the spot card's extras load after the list is up.
+        details = {f["properties"]["id"]: {k: f["properties"].pop(k) for k in DETAIL_KEYS if k in f["properties"]}
+                   for f in feats}
+        (out / f"spots_{key}.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats},
+                                                             separators=(",", ":")))
+        (out / f"spot_details_{key}.json").write_text(json.dumps(details, separators=(",", ":")))
         log.info("wrote %d %s spots", len(feats), key)
 
     seed_out = []
@@ -469,6 +594,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
         entry["preview"] = {"file": f"previews/{r}-{c}.png", **done_previews[(r, c)],
                             "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
         seed_out.append(entry)
+    _flush_pngs()
 
     xmin, ymin, xmax, ymax = region.bbox
     site_meta = {
@@ -479,7 +605,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                    "legal_res_m": LEGAL_RES, "cell_m": CELL},
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "sources": meta,
-        "profiles": {k: {"label": p.label, "drone": p.drone, "category": p.category,
+        "profiles": {k: {"label": p.label, "short": p.short, "drone": p.drone, "category": p.category,
                          "weights": p.weights, "radius_m": (p.radius_cells + 0.5) * CELL,
                          "components": {c: scoring.COMPONENT_TEXT.get(c, c) for c in p.weights}}
                      for k, p in scoring.PROFILES.items()},
@@ -499,3 +625,12 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "classes": ["ground", "water", "road", "path", "tree", "building"]},
     }
     (out / "meta.json").write_text(json.dumps(site_meta, indent=2))
+    write_offline_list(out, site_meta["generated_at"])
+
+
+def write_offline_list(out: Path, generated_at: str) -> None:
+    """What the service worker fetches for offline use: everything but the 3D previews and GPX."""
+    files = sorted(p.relative_to(out).as_posix() for p in out.rglob("*")
+                   if p.is_file() and p.suffix != ".gpx" and p.name != "offline.json"
+                   and p.relative_to(out).parts[0] != "previews")
+    (out / "offline.json").write_text(json.dumps({"generated_at": generated_at, "files": files}, indent=0))

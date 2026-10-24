@@ -27,6 +27,8 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--no-lidar", action="store_true", help="ignore LiDAR even if it's there")
         p.add_argument("--spots", type=int, default=250, help="spots per profile")
         p.add_argument("--previews", type=int, default=120, help="3D previews per profile")
+        p.add_argument("--strict", action="store_true",
+                       help="only list spots each drone may fly under its Open subcategory (default: label them)")
         if name == "lidar":
             p.add_argument("--top", type=int, default=0,
                            help="only fetch the 1 km squares under the best N spots per profile (0 = whole region)")
@@ -50,7 +52,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "legal":
         pipeline.refresh_legal(region)
     if args.cmd in ("score", "run"):
-        pipeline.score_and_export(region, n_spots=args.spots, previews=args.previews)
+        pipeline.score_and_export(region, n_spots=args.spots, previews=args.previews, strict=args.strict)
     logging.info("done in %.0fs", time.time() - t0)
 
 
