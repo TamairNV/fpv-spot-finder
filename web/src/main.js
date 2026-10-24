@@ -4,7 +4,7 @@ import './style.css';
 import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save, SANDBOXED } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
-import { renderSpot, legalBadge, nice } from './detail.js';
+import { renderSpot, legalBadge, nice, BANDO_STATE } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
 
@@ -741,6 +741,7 @@ function renderList() {
     renderList();
   });
   renderSeeds(label);
+  renderBandoHits();
   $('#spot-list').replaceChildren(...list.map(spotRow));
   const empty = $('#list-empty');
   empty.hidden = list.length > 0;
@@ -951,16 +952,7 @@ function showSpot(f, isSeed) {
     onBack: () => goBack(),
     onNote: () => renderList(),
     nearBandos: hasBandos() ? () => loadBandos().then(() => bandosNear(f.geometry.coordinates, 1000, 4)) : null,
-    onBando: (b) => {
-      state.bandos = $('#lyr-bandos').checked = true;  // asked to see one, so the layer stays on
-      savePrefs();
-      syncBandos();
-      const H = sheetHeights();
-      if (PHONE.matches && state.sheet === 'full') setSheet('half');
-      map.flyTo({ center: b.geometry.coordinates, zoom: Math.max(map.getZoom(), 15.5), essential: true, duration: 1200,
-        padding: PHONE.matches ? { top: 260, bottom: H.half, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 } });
-      showBando(b);
-    },
+    onBando: showBandoOnMap,
   });
   $('#spot-scroll').scrollTop = 0;
 }
@@ -1101,6 +1093,57 @@ function syncBandos() {
   const on = bandosWanted();
   if (on) loadBandos();
   for (const id of ['bandos-site', 'bandos-dots']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+}
+
+// Asked to see one (or some), so the layer stays on: it's ticked in Layers.
+function bandosOnMap() {
+  state.bandos = $('#lyr-bandos').checked = true;
+  savePrefs();
+  syncBandos();
+  if (PHONE.matches && state.sheet === 'full') setSheet('half');
+  return PHONE.matches ? { top: 260, bottom: sheetHeights().half, left: 30, right: 30 } : { top: 60, bottom: 60, left: 60, right: 60 };
+}
+
+function showBandoOnMap(b) {
+  const padding = bandosOnMap();
+  map.flyTo({ center: b.geometry.coordinates, zoom: Math.max(map.getZoom(), 15.5), essential: true, duration: 1200,
+    padding: PHONE.matches ? padding : { top: 0, bottom: 0, left: 0, right: 0 } });
+  showBando(b);
+}
+
+function showAllBandos(list) {
+  const padding = bandosOnMap();
+  const xs = list.map((f) => f.geometry.coordinates[0]), ys = list.map((f) => f.geometry.coordinates[1]);
+  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });  // a fly-to's padding sticks and would add to this
+  map.fitBounds([[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]], { padding: { ...padding, top: 70 }, maxZoom: 15.5, duration: 1200 });
+}
+
+// Searching names a bando too ("priory", "mine", "bunker"; "bandos" lists the lot), above the spots.
+function renderBandoHits() {
+  const box = $('#bando-hits');
+  const q = state.query.trim().toLowerCase();
+  if (q.length < 3 || !hasBandos()) return box.replaceChildren();
+  if (!bandosData) {
+    loadBandos().then(() => state.query.trim().toLowerCase() === q && renderBandoHits());
+    return box.replaceChildren();
+  }
+  const all = /^bandos?$/.test(q);
+  const hits = bandosData.features
+    .filter((f) => all || `${f.properties.n || ''} ${f.properties.k}`.toLowerCase().includes(q))
+    .sort((a, b) => (b.properties.s === 1) - (a.properties.s === 1) || !!b.properties.n - !!a.properties.n
+      || (b.properties.h ?? 0) - (a.properties.h ?? 0));
+  if (!hits.length) return box.replaceChildren();
+  box.replaceChildren(
+    el('div', { class: 'section-label bando-label' }, `Bandos · ${hits.length}`,
+      hits.length > 1 ? el('button', { class: 'linklike', onclick: () => showAllBandos(hits) }, 'Show all on the map') : null),
+    el('ul', { class: 'bando-hits' }, hits.slice(0, 5).map((f) => {
+      const p = f.properties;
+      return el('li', { class: 'bando-hit', title: 'Show it on the map', onclick: () => showBandoOnMap(f) },
+        el('i', { class: `bdot s${p.s}` }),
+        el('div', {},
+          el('div', { class: 'spot-name' }, p.n || p.k),
+          el('div', { class: 'spot-sub' }, [p.n ? p.k : null, BANDO_STATE[p.s](p.h)].filter(Boolean).join(' · '))));
+    })));
 }
 
 function bandosNear(c, maxD, n) {

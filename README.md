@@ -50,7 +50,8 @@ Three profiles out of the box:
 - **Bandos on the map**: every ruin and derelict building on OpenStreetMap as a purple dot (solid
   if LiDAR still sees something standing, a ring if little is left). Tap one for what it is, how
   tall, the nearest spot, directions and Street View. On in Layers, and whenever the Bandos chip or
-  the bando filter is on.
+  the bando filter is on. Search finds them by name or kind ("priory", "bunker"; "bandos" lists the
+  lot), and each spot card lists the bandos within 1 km.
 - **Works offline** once loaded (add it to your home screen). When the online map can't load, it
   switches to a built-in basemap (main roads, rail, water, woods, built-up areas, place names), so it
   still works in a field with no signal. **GPX export** of the spots for OS Maps or a GPS, and a share

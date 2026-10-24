@@ -90,7 +90,7 @@ function legalBox(p, a3, cat) {
 }
 
 // Mapped bandos within a walk of the spot, still-standing ones first; filled in once the bando file is in.
-const BANDO_STATE = { 1: (h) => `still standing, ${Math.round(h)} m`, 0: () => 'little left', '-1': () => 'not checked' };
+export const BANDO_STATE = { 1: (h) => `still standing, ${Math.round(h)} m`, 0: () => 'little left', '-1': () => 'not checked' };
 function bandoBox(nearBandos, onBando) {
   if (!nearBandos) return null;
   const box = el('div', { class: 'box', hidden: true });
