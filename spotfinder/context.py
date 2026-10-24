@@ -131,8 +131,12 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     seg = overture.load_layer(region, "segments")
     bridges_seg = seg[seg["is_bridge"].fillna(False).astype(bool) & (seg.geometry.length >= 25)]
     bridge_lines = lines[lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct", "yes", "boardwalk"})]
+    # A bridge worth filming crosses water or is a viaduct; a 60 m flyover across a dual carriageway isn't.
+    water_union = pd.concat([big_water.geometry, rivers.geometry]).union_all()
+    long_seg = bridges_seg[bridges_seg.geometry.length >= 60]
     big_bridges = pd.concat([
-        bridges_seg[bridges_seg.geometry.length >= 60].geometry,
+        long_seg[long_seg.geometry.distance(water_union) <= 30].geometry,
+        bridges_seg[bridges_seg.geometry.length >= 150].geometry,
         bridge_lines[bridge_lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"})].geometry,
     ])
 
