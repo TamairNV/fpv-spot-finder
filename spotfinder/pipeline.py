@@ -10,7 +10,7 @@ import time
 import numpy as np
 from scipy import ndimage
 
-from . import basemap, context, export, features, legal, rasterize, scoring
+from . import basemap, context, derived, export, features, legal, rasterize, scoring
 from .config import CONFIG_DIR, Region, load_seeds
 from .heights import lidar_paths
 from .sources import canopy, osm, overture, terrain
@@ -109,7 +109,7 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, st
     """Score every cell and export the spots. By default legality is a label on each spot, not a filter:
     the app lists potential places and says which rules they meet. No-fly zones, MOD land and danger areas
     stay out either way. strict=True only lists spots each drone may fly under its Open subcategory."""
-    cells = load_cells(region)
+    cells = derived.add_derived(load_cells(region), region)
     meta = json.loads((region.out_dir / "cells_meta.json").read_text())
     seeds = load_seeds()
     results = {}
@@ -144,15 +144,15 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, st
             # places like the ones you binned get pulled down
             sim = np.clip(sim - 0.6 * scoring.similarity(style, profile, [_near(rc) for rc in down], land), 0, 1)
         seed_cells = [rc for g in groups for rc in g]
-        # Rules scaled so the best 0.1% of the region reads ~100; taste is already 0..1 (1 = just like the seeds).
-        top = float(np.percentile(rule[eligible], 99.9)) if eligible.any() else 1.0
+        # Rules scaled so the best 0.01% of the region reads ~100; taste is already 0..1 (1 = just like the seeds).
+        top = float(np.percentile(rule[eligible], 99.99)) if eligible.any() else 1.0
         rule_n = np.clip(rule / max(top, 1e-6), 0, 1)
         final = rule_n if sim is None else 0.6 * rule_n + 0.4 * sim
         # Same blend on the place's style alone, ignoring any A3 mask: how your seed spots score.
         style_n = np.clip(scoring.rule_score(style, profile) / max(top, 1e-6), 0, 1)
         style_final = style_n if sim is None else 0.6 * style_n + 0.4 * sim
         spots = scoring.pick_spots(final, eligible, profile.spacing_m, n_spots)
-        results[key] = dict(comps=comps, style=style, rule=rule, rule_rank=rule_n, sim=sim, final=final,
+        results[key] = dict(top=top, comps=comps, style=style, rule=rule, rule_rank=rule_n, sim=sim, final=final,
                             style_final=style_final, heat=scoring.pct_rank(final, land), eligible=eligible, spots=spots, seed_cells=seed_cells)
         log.info("%s: %d eligible cells, %d spots", key, int(eligible.sum()), len(spots))
     export.write_all(region, cells, results, meta, seeds, previews=previews)

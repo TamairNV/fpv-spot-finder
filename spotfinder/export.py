@@ -169,8 +169,8 @@ def write_legal_layers(region: Region) -> list:
         rgba[np.isin(code, [CODE_FRZ, CODE_RESTRICTED])] = [220, 38, 38, 110]
         return rgba
 
-    Image.fromarray(overlay(True), "RGBA").save(out / "legal_freestyle5.png", optimize=True)
-    Image.fromarray(overlay(False), "RGBA").save(out / "legal_cine85.png", optimize=True)
+    for key, p in scoring.PROFILES.items():
+        Image.fromarray(overlay("A3" in p.category), "RGBA").save(out / f"legal_{key}.png", optimize=True)
     (out / "zones.geojson").write_text((region.out_dir / "zones.geojson").read_text())
     return corners
 
@@ -331,6 +331,65 @@ def _drivers(comp_vals: dict[str, float], profile: scoring.Profile) -> list[str]
     return [scoring.COMPONENT_TEXT[k] for k, v in pos[:3] if v > 0.02]
 
 
+def _why_text(k: str, key: str, s: dict) -> str:
+    """One line per reason, with the numbers that earned it."""
+    plural = lambda n, one, many: f"{n} {one if n == 1 else many}"
+    away = lambda m: "right here" if m < 25 else f"{m} m away"
+    bando = (f"Ruin or abandoned structure {away(s['bando_m'])}" if s["bando_m"] <= s["bando_site_m"]
+             else f"Old industrial site {away(s['bando_site_m'])} (not much left standing)")
+    texts = {
+        "gaps": (plural(s["gaps_whoop"], "whoop-sized gap", "whoop-sized gaps") + " to thread" if key == "cine85"
+                 else plural(s["gaps"], "fly-through gap", "fly-through gaps") + " between trees or buildings"),
+        "lone": plural(s["lone_trees"], "lone tree", "lone trees") + f" to orbit, tallest {s['lone_h_max']:.0f} m",
+        "edges": f"{s['treeline_m']} m of tree line to skim" if s["treeline_m"] >= 30
+        else f"{s['edge_m']} m of tree and building edges",
+        "space": f"Open ground {s['open_r_m']} m out from the middle to carry speed" if s["open_r_m"] >= 50
+        else f"{s['open_pct']}% open ground",
+        "mix": f"Good mix: {s['tree_pct']}% trees, {s['open_pct']}% open",
+        "vertical": f"Tall stuff to dive, up to {s['max_height_m']:.0f} m",
+        "relief": f"{s['relief_m']:.0f} m of height change: banks and slopes to dive",
+        "bando": bando,
+        "water": f"Water {s['water_m']} m away" if s["water_m"] >= 25 else "Right by the water",
+        "bridge": f"Bridge or viaduct {away(s['bridge_m'])}",
+        "architecture": f"Buildings up to {s['bld_h_max']:.0f} m, {s['bld_pct']}% built up",
+        "trees": f"{s['tree_pct']}% trees to weave through",
+        "under": "Room to fly under the canopy",
+        "landmark": f"Landmark {away(s['landmark_m'])}",
+        "plaza": "Open plaza between buildings",
+        "sunset": f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"
+        if s["sunset_deg"] <= -1 else f"{s['west_edge_m']} m of trees and walls facing the sunset, open ground in front",
+        "public": "Public open space to fly from",
+        "busy": f"Busy: {s['places']} shops, cafés and the like nearby, plus paths" if s["places"]
+        else "Busy footpaths: expect walkers",
+        "hazard": f"Power line, mast or crane {away(s['hazard_m'])}",
+        "permission": "Land that needs the owner's permission",
+        "wet": "Mostly water",
+        "remote": f"{s['access_m']} m from the nearest path or road",
+        "farm": "Farmland: crops or livestock, ask the farmer first",
+        "road": f"Fast main road {away(s['road_busy_m'])}",
+        "crowds": "Crowded place: never fly over people",
+    }
+    return texts.get(k, scoring.COMPONENT_TEXT.get(k, k))
+
+
+def why(comp_vals: dict[str, float], profile: scoring.Profile, stats: dict, res: dict, r: int, c: int) -> list[dict]:
+    """The score taken apart: points (out of 100) per reason, biggest first, penalties last.
+    The rule part is 60% of the score when there are seed spots (100% without), shared out by weight."""
+    pos = sum(w for w in profile.weights.values() if w > 0)
+    has_taste = res["sim"] is not None
+    scale = 100 * (0.6 if has_taste else 1.0) / (pos * max(res["top"], 1e-6))
+    out = []
+    for k, w in profile.weights.items():
+        pts = scale * w * comp_vals.get(k, 0.0)
+        if abs(pts) >= 0.5:
+            out.append({"key": k, "text": _why_text(k, profile.key, stats), "pts": round(pts, 1)})
+    if has_taste:
+        out.append({"key": "taste", "text": "Like your favourite spots and 👍 ratings",
+                    "pts": round(40 * float(res["sim"][r, c]), 1)})
+    out.sort(key=lambda d: -d["pts"])
+    return out
+
+
 def _flags_text(flag_bits: int) -> list[str]:
     return [txt for bit, txt in legal.FLAG_TEXT.items() if flag_bits & bit and bit != legal.FLAG_COMMON]
 
@@ -408,7 +467,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                            "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
             gr = os_grid_ref(x, y)
             a3_clear = wm("a3_frac")
-            if key == "freestyle5":
+            if profile.legal_key == "a3_frac":
                 if a3_clear >= 0.9:
                     a_txt = ("Open A3: clear of the A3 distances (150 m from houses, businesses and parks; 50 m from "
                              "buildings and busy roads).")
@@ -426,6 +485,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 "taste": None if res["sim"] is None else round(100 * float(res["sim"][r, c])),
                 "title": title, "locality": locality, "gridref": gr,
                 "components": comp_vals, "drivers": _drivers(comp_vals, profile),
+                "why": None,
                 "stats": {
                     "gaps": int(ws("gaps")), "gaps_whoop": int(ws("gaps_whoop")), "lone_trees": int(ws("lone")),
                     "edge_m": int(ws("edge_tree_m") + ws("edge_bld_m")), "open_pct": round(100 * wm("open_frac")),
@@ -436,6 +496,12 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "parking_m": int(wmin("dist_parking")), "hazard_m": int(wmin("dist_hazard")),
                     "places": int(ws("places_n")), "buildings": int(ws("bld_n")),
                     "lidar_pct": round(100 * wm("lidar_frac")),
+                    "gaps_all": int(ws("gaps_all")), "west_edge_m": int(ws("edge_w_m")), "treeline_m": int(ws("treeline_m")),
+                    "open_r_m": int(wmax("open_r_m")), "sunset_deg": round(wmin("sunset_horizon"), 1),
+                    "access_m": int(wmin("dist_access")), "road_busy_m": int(wmin("dist_road_busy")),
+                    "bando_site_m": int(wmin("dist_bando_site")), "landmark_m": int(wmin("dist_landmark")),
+                    "lone_h_max": round(wmax("lone_h_max"), 1), "bld_h_max": round(wmax("bld_h_max"), 1),
+                    "gap_q": round(ws("gq5" if key != "cine85" else "gqw"), 1),
                 },
                 "legal": {"summary": a_txt, "flags": _flags_text(flag_bits), "a3_clear_pct": round(100 * a3_clear),
                           "a3_edge_m": int(wmin("dist_a3_edge"))},
@@ -450,6 +516,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "dronemap": "https://dronesafetymap.co.uk/",
                 },
             }
+            props["why"] = why(comp_vals, profile, props["stats"], res, r, c)
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
         (out / f"spots_{key}.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
@@ -489,7 +556,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                    "legal_res_m": LEGAL_RES, "cell_m": CELL},
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "sources": meta,
-        "profiles": {k: {"label": p.label, "drone": p.drone, "category": p.category,
+        "profiles": {k: {"label": p.label, "short": p.short, "drone": p.drone, "category": p.category,
                          "weights": p.weights, "radius_m": (p.radius_cells + 0.5) * CELL,
                          "components": {c: scoring.COMPONENT_TEXT.get(c, c) for c in p.weights}}
                      for k, p in scoring.PROFILES.items()},

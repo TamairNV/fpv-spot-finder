@@ -65,6 +65,7 @@ def win_or(a, r):
 class Profile:
     key: str
     label: str
+    short: str                 # name on the phone's drone switch
     drone: str
     category: str
     radius_cells: int          # neighbourhood that makes up "a spot"
@@ -78,20 +79,31 @@ class Profile:
 
 PROFILES = {
     "freestyle5": Profile(
-        key="freestyle5", label="5\" freestyle", drone="5 inch, 800 g (no class mark)", category="Open A3",
-        radius_cells=2, spacing_m=400, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
+        key="freestyle5", label="5\" freestyle", short="5\"", drone="5 inch, 800 g (no class mark)",
+        category="Open A3", radius_cells=2, spacing_m=400, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
         weights={"gaps": 0.20, "lone": 0.12, "edges": 0.14, "space": 0.10, "mix": 0.08, "vertical": 0.08,
-                 "relief": 0.10, "bando": 0.10, "water": 0.04, "bridge": 0.04,
-                 "busy": -0.15, "hazard": -0.25, "permission": -0.08, "wet": -0.2},
+                 "relief": 0.10, "bando": 0.10, "water": 0.04, "bridge": 0.04, "sunset": 0.04,
+                 "busy": -0.15, "hazard": -0.25, "permission": -0.08, "wet": -0.2,
+                 "remote": -0.10, "farm": -0.05, "road": -0.12},
         style_features=["gaps", "lone", "edges", "space", "mix", "vertical", "relief", "water"],
     ),
+    "cine5": Profile(
+        key="cine5", label="5\" cinematic", short="5\" cine", drone="5 inch, 800 g (no class mark)",
+        category="Open A3", radius_cells=3, spacing_m=600, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
+        # Long smooth lines over big scenery: rivers, coast, viaducts, hills, ruins, a sunset to fly into.
+        weights={"water": 0.18, "relief": 0.16, "bridge": 0.14, "landmark": 0.12, "sunset": 0.14, "space": 0.10,
+                 "edges": 0.08, "bando": 0.08,
+                 "busy": -0.12, "hazard": -0.25, "permission": -0.08, "wet": -0.2, "remote": -0.08, "road": -0.10},
+        style_features=["water", "relief", "bridge", "landmark", "sunset", "space", "edges", "bando"],
+    ),
     "cine85": Profile(
-        key="cine85", label="85 mm cinematic", drone="85 mm whoop, under 250 g", category="Open A1",
+        key="cine85", label="85 mm cinematic", short="85 mm", drone="85 mm whoop, under 250 g", category="Open A1",
         radius_cells=1, spacing_m=250, legal_key="a1_frac", legal_min=0.9,
         # Busy places only cost a little: a whoop at a quiet hour is how the Helix gets flown.
         weights={"architecture": 0.26, "gaps": 0.10, "trees": 0.14, "under": 0.06, "water": 0.14,
-                 "bridge": 0.12, "landmark": 0.10, "plaza": 0.06, "relief": 0.04, "bando": 0.04,
-                 "busy": -0.06, "crowds": -0.08, "permission": -0.08, "wet": -0.2},
+                 "bridge": 0.12, "landmark": 0.10, "plaza": 0.06, "relief": 0.04, "bando": 0.06, "sunset": 0.04,
+                 "public": 0.04,
+                 "busy": -0.06, "crowds": -0.08, "permission": -0.08, "wet": -0.2, "remote": -0.04},
         style_features=["architecture", "gaps", "trees", "under", "water", "bridge", "plaza", "relief"],
     ),
 }
@@ -112,52 +124,81 @@ COMPONENT_TEXT = {
     "under": "open space under the tree canopy",
     "landmark": "a landmark in shot",
     "plaza": "open plazas between buildings",
+    "sunset": "a clear view west for golden hour",
+    "public": "public open space to fly from",
+    "busy": "busy with people",
+    "hazard": "power lines, masts or cranes close by",
+    "permission": "land that needs the owner's permission",
+    "wet": "mostly water",
+    "remote": "a long walk from any path or road",
+    "farm": "farmland: crops or livestock, ask the farmer",
+    "road": "a fast main road right next to it",
+    "crowds": "a crowded place",
 }
 
 
-
 def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) -> dict[str, np.ndarray]:
-    """Component scores per cell. With legal_only, the 5 inch only counts features in the part of
-    the neighbourhood it may actually fly (A3); without, it's the place's style regardless of rules,
+    """Component scores per cell. With legal_only, the A3 profiles only count features in the part of
+    the neighbourhood they may actually fly; without, it's the place's style regardless of rules,
     which is what the taste match compares (your seed spots needn't be A3-legal)."""
     r = p.radius_cells
     flags = f["flags"].astype("int64")
     from . import legal
 
-    if p.key == "freestyle5" and legal_only:
+    if p.legal_key == "a3_frac" and legal_only:
         L = f["a3_frac"].astype("float64")
         f = dict(f)
-        for k in ("gaps", "lone", "edge_tree_m", "edge_bld_m", "open_frac"):
+        for k in ("gaps", "gq5", "lone", "edge_tree_m", "edge_bld_m", "treeline_m", "open_frac"):
             f[k] = f[k] * L
         for k in ("h_p90", "relief_250", "steep_frac"):
             f[k] = np.where(L >= 0.5, f[k], 0.0)
 
     c: dict[str, np.ndarray] = {}
     perm_bits = (legal.FLAG_NATIONAL_TRUST | legal.FLAG_FORESTRY | legal.FLAG_WOODLAND_TRUST
-                 | legal.FLAG_NATURE_RESERVE | legal.FLAG_CEMETERY | legal.FLAG_GOLF)
+                 | legal.FLAG_NATURE_RESERVE | legal.FLAG_CEMETERY | legal.FLAG_GOLF | legal.FLAG_QUARRY)
     c["permission"] = ((win_or(flags, r) & perm_bits) > 0).astype("float64")
+    # Mapped ruins with something still standing; a mapped site with nothing left only counts a little.
+    bando = lambda full, zero: np.maximum(near(win_min(f["dist_bando"], r), full, zero),
+                                          0.3 * near(win_min(f["dist_bando_site"], r), full, zero))
+    # Golden hour: either you look down on the sunset, or there's a tree line / wall facing it with open
+    # ground in front to film from.
+    c["sunset"] = np.maximum(ramp(-win_min(f["sunset_horizon"], r), 0.0, 3.0),
+                             0.6 * sat(win_sum(f["edge_w_m"], r), 600 * (2 * r + 1)))
+    c["remote"] = ramp(win_min(f["dist_access"], r), 250, 600)
+    c["hazard"] = near(win_min(f["dist_hazard"], r), 30, 100)
     if p.key == "freestyle5":
-        c["gaps"] = sat(win_sum(f["gaps"], r), 12)
-        c["lone"] = sat(win_sum(f["lone"], r), 5)
-        c["edges"] = sat(win_sum(f["edge_tree_m"] + f["edge_bld_m"], r), 700)
+        c["gaps"] = sat(win_sum(f["gq5"], r), 20)
+        c["lone"] = sat(win_sum(f["lone"] * ramp(f["lone_h_max"], 5, 12), r), 12)
+        c["edges"] = 0.6 * sat(win_sum(f["treeline_m"], r), 250) + 0.4 * sat(win_sum(f["edge_tree_m"] + f["edge_bld_m"], r), 700)
         open_m = win_mean(f["open_frac"], r)
         tall_m = win_mean(f["tall_frac"], r)
-        c["space"] = ramp(open_m, 0.3, 0.7)
+        c["space"] = 0.5 * ramp(open_m, 0.3, 0.7) + 0.5 * ramp(win_max(f["open_r_m"], r), 50, 200)
         c["mix"] = np.clip(1 - np.abs(tall_m - 0.25) / 0.25, 0, 1)
-        c["vertical"] = ramp(win_max(f["h_p90"], r), 6, 20)
+        c["vertical"] = ramp(win_max(f["h_p90"], r), 10, 25)
         c["relief"] = np.maximum(ramp(win_max(f["relief_250"], r), 8, 45), 0.6 * win_max(f["steep_frac"], r) ** 0.5)
-        c["bando"] = near(win_min(f["dist_bando"], r), 60, 300)
+        c["bando"] = bando(60, 300)
         c["water"] = near(win_min(f["dist_water"], r), 50, 250)
-        c["bridge"] = near(win_min(f["dist_bridge"], r), 80, 400)
-        busy = sat(win_sum(f["places_n"], r + 1), 3) * 0.6 + sat(win_sum(f["path_frac"], r), 1.5) * 0.4
-        c["busy"] = busy
-        c["hazard"] = near(win_min(f["dist_hazard"], r), 30, 100)
+        c["bridge"] = near(win_min(f["dist_bridge"], r), 40, 200)
+        c["busy"] = sat(win_sum(f["places_n"], r + 1), 3) * 0.6 + sat(win_sum(f["path_frac"], r), 1.5) * 0.4
         c["wet"] = ramp(f["water_frac"], 0.3, 0.8)
+        c["farm"] = ramp(win_mean(f["farm_frac"], r), 0.3, 0.9)
+        c["road"] = near(win_min(f["dist_road_busy"], r), 30, 120)
+    elif p.key == "cine5":
+        c["water"] = near(win_min(f["dist_water"], r), 30, 300)
+        c["relief"] = np.maximum(ramp(win_max(f["relief_250"], r), 10, 60), 0.7 * win_max(f["steep_frac"], r) ** 0.5)
+        c["bridge"] = near(win_min(f["dist_bridge"], r), 60, 300)
+        c["landmark"] = near(win_min(f["dist_landmark"], r), 80, 400)
+        c["space"] = ramp(win_max(f["open_r_m"], r), 75, 300)
+        c["edges"] = sat(win_sum(f["treeline_m"], r), 400)
+        c["bando"] = bando(60, 300)
+        c["busy"] = sat(win_sum(f["places_n"], r + 1), 4) * 0.6 + sat(win_sum(f["path_frac"], r), 2.5) * 0.4
+        c["wet"] = ramp(f["water_frac"], 0.3, 0.8)
+        c["road"] = near(win_min(f["dist_road_busy"], r), 30, 120)
     else:
         c["architecture"] = (0.5 * sat(win_sum(f["edge_bld_m"], r), 300)
                              + 0.25 * ramp(win_max(f["bld_h_std"], r), 2, 10)
                              + 0.25 * ramp(win_max(f["bld_h_max"], r), 10, 30))
-        c["gaps"] = sat(win_sum(f["gaps_whoop"], r), 8)
+        c["gaps"] = sat(win_sum(f["gqw"], r), 10)
         c["trees"] = sat(win_sum(f["edge_tree_m"], r), 300) * ramp(win_max(f["tree_h_p90"], r), 4, 12)
         c["under"] = ramp(win_mean(f["under_frac"], r), 0.1, 0.5) * ramp(win_mean(f["tree_frac"], r), 0.05, 0.3)
         c["water"] = near(win_min(f["dist_water"], r), 20, 150)
@@ -167,7 +208,8 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         bld_m = win_mean(f["bld_frac"], r)
         c["plaza"] = ramp(win_mean(f["open_frac"], r), 0.2, 0.5) * ramp(bld_m, 0.05, 0.25)
         c["relief"] = ramp(win_max(f["relief_250"], r), 8, 40)
-        c["bando"] = near(win_min(f["dist_bando"], r), 40, 200)
+        c["bando"] = bando(40, 200)
+        c["public"] = ramp(win_mean(f["public_frac"], r), 0.1, 0.5)
         c["busy"] = sat(win_sum(f["places_n"], r + 1), 6) * 0.7 + sat(win_sum(f["road_frac"], r), 2) * 0.3
         c["crowds"] = ((win_or(flags, r) & legal.FLAG_CROWDS) > 0).astype("float64")
         c["wet"] = ramp(f["water_frac"], 0.5, 0.9)

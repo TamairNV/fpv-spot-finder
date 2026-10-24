@@ -87,9 +87,9 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-24T11:49:56+00:00",
+  "generated_at": "2026-10-24T11:58:33+00:00",
   "sources": {
-    "computed_at": "2026-10-24T01:47:12+00:00",
+    "computed_at": "2026-10-24T11:48:24+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
     "lidar_coverage": 0.9205005168914795,
     "terrain": "AWS terrain tiles (EA 2 m LiDAR DTM in England)",
@@ -106,6 +106,7 @@
   "profiles": {
     "freestyle5": {
       "label": "5\" freestyle",
+      "short": "5\"",
       "drone": "5 inch, 800 g (no class mark)",
       "category": "Open A3",
       "weights": {
@@ -119,10 +120,14 @@
         "bando": 0.1,
         "water": 0.04,
         "bridge": 0.04,
+        "sunset": 0.04,
         "busy": -0.15,
         "hazard": -0.25,
         "permission": -0.08,
-        "wet": -0.2
+        "wet": -0.2,
+        "remote": -0.1,
+        "farm": -0.05,
+        "road": -0.12
       },
       "radius_m": 125.0,
       "components": {
@@ -136,14 +141,58 @@
         "bando": "abandoned / ruined structures nearby",
         "water": "water nearby for reflections",
         "bridge": "a bridge or viaduct nearby",
-        "busy": "busy",
-        "hazard": "hazard",
-        "permission": "permission",
-        "wet": "wet"
+        "sunset": "a clear view west for golden hour",
+        "busy": "busy with people",
+        "hazard": "power lines, masts or cranes close by",
+        "permission": "land that needs the owner's permission",
+        "wet": "mostly water",
+        "remote": "a long walk from any path or road",
+        "farm": "farmland: crops or livestock, ask the farmer",
+        "road": "a fast main road right next to it"
+      }
+    },
+    "cine5": {
+      "label": "5\" cinematic",
+      "short": "5\" cine",
+      "drone": "5 inch, 800 g (no class mark)",
+      "category": "Open A3",
+      "weights": {
+        "water": 0.18,
+        "relief": 0.16,
+        "bridge": 0.14,
+        "landmark": 0.12,
+        "sunset": 0.14,
+        "space": 0.1,
+        "edges": 0.08,
+        "bando": 0.08,
+        "busy": -0.12,
+        "hazard": -0.25,
+        "permission": -0.08,
+        "wet": -0.2,
+        "remote": -0.08,
+        "road": -0.1
+      },
+      "radius_m": 175.0,
+      "components": {
+        "water": "water nearby for reflections",
+        "relief": "slopes, banks or cliffs to dive",
+        "bridge": "a bridge or viaduct nearby",
+        "landmark": "a landmark in shot",
+        "sunset": "a clear view west for golden hour",
+        "space": "open ground to carry speed",
+        "edges": "tree lines and edges to skim along",
+        "bando": "abandoned / ruined structures nearby",
+        "busy": "busy with people",
+        "hazard": "power lines, masts or cranes close by",
+        "permission": "land that needs the owner's permission",
+        "wet": "mostly water",
+        "remote": "a long walk from any path or road",
+        "road": "a fast main road right next to it"
       }
     },
     "cine85": {
       "label": "85 mm cinematic",
+      "short": "85 mm",
       "drone": "85 mm whoop, under 250 g",
       "category": "Open A1",
       "weights": {
@@ -156,11 +205,14 @@
         "landmark": 0.1,
         "plaza": 0.06,
         "relief": 0.04,
-        "bando": 0.04,
+        "bando": 0.06,
+        "sunset": 0.04,
+        "public": 0.04,
         "busy": -0.06,
         "crowds": -0.08,
         "permission": -0.08,
-        "wet": -0.2
+        "wet": -0.2,
+        "remote": -0.04
       },
       "radius_m": 75.0,
       "components": {
@@ -174,10 +226,13 @@
         "plaza": "open plazas between buildings",
         "relief": "slopes, banks or cliffs to dive",
         "bando": "abandoned / ruined structures nearby",
-        "busy": "busy",
-        "crowds": "crowds",
-        "permission": "permission",
-        "wet": "wet"
+        "sunset": "a clear view west for golden hour",
+        "public": "public open space to fly from",
+        "busy": "busy with people",
+        "crowds": "a crowded place",
+        "permission": "land that needs the owner's permission",
+        "wet": "mostly water",
+        "remote": "a long walk from any path or road"
       }
     }
   },
@@ -219,19 +274,23 @@
       "flags": [],
       "components": {
         "permission": 0.0,
-        "gaps": 1.0,
-        "lone": 1.0,
-        "edges": 0.991,
-        "space": 1.0,
+        "sunset": 0.358,
+        "remote": 0.0,
+        "hazard": 0.0,
+        "gaps": 0.783,
+        "lone": 0.987,
+        "edges": 0.996,
+        "space": 0.805,
         "mix": 0.576,
-        "vertical": 0.786,
+        "vertical": 0.467,
         "relief": 0.057,
         "bando": 0.0,
         "water": 0.0,
-        "bridge": 0.784,
+        "bridge": 0.318,
         "busy": 0.375,
-        "hazard": 0.0,
-        "wet": 0.0
+        "wet": 0.0,
+        "farm": 0.0,
+        "road": 0.0
       },
       "score": 83,
       "preview": {
@@ -264,21 +323,25 @@
       ],
       "components": {
         "permission": 0.0,
-        "architecture": 0.815,
-        "gaps": 0.675,
-        "trees": 0.621,
+        "sunset": 0.333,
+        "remote": 0.0,
+        "hazard": 0.0,
+        "architecture": 0.695,
+        "gaps": 0.227,
+        "trees": 0.518,
         "under": 0.0,
         "water": 0.0,
-        "bridge": 0.17,
-        "landmark": 0.3,
-        "plaza": 0.734,
+        "bridge": 0.233,
+        "landmark": 0.688,
+        "plaza": 0.44,
         "relief": 0.392,
         "bando": 0.062,
-        "busy": 0.807,
+        "public": 0.0,
+        "busy": 0.814,
         "crowds": 1.0,
         "wet": 0.0
       },
-      "score": 67,
+      "score": 63,
       "preview": {
         "file": "previews/412-381.png",
         "size": 160,
