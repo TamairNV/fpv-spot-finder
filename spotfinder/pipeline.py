@@ -30,10 +30,10 @@ def prepare(region: Region) -> None:
 
 def compute_cells(region: Region, use_lidar: bool = True, workers: int = 4) -> dict[str, np.ndarray]:
     """All per-cell features for the region, cached in data/out/<region>/cells.npz."""
+    g = legal.build_legal(region)  # first: it's quick, and fails fast on a missing NATS file
     t0 = time.time()
     height_cells, gaps, lone = features.run(region, workers=workers, use_lidar=use_lidar)
     log.info("height features in %.0fs", time.time() - t0)
-    g = legal.build_legal(region)
     cells = dict(height_cells)
     cells.update(context.legal_features(g))
     cells.update(context.context_features(region))

@@ -18,3 +18,8 @@ osm = ["durham", "tyne-and-wear"]
 name = "Morpeth, Ashington and Amble"
 bbox = [395000, 580000, 435000, 620000]
 osm = ["northumberland", "tyne-and-wear"]
+
+[hexham]
+name = "Hexham and the Tyne Valley"
+bbox = [365000, 545000, 405000, 585000]
+osm = ["northumberland", "durham"]
