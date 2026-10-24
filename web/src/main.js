@@ -525,6 +525,10 @@ function addOverlays() {
   });
   map.on('mouseenter', 'spots-dots', () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'spots-dots', () => { map.getCanvas().style.cursor = ''; });
+  hoverTip('spots-dots', (p) => `<b>${esc(p.title)}</b> · ${p.score}`);
+  for (const id of ['bandos-site', 'bandos-dots']) {
+    hoverTip(id, (p) => `<b>${esc(p.n || p.k)}</b><br>${p.n ? `${esc(p.k)} · ` : ''}${BANDO_STATE[p.s](p.h)}`);
+  }
   applyLayerToggles();
   drawPins();
   drawSeeds();
@@ -538,6 +542,19 @@ function addOverlays() {
   }
   // Start with the attribution folded away; the (i) button opens it.
   $('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+}
+
+// With a mouse, hovering a dot names it.
+let hoverPop = null;
+function hoverTip(layer, html) {
+  if (TOUCH.matches || !map.getLayer(layer)) return;
+  map.on('mousemove', layer, (e) => {
+    const f = e.features?.[0];
+    if (!f || state.checking) return;
+    hoverPop ||= new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 9, className: 'hover-tip', maxWidth: '260px' });
+    hoverPop.setLngLat(f.geometry.coordinates).setHTML(html(f.properties)).addTo(map);
+  });
+  map.on('mouseleave', layer, () => hoverPop?.remove());
 }
 
 function applyLayerToggles() {
