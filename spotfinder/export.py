@@ -205,6 +205,9 @@ NOT_A_PLACE = {"hotel", "hostel", "guest_house", "motel", "apartment", "chalet",
                "tanning_salon", "trampoline_park", "indoor_play", "information", "artwork", "gallery"}
 
 
+SIGHT_M = 60  # a spot this close to a named viaduct, bridge or landmark is named after it
+
+
 class Namer:
     def __init__(self, region: Region):
         o = osm.extract(region)
@@ -227,6 +230,14 @@ class Namer:
         rivers = named(ln)[named(ln)["tags"].map(lambda t: t.get("waterway") in {"river", "canal"} or "bridge" in t)]
         self.feats = pd.concat([feats, rivers]).reset_index(drop=True)
         self.feat_tree = STRtree(self.feats.geometry.values)
+        # A named viaduct, bridge, lighthouse or monument right at the spot is what you'd call it: the Nine
+        # Arches Viaduct, not the country park it stands in.
+        # (a railway or road on a viaduct carries the line's or road's name, not the viaduct's)
+        sight = lambda t: (((t.get("bridge") in {"viaduct", "aqueduct"} or t.get("man_made") == "bridge")
+                            and not t.get("railway") and not t.get("highway"))
+                           or t.get("man_made") == "lighthouse" or t.get("historic") in {"monument", "castle"})
+        self.sights = pd.concat([g[g["tags"].map(sight)] for g in (named(ln), named(a), pts)]).reset_index(drop=True)
+        self.sight_tree = STRtree(self.sights.geometry.values)
 
     def _nearest(self, tree, frame, p, max_d):
         if len(frame) == 0:
@@ -240,8 +251,11 @@ class Namer:
     def name(self, x: float, y: float) -> tuple[str, str]:
         p = Point(x, y)
         title = None
+        sight, _ = self._nearest(self.sight_tree, self.sights, p, SIGHT_M)
         cont = [i for i in self.area_tree.query(p, predicate="intersects")]
-        if cont:
+        if sight is not None:
+            title = sight["tags"]["name"]
+        elif cont:
             best = min(cont, key=lambda i: self.areas.geometry.iloc[i].area)
             title = self.areas["tags"].iloc[best]["name"]
         else:
