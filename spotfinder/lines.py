@@ -36,7 +36,7 @@ class Style:
     corridor: int  # metres of clear air across the flight path (a quad plus margin)
 
 
-FREESTYLE = Style(min_link=10.0, max_link=70.0, gap_max_w=12.0, corridor=5)
+FREESTYLE = Style(min_link=10.0, max_link=70.0, gap_max_w=12.0, corridor=3)
 WHOOP = Style(min_link=5.0, max_link=35.0, gap_max_w=5.0, corridor=3)
 
 

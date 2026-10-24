@@ -210,3 +210,15 @@ def test_analyse_reports_line_cells():
         ohm[500:508, c:c + 8] = 12
     cells, _, _ = features.analyse(make_tile(ohm), margin=m, size=1000)
     assert cells["line5"].max() > 4 and cells["line5_n"].max() >= 5
+
+
+def test_tree_in_a_loose_clump_is_not_an_orbit():
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    ohm[600:606, 300:306] = 12
+    ohm[600:606, 314:320] = 10  # a second tree 8 m away: the first passes its Voronoi ring, not an orbit
+    _, _, lone = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert len(lone) == 0
+    ohm[600:606, 314:320] = 2  # just a low bush: still a fine orbit
+    _, _, lone = features.analyse(make_tile(ohm), margin=m, size=1000)
+    assert len(lone) == 1

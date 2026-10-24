@@ -141,7 +141,9 @@ seeds; places like your thumbs-down spots get pulled down.
    room under the canopy.
    **Lines**: every fly-through gap, lone tree (orbit), tree 18 m+ (dive) and stretch of tree line
    (skim, one every 25 m) is a node. Two nodes link when they're 10-70 m apart (5-35 m for the whoop)
-   and nothing taller than 3 m is in the way on the 1 m height grid. From each node a greedy walk
+   and a 3 m wide corridor between them is clear below 3 m on the 1 m height grid. Before any of
+   this, winter LiDAR crowns are "leafed on": 1-2 m holes inside a crown are filled to the crown height,
+   and an orbit needs a full 10 m circle of clear air round its crown. From each node a greedy walk
    picks the next obstacle by its value, a change of move and a smooth heading (no turns over 115°),
    up to 12 moves, and scores the run with a bonus for variety. Each spot's "flow" is the best run
    that starts in it, and the spot card gets that run as a suggested line.

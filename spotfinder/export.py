@@ -440,7 +440,7 @@ def _why_text(k: str, key: str, s: dict) -> str:
         "bridge": f"Bridge or viaduct {away(s['bridge_m'])}",
         "architecture": f"Buildings up to {s['bld_h_max']:.0f} m, {s['bld_pct']}% built up",
         "trees": f"{s['tree_pct']}% trees to weave through",
-        "under": "Room to fly under the canopy",
+        "under": "Tall trees with see-through crowns: maybe room underneath (LiDAR can't see where branches start)",
         "landmark": f"Landmark {away(s['landmark_m'])}",
         "plaza": "Open plaza between buildings",
         "sunset": f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"

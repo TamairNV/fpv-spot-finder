@@ -101,7 +101,7 @@ PROFILES = {
         key="cine85", label="85 mm cinematic", short="85 mm", drone="85 mm whoop, under 250 g", category="Open A1",
         radius_cells=1, spacing_m=250, legal_key="a1_frac", legal_min=0.9,
         # Busy places only cost a little: a whoop at a quiet hour is how the Helix gets flown.
-        weights={"architecture": 0.24, "flow": 0.14, "gaps": 0.06, "trees": 0.12, "under": 0.06, "water": 0.14,
+        weights={"architecture": 0.24, "flow": 0.14, "gaps": 0.06, "trees": 0.14, "under": 0.03, "water": 0.14,
                  "bridge": 0.12, "landmark": 0.10, "plaza": 0.06, "relief": 0.04, "bando": 0.06, "sunset": 0.04,
                  "public": 0.04,
                  "busy": -0.06, "crowds": -0.08, "permission": -0.08, "wet": -0.2, "remote": -0.04},
@@ -123,7 +123,7 @@ COMPONENT_TEXT = {
     "bridge": "a bridge or viaduct nearby",
     "architecture": "interesting buildings and edges",
     "trees": "trees to weave through",
-    "under": "open space under the tree canopy",
+    "under": "tall, see-through trees that may have room underneath",
     "landmark": "a landmark in shot",
     "plaza": "open plazas between buildings",
     "sunset": "a clear view west for golden hour",
@@ -169,7 +169,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
     c["remote"] = ramp(win_min(f["dist_access"], r), 250, 600)
     c["hazard"] = near(win_min(f["dist_hazard"], r), 30, 100)
     if p.key == "freestyle5":
-        c["flow"] = ramp(win_max(f["line5"], r), 3, 15)
+        c["flow"] = ramp(win_max(f["line5"], r), 2, 10)
         c["gaps"] = sat(win_sum(f["gq5"], r), 20)
         c["lone"] = sat(win_sum(f["lone"] * ramp(f["lone_h_max"], 5, 12), r), 12)
         c["edges"] = 0.6 * sat(win_sum(f["treeline_m"], r), 250) + 0.4 * sat(win_sum(f["edge_tree_m"] + f["edge_bld_m"], r), 700)
@@ -201,10 +201,13 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         c["architecture"] = (0.5 * sat(win_sum(f["edge_bld_m"], r), 300)
                              + 0.25 * ramp(win_max(f["bld_h_std"], r), 2, 10)
                              + 0.25 * ramp(win_max(f["bld_h_max"], r), 10, 30))
-        c["flow"] = ramp(win_max(f["linew"], r), 3, 15)
+        c["flow"] = ramp(win_max(f["linew"], r), 1.5, 8)
         c["gaps"] = sat(win_sum(f["gqw"], r), 10)
         c["trees"] = sat(win_sum(f["edge_tree_m"], r), 300) * ramp(win_max(f["tree_h_p90"], r), 4, 12)
-        c["under"] = ramp(win_mean(f["under_frac"], r), 0.1, 0.5) * ramp(win_mean(f["tree_frac"], r), 0.05, 0.3)
+        # First-minus-last return only says light gets through the crown, not where the branches start,
+        # so this is a hint, kept small, and only for tall trees (low bushy ones are never "under-able").
+        c["under"] = (ramp(win_mean(f["under_frac"], r), 0.2, 0.6) * ramp(win_mean(f["tree_frac"], r), 0.05, 0.3)
+                      * ramp(win_max(f["tree_h_p90"], r), 12, 18))
         c["water"] = near(win_min(f["dist_water"], r), 20, 150)
         c["bridge"] = np.maximum(near(win_min(f["dist_bridge"], r), 40, 200),
                                  0.5 * near(win_min(f["dist_footbridge"], r), 15, 60))
