@@ -89,6 +89,25 @@ function legalBox(p, a3, cat) {
       ' before you go.'));
 }
 
+// Mapped bandos within a walk of the spot, still-standing ones first; filled in once the bando file is in.
+const BANDO_STATE = { 1: (h) => `still standing, ${Math.round(h)} m`, 0: () => 'little left', '-1': () => 'not checked' };
+function bandoBox(nearBandos, onBando) {
+  if (!nearBandos) return null;
+  const box = el('div', { class: 'box', hidden: true });
+  nearBandos().then((list) => {
+    if (!list.length) return;
+    box.replaceChildren(el('h4', {}, 'Bandos nearby'),
+      el('ul', { class: 'bando-near' }, list.map(({ f, d }) => {
+        const b = f.properties;
+        return el('li', {},
+          el('button', { class: 'linklike', title: 'Show it on the map', onclick: () => onBando(f) }, b.n || b.k),
+          el('span', { class: 'muted' }, ` ${b.n ? `${b.k.toLowerCase()}, ` : ''}${BANDO_STATE[b.s](b.h)} · ${metres(d)}`));
+      })));
+    box.hidden = false;
+  });
+  return box;
+}
+
 function takeoffBox(p) {
   const t = p.takeoff;
   if (!t) return null;
@@ -102,7 +121,7 @@ function takeoffBox(p) {
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
 }
 
-export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, onRate, onLike, onBack, onNote }) {
+export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, nearBandos, onRate, onLike, onBack, onNote, onBando }) {
   const p = spot.properties;
   const [lon, lat] = spot.geometry.coordinates;
   let rating = ratings.get(profile, p.id);
@@ -179,6 +198,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   const why = whyList(p);
   if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
   if (p.stats) kids.push(tiles(p.stats, a3));
+  kids.push(bandoBox(nearBandos, onBando));
 
   if (p.legal) kids.push(legalBox(p, a3, category));
   kids.push(takeoffBox(p));

@@ -950,6 +950,17 @@ function showSpot(f, isSeed) {
     },
     onBack: () => goBack(),
     onNote: () => renderList(),
+    nearBandos: hasBandos() ? () => loadBandos().then(() => bandosNear(f.geometry.coordinates, 1000, 4)) : null,
+    onBando: (b) => {
+      state.bandos = $('#lyr-bandos').checked = true;  // asked to see one, so the layer stays on
+      savePrefs();
+      syncBandos();
+      const H = sheetHeights();
+      if (PHONE.matches && state.sheet === 'full') setSheet('half');
+      map.flyTo({ center: b.geometry.coordinates, zoom: Math.max(map.getZoom(), 15.5), essential: true, duration: 1200,
+        padding: PHONE.matches ? { top: 260, bottom: H.half, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 } });
+      showBando(b);
+    },
   });
   $('#spot-scroll').scrollTop = 0;
 }
@@ -1090,6 +1101,14 @@ function syncBandos() {
   const on = bandosWanted();
   if (on) loadBandos();
   for (const id of ['bandos-site', 'bandos-dots']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+}
+
+function bandosNear(c, maxD, n) {
+  return (bandosData?.features || [])
+    .map((f) => ({ f, d: haversine(c, f.geometry.coordinates) }))
+    .filter((x) => x.d <= maxD)
+    .sort((a, b) => (b.f.properties.s === 1) - (a.f.properties.s === 1) || a.d - b.d)
+    .slice(0, n);
 }
 
 // The closest bando to a tap, with some slack: the dots are small for a finger.
