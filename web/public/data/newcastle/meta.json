@@ -87,24 +87,24 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-24T18:47:56+00:00",
+  "generated_at": "2026-10-24T23:39:56+00:00",
   "sources": {
-    "computed_at": "2026-10-24T18:46:00+00:00",
+    "computed_at": "2026-10-24T20:52:26+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
     "lidar_coverage": 0.9205005168914795,
     "terrain": "AWS terrain tiles (EA 2 m LiDAR DTM in England)",
     "airspace": "NATS EG_UAS_FR_DS_AREA1_FULL_20261001.kmz (effective 2026-10-01)",
     "overture_release": "2026-10-21.0",
     "osm": [
-      "durham-latest.osm.pbf",
+      "tyne-and-wear-latest.osm.pbf",
       "northumberland-latest.osm.pbf",
-      "tyne-and-wear-latest.osm.pbf"
+      "durham-latest.osm.pbf"
     ],
     "ratings": {},
+    "ratings_other_regions": {},
     "legal_mode": "label",
     "bandos": {
-      "standing": 235,
-      "site": 161,
+      "standing": 15,
       "unknown": 0
     }
   },
@@ -125,10 +125,12 @@
         "relief": 0.1,
         "bando": 0.1,
         "water": 0.04,
-        "bridge": 0.04,
+        "bridge": 0.12,
+        "beach": 0.08,
+        "public": 0.12,
         "sunset": 0.04,
         "busy": -0.15,
-        "hazard": -0.25,
+        "hazard": -0.2,
         "permission": -0.08,
         "wet": -0.2,
         "remote": -0.1,
@@ -148,6 +150,8 @@
         "bando": "abandoned / ruined structures nearby",
         "water": "water nearby for reflections",
         "bridge": "a bridge or viaduct nearby",
+        "beach": "a beach: open sand to carry speed along the water",
+        "public": "public open space to fly from",
         "sunset": "a clear view west for golden hour",
         "busy": "busy with people",
         "hazard": "power lines, masts or cranes close by",
@@ -172,8 +176,9 @@
         "space": 0.1,
         "edges": 0.08,
         "bando": 0.08,
+        "coast": 0.14,
         "busy": -0.12,
-        "hazard": -0.25,
+        "hazard": -0.2,
         "permission": -0.08,
         "wet": -0.2,
         "remote": -0.08,
@@ -189,6 +194,7 @@
         "space": "open ground to carry speed",
         "edges": "tree lines and edges to skim along",
         "bando": "abandoned / ruined structures nearby",
+        "coast": "the coast: a beach or the sea in shot",
         "busy": "busy with people",
         "hazard": "power lines, masts or cranes close by",
         "permission": "land that needs the owner's permission",
@@ -283,26 +289,28 @@
       "flags": [],
       "components": {
         "permission": 0.0,
-        "sunset": 0.12,
+        "sunset": 0.141,
         "remote": 0.0,
         "hazard": 0.0,
         "flow": 0.006,
         "gaps": 0.273,
         "lone": 0.0,
-        "edges": 0.493,
-        "space": 0.86,
-        "mix": 0.209,
+        "edges": 0.573,
+        "space": 0.805,
+        "mix": 0.239,
         "vertical": 0.2,
         "relief": 0.692,
         "bando": 0.0,
         "water": 0.0,
         "bridge": 0.0,
-        "busy": 0.031,
+        "beach": 0.0,
+        "public": 1.0,
+        "busy": 0.047,
         "wet": 0.0,
         "farm": 0.0,
-        "road": 0.008
+        "road": 0.007
       },
-      "score": 57,
+      "score": 67,
       "preview": {
         "file": "previews/374-371.png",
         "size": 160,
@@ -316,6 +324,58 @@
         "bng": [
           423575.0,
           566275.0
+        ]
+      }
+    },
+    {
+      "name": "Nine Arches viaduct and the river beach, Derwent Walk",
+      "profile": "freestyle5",
+      "lon": -1.7201,
+      "lat": 54.9333,
+      "radius_m": 150.0,
+      "note": "Arches to fly through ~25 m over the Derwent, a gravel beach underneath to take off from, woods either side. Two big power lines cross by its west end, so stay low under them.",
+      "a3_frac": 0.0,
+      "a1_frac": 1.0,
+      "flags": [
+        "Power lines within 30 m"
+      ],
+      "components": {
+        "permission": 1.0,
+        "sunset": 0.211,
+        "remote": 0.0,
+        "hazard": 0.127,
+        "flow": 0.0,
+        "gaps": 0.497,
+        "lone": 0.0,
+        "edges": 0.32,
+        "space": 0.0,
+        "mix": 0.0,
+        "vertical": 1.0,
+        "relief": 1.0,
+        "bando": 0.0,
+        "water": 1.0,
+        "bridge": 0.756,
+        "beach": 0.0,
+        "public": 1.0,
+        "busy": 0.238,
+        "wet": 0.0,
+        "farm": 0.0,
+        "road": 0.0
+      },
+      "score": 69,
+      "preview": {
+        "file": "previews/502-260.png",
+        "size": 160,
+        "res": 2,
+        "ground_min": 13.6,
+        "lidar": true,
+        "center": [
+          -1.720226,
+          54.93323
+        ],
+        "bng": [
+          418025.0,
+          559875.0
         ]
       }
     },
@@ -346,7 +406,7 @@
         "landmark": 0.688,
         "plaza": 0.44,
         "relief": 0.392,
-        "bando": 0.062,
+        "bando": 0.0,
         "public": 0.0,
         "busy": 0.814,
         "crowds": 1.0,
