@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from spotfinder import features, legal, scoring
+from spotfinder import features, legal, parks, scoring
 from spotfinder.export import os_grid_ref
 from spotfinder.heights import Tile
 from spotfinder.sources import lidar_wcs
@@ -176,3 +176,21 @@ def test_why_points_add_up_to_the_score():
     expected = 100 * (0.6 * float(rule) / 0.4 + 0.4 * 0.5)
     assert abs(sum(d["pts"] for d in out) - expected) < 1.5
     assert out[0]["pts"] >= out[-1]["pts"] and all(d["text"] for d in out)
+
+
+def test_every_park_without_a_spot_gets_its_best_cell():
+    grid = np.zeros((20, 20), dtype="int32")
+    grid[2:6, 2:6] = 1    # park 1 already has a spot in it
+    grid[10:16, 10:16] = 2  # park 2 has none
+    grid[17:19, 0:2] = 3  # park 3 has nothing eligible
+    eligible = np.ones((20, 20), dtype=bool)
+    eligible[17:19, 0:2] = False
+    score = np.zeros((20, 20))
+    score[12, 13] = 0.9
+    score[14, 14] = 0.5
+    names = [("A", None), ("B", None), ("C", None)]
+    assert parks.picks(grid, names, score, eligible, [(3, 3)], spacing_m=400) == [(12, 13)]
+    # the best cell is too close to a spot just outside the park, so the next best in the park is used
+    assert parks.picks(grid, names, score, eligible, [(3, 3), (9, 12)], spacing_m=400) == [(14, 14)]
+    assert parks.name_at(grid, names, 12, 13) == "B" and parks.name_at(grid, names, 0, 0) is None
+
