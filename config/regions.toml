@@ -1,0 +1,6 @@
+# Regions are boxes on the British National Grid (EPSG:27700), in metres.
+# bbox = [xmin, ymin, xmax, ymax]. Keep them on whole kilometres so tiles line up.
+
+[newcastle]
+name = "Newcastle upon Tyne"
+bbox = [405000, 545000, 445000, 585000]

@@ -1,0 +1,19 @@
+# Spots you already like. The scorer looks for places whose height and map
+# features resemble these, on top of its own rules. Add more any time.
+# profile: "freestyle5" (5 inch, 800 g, A3) or "cine85" (85 mm whoop, sub-250 g, A1)
+
+[[seed]]
+name = "Nuns Moor Park trees by Cow Hill"
+profile = "freestyle5"
+lat = 54.9808
+lon = -1.6400
+radius_m = 180
+note = "Weaving in and around the tree clumps on the Town Moor edge, near Hunters Moor Hospital. Style seed only: the moor counts as a recreational area, so it isn't A3-legal for an 800 g quad."
+
+[[seed]]
+name = "Newcastle Helix: Urban Sciences Building and Frederick Douglass Centre"
+profile = "cine85"
+lat = 54.97330
+lon = -1.62545
+radius_m = 120
+note = "Whoop lines around modern buildings, plazas and gaps at Newcastle Helix."
