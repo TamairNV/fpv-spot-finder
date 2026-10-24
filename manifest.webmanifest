@@ -1,0 +1,14 @@
+{
+  "name": "FPV Spot Finder",
+  "short_name": "FPV Spots",
+  "description": "Legal, interesting FPV spots from height and map data.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f1417",
+  "theme_color": "#0f1417",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
