@@ -101,7 +101,7 @@ const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.catego
 // pipeline). A type nearly every spot has, or only one or two do, isn't worth a chip.
 const KINDS = {
   park: 'Parks', bando: 'Bandos', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', relief: 'Hills and banks', sunset: 'Sunset',
-  plaza: 'Plazas', under: 'Under the trees', public: 'Public space', edges: 'Tree lines', space: 'Wide open',
+  plaza: 'Plazas', under: 'Under the trees', public: 'Public space', edges: 'Tree lines', space: 'Wide open', flow: 'Good lines',
 };
 const hasKind = (f, k) => f.properties.kinds?.includes(k) ?? (f.properties.why || []).some((w) => w.key === k && w.pts >= 2);
 const kindCache = {};
@@ -448,10 +448,16 @@ function addOverlays() {
   map.addLayer({ id: 'sel-halo', type: 'line', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'line-color': '#ffffff', 'line-width': 3.5, 'line-opacity': 0.8 } });
   map.addLayer({ id: 'sel-line', type: 'line', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'line-color': '#1b2328', 'line-width': 1.5, 'line-dasharray': [3, 2] } });
   map.addLayer({
-    id: 'sel-pts', type: 'circle', source: 'sel', filter: ['!=', ['get', 'k'], 'area'], minzoom: 12.5,
+    id: 'sel-path', type: 'line', source: 'sel', filter: ['==', ['get', 'k'], 'path'], minzoom: 12.5,
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#5cc8ff', 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1.5, 17, 4], 'line-opacity': 0.9 },
+  });
+  map.addLayer({
+    id: 'sel-pts', type: 'circle', source: 'sel', filter: ['==', ['geometry-type'], 'Point'], minzoom: 12.5,
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, ['match', ['get', 'k'], 'takeoff', 5, 2], 17, ['match', ['get', 'k'], 'takeoff', 9, 5.5]],
-      'circle-color': ['match', ['get', 'k'], 'gap', '#ff3d7f', 'lone', '#ffc400', 'takeoff', '#22c55e', '#fff'],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, ['match', ['get', 'k'], 'takeoff', 5, 'move', 4, 2], 17, ['match', ['get', 'k'], 'takeoff', 9, 'move', 8, 5.5]],
+      'circle-color': ['match', ['get', 'k'], 'gap', '#ff3d7f', 'lone', '#ffc400', 'takeoff', '#22c55e',
+        'move', ['match', ['get', 'kind'], 'gap', '#ff3d7f', 'orbit', '#ffc400', 'dive', '#a78bfa', '#22d3ee'], '#fff'],
       'circle-stroke-color': ['match', ['get', 'k'], 'takeoff', '#ffffff', '#1b2328'],
       'circle-stroke-width': ['match', ['get', 'k'], 'takeoff', 2.5, 1],
     },
@@ -607,7 +613,7 @@ function spotRow(f, i) {
       isA3() ? legalBadge(p, true) : null));
 }
 
-// The spot's little top-down picture (top spots only), with the rank or a star on it.
+// The spot's little top-down picture, with the rank or a star on it.
 function thumbBox(preview, tag) {
   return el('span', { class: `thumb${preview ? '' : ' none'}` },
     preview ? el('img', { alt: '', 'data-thumb': `${BASE}/${preview.file}`, decoding: 'async' }) : null, tag);
@@ -810,6 +816,12 @@ function showSelection(f) {
   const feats = [{ type: 'Feature', geometry: circlePolygon(f.geometry.coordinates, state.meta.profiles[state.profile].radius_m), properties: { k: 'area' } }];
   (p.gaps_list || []).forEach((g) => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [g[0], g[1]] }, properties: { k: 'gap' } }));
   (p.lone_list || []).forEach((t) => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [t[0], t[1]] }, properties: { k: 'lone' } }));
+  const moves = p.line?.moves || [];
+  if (moves.length) { // the suggested line: take-off, then each move in order
+    const start = p.takeoff ? [[p.takeoff.lon, p.takeoff.lat]] : [];
+    feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [...start, ...moves.map((m) => [m[1], m[2]])] }, properties: { k: 'path' } });
+    moves.forEach((m, i) => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [m[1], m[2]] }, properties: { k: 'move', n: i + 1, kind: m[0] } }));
+  }
   if (p.takeoff) feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.takeoff.lon, p.takeoff.lat] }, properties: { k: 'takeoff' } });
   map.getSource('sel')?.setData({ type: 'FeatureCollection', features: feats });
 }

@@ -24,6 +24,9 @@ const DRONES = {
   cine85: { name: '85 mm', twr: 2.4, drag: 0.15, rate: 450, expo: 0.35, uptilt: 12, radius: 0.06 },
 };
 const G = 9.81;
+// the suggested line's moves, numbered in the order to fly them
+const MOVE_COLOUR = { gap: '#ff3d7f', orbit: '#ffc400', dive: '#a78bfa', skim: '#22d3ee' };
+const LINE_SPEED = { freestyle5: 15, cine5: 11, cine85: 6 }; // m/s for "Watch the line"
 const COARSE = matchMedia('(pointer: coarse)');
 const AXES_KEY = 'fpvspots:gamepad-axes';
 
@@ -79,7 +82,9 @@ export class Preview3D {
     this.wrap.append(this.stage, close);
     this.host.append(this.wrap);
     this.onEsc = (e) => {
-      if (e.key === 'Escape' && !this.fly && this.wrap.classList.contains('full')) this.toggleFull(false);
+      if (e.key !== 'Escape' || this.fly) return;
+      if (this.play) this.stopLine();
+      else if (this.wrap.classList.contains('full')) this.toggleFull(false);
     };
     window.addEventListener('keydown', this.onEsc);
   }
@@ -90,7 +95,7 @@ export class Preview3D {
     const full = this.wrap.classList.contains('full');
     if (this.controls) {
       this.controls.enableZoom = full;
-      this.controls.enabled = !this.fly && (full || !COARSE.matches);
+      this.controls.enabled = !this.fly && !this.play && (full || !COARSE.matches);
     }
     this.canvas.style.touchAction = full ? 'none' : 'pan-y';
   }
@@ -114,6 +119,7 @@ export class Preview3D {
     this.buildTerrain();
     this.buildObjects();
     this.buildMarkers();
+    this.buildLine();
     this.buildUI();
     this.setTime(this.defaultTime());
     this.tag.textContent = `${this.preview.lidar ? 'EA LiDAR, 2 m blocks' : 'Tree model + building heights (no LiDAR yet)'} · ${n * res} m square`;
@@ -335,6 +341,144 @@ export class Preview3D {
     this.scene.add(grp);
   }
 
+  // ---------- the suggested line (from the pipeline's line finder): take-off, then each move in order
+
+  buildLine() {
+    this.lineSprites = [];
+    const moves = (this.spot.line?.moves || []).filter((m) => Math.abs(m[3]) <= this.half && Math.abs(m[4]) <= this.half);
+    if (!moves.length) return;
+    const pts = [this.takeoff.clone().add(new THREE.Vector3(0, 2, 0))];
+    moves.forEach(([kind, , , dx, dy], i) => {
+      const x = dx, z = -dy, prev = pts.at(-1);
+      const into = new THREE.Vector3(x - prev.x, 0, z - prev.z).normalize();
+      const ground = this.groundAt(x, z);
+      let mark;
+      if (kind === 'orbit') { // once round the tree, entering on the side we arrive from
+        const tree = this.nearest(this.spot.lone_list, x, z, 3, 4, 8);
+        const h = tree ? tree[2] : 10, rad = Math.max(6, h * 0.45), y = ground + Math.max(3, h * 0.5);
+        const a0 = Math.atan2(-into.z, -into.x);
+        for (let k = 0; k <= 12; k++) {
+          const a = a0 - (k / 12) * 2 * Math.PI;
+          pts.push(new THREE.Vector3(x + Math.cos(a) * rad, y, z + Math.sin(a) * rad));
+        }
+        mark = new THREE.Vector3(x, y + h * 0.5 + 3, z);
+      } else if (kind === 'dive') { // over the top, then down the far side
+        const top = this.topAt(x, z);
+        pts.push(new THREE.Vector3(x, top + 10, z));
+        const fx = x + into.x * 18, fz = z + into.z * 18;
+        pts.push(new THREE.Vector3(fx, this.groundAt(fx, fz) + 3, fz));
+        mark = new THREE.Vector3(x, top + 14, z);
+      } else if (kind === 'gap') { // through the middle of the ring
+        const gate = this.gates.reduce((b, g) => {
+          const d = Math.hypot(g.centre.x - x, g.centre.z - z);
+          return d < (b?.d ?? 6) ? { g, d } : b;
+        }, null);
+        const p = gate ? gate.g.centre.clone() : new THREE.Vector3(x, ground + 2.5, z);
+        pts.push(p);
+        mark = p.clone().add(new THREE.Vector3(0, (gate?.g.r ?? 2) + 3, 0));
+      } else { // skim: low along the edge
+        pts.push(new THREE.Vector3(x, ground + 2, z));
+        mark = new THREE.Vector3(x, ground + 6, z);
+      }
+      const sp = this.numberSprite(i + 1, MOVE_COLOUR[kind] || '#ffffff', mark);
+      this.lineSprites.push(sp);
+      this.markers.add(sp);
+    });
+    this.line = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(this.line, Math.max(80, pts.length * 12), 0.35, 6, false),
+      new THREE.MeshBasicMaterial({ color: 0x5cc8ff, transparent: true, opacity: 0.85 }));
+    this.markers.add(tube);
+  }
+
+  // nearest [.., dx, dy] row of a gaps/lone list within maxD metres of (x, z) in scene space
+  nearest(list, x, z, ix, iy, maxD) {
+    let best = null, bd = maxD;
+    for (const row of list || []) {
+      const d = Math.hypot(row[ix] - x, -row[iy] - z);
+      if (d < bd) [best, bd] = [row, d];
+    }
+    return best;
+  }
+
+  numberSprite(n, colour, pos) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.arc(32, 32, 28, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#111';
+    ctx.stroke();
+    ctx.fillStyle = '#111';
+    ctx.font = 'bold 34px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(n), 32, 34);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+    sp.scale.set(7, 7, 1);
+    sp.position.copy(pos);
+    sp.renderOrder = 2;
+    return sp;
+  }
+
+  // Follow a little drone along the line from just behind it, like a chase cam. Needs no keyboard or radio.
+  playLine() {
+    if (!this.line || this.fly) return;
+    if (this.play) return this.stopLine();
+    if (!this.wrap.classList.contains('full')) this.toggleFull(true);
+    const len = this.line.getLength(), speed = LINE_SPEED[this.profile] || 12;
+    this.play = { t0: performance.now(), dur: (len / speed) * 1000, len };
+    this.controls.enabled = false;
+    this.camera.fov = 70;
+    this.camera.near = 0.05;
+    this.camera.updateProjectionMatrix();
+    this.lineSprites.forEach((sp) => { sp.visible = false; });
+    this.dot ||= new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), new THREE.MeshBasicMaterial({ color: 0x5cc8ff }));
+    this.scene.add(this.dot);
+    this.playBtn?.classList.add('on');
+    if (this.playBtn) this.playBtn.textContent = '■ Stop';
+    const at = (m) => this.line.getPointAt(Math.min(1, Math.max(0, m / len)));
+    const cam = new THREE.Vector3();
+    let first = true;
+    const loop = () => {
+      if (!this.play || this.disposed) return;
+      const u = Math.min(1, (performance.now() - this.play.t0) / this.play.dur), m = u * len;
+      const p = at(m), ahead = at(m + 5);
+      const want = at(m - 9).add(new THREE.Vector3(0, 3.5, 0));
+      want.y = Math.max(want.y, this.topAt(want.x, want.z) + 1.5); // keep the camera out of the trees
+      if (first) cam.copy(want);
+      else cam.lerp(want, 0.2);
+      first = false;
+      this.dot.position.copy(p);
+      this.camera.position.copy(cam);
+      this.camera.lookAt(ahead);
+      this.renderer.render(this.scene, this.camera);
+      if (u >= 1) return this.stopLine();
+      this.raf = requestAnimationFrame(loop);
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+
+  stopLine() {
+    if (!this.play) return;
+    this.play = null;
+    cancelAnimationFrame(this.raf);
+    this.lineSprites.forEach((sp) => { sp.visible = true; });
+    if (this.dot) this.scene.remove(this.dot);
+    this.playBtn?.classList.remove('on');
+    if (this.playBtn) this.playBtn.textContent = '▶ Watch the line';
+    this.camera.fov = 45;
+    this.camera.near = 0.1;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.set(170, 190, 230);
+    this.applyMode();
+    this.controls.target.set(0, this.groundAt(0, 0), 0);
+    this.camera.lookAt(this.controls.target);
+    this.render();
+  }
+
   // ---------- sun
 
   defaultTime() {
@@ -383,6 +527,10 @@ export class Preview3D {
       this.flyBtn = el('button', { class: 'p3d-pill', onclick: () => (this.fly ? this.stopFly() : this.startFly()) }, '✈ Fly it');
       this.tools.prepend(this.flyBtn);
     }
+    if (this.line) {
+      this.playBtn = el('button', { class: 'p3d-pill', onclick: () => this.playLine() }, '▶ Watch the line');
+      this.tools.prepend(this.playBtn);
+    }
     const rowJump = el('div', { class: 'p3d-row p3d-chips' },
       jump('Golden AM', mid(t.sunrise, t.goldenHourEnd)), jump('Midday', t.solarNoon),
       jump('Golden PM', mid(t.goldenHour, t.sunset)), jump('Now', new Date()));
@@ -390,6 +538,7 @@ export class Preview3D {
       el('span', {}, el('b', { style: 'color:#ff3d7f' }, '◯'), ' gaps'),
       el('span', {}, el('b', { style: 'color:#ffc400' }, '◯'), ' lone trees'),
       el('span', {}, el('b', { style: 'color:#22c55e' }, '●'), ' take-off'),
+      this.line ? el('span', {}, el('b', { style: 'color:#5cc8ff' }, '━'), ' line to fly') : null,
       el('span', {}, '- - spot area'));
     this.ui = el('div', { class: 'p3d-ui' }, rowSun, rowJump, legend);
     this.wrap.append(this.ui);
@@ -408,13 +557,14 @@ export class Preview3D {
     this.wrap.classList.toggle('full', on);
     document.body.classList.toggle('p3d-full', on);
     if (!on && this.fly) this.stopFly();
+    if (!on && this.play) this.stopLine();
     this.applyMode();
     this.resize();
   }
 
   render() {
     if (this.disposed || !this.renderer) return;
-    if (this.fly) return; // the fly loop renders every frame
+    if (this.fly || this.play) return; // the fly and line loops render every frame
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame(() => {
       this.controls.update();
@@ -425,6 +575,7 @@ export class Preview3D {
   // ---------- fly mode
 
   startFly() {
+    this.stopLine();
     const spec = DRONES[this.profile] || DRONES.freestyle5;
     this.controls.enabled = false;
     this.flyBtn?.classList.add('on');
@@ -643,6 +794,9 @@ export class Preview3D {
   dispose() {
     this.disposed = true;
     this.stopFly();
+    this.stopLine();
+    this.dot?.geometry.dispose();
+    this.dot?.material.dispose();
     window.removeEventListener('keydown', this.onEsc);
     document.body.classList.remove('p3d-full');
     cancelAnimationFrame(this.raf);

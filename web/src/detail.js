@@ -173,7 +173,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   }
 
   const p3dHost = el('div');
-  kids.push(p3dHost);
+  kids.push(p3dHost, lineBox(p));
 
   const why = whyList(p);
   if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
@@ -220,9 +220,22 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
     });
   } else {
     p3dHost.append(el('div', { class: 'muted small', style: 'margin:0 0 12px' },
-      'The 3D view is made for the top spots only.'));
+      'No 3D model for this spot yet: re-run the scorer to make one.'));
   }
   return { dispose: () => { gone = true; preview?.dispose(); } };
+}
+
+// The pipeline's suggested run through the spot, numbered like the markers in the 3D view.
+const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the edge' };
+function lineBox(p) {
+  const moves = p.line?.moves;
+  if (!moves?.length) return null;
+  const head = [p.stats?.line_mix, p.line.length_m ? `about ${Math.round(p.line.length_m / 10) * 10} m` : null].filter(Boolean).join(' · ');
+  return el('div', { class: 'box line-box' },
+    el('h4', {}, 'A line to fly'),
+    head ? el('p', { class: 'muted small' }, `${head}. From the take-off, in this order; the 3D view numbers them and “Watch the line” rides it.`) : null,
+    el('ol', { class: 'moves' }, moves.map(([kind], i) => el('li', {},
+      el('span', { class: `mv mv-${kind}` }, i + 1), MOVE_TEXT[kind] || kind))));
 }
 
 export function nice(k) {
