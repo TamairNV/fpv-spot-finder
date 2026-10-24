@@ -396,6 +396,7 @@ dialog#about li { margin: 4px 0; }
   #topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--top-h); gap: 8px; padding: 0 8px 0 12px; }
   .brand-name, .tb-btn .lbl { display: none; }
   #region-name { font-size: 13px; }
+  #region-name:not(:has(select)) { display: none; }
   .seg .long { display: none; }
   .seg .short { display: inline; }
   .tb-btn { padding: 0 9px; }

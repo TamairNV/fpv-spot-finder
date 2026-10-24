@@ -472,7 +472,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     a_txt = ("Open A3: clear of the A3 distances (150 m from houses, businesses and parks; 50 m from "
                              "buildings and busy roads).")
                 elif a3_clear >= 0.3:
-                    a_txt = (f"Partly A3-clear ({round(100 * a3_clear)}%). Keep the 5\" in the clear part; the amber "
+                    a_txt = (f"Partly A3-clear ({round(100 * a3_clear)}%). Keep the 5\" in the clear part; the grey "
                              "overlay shows where it isn't. The rest is fine for a sub-250 g drone under A1.")
                 else:
                     a_txt = ("Not A3-clear: houses, businesses or a park within 150 m, so an 800 g quad is outside "
