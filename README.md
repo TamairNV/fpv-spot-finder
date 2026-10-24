@@ -135,7 +135,9 @@ seeds; places like your thumbs-down spots get pulled down.
   python -m spotfinder queue --region all --lidar built --save-to /some/big/disk
   ```
 
-  It does each region end to end, fetches the next one while the current one computes, marks
+  Add `--jobs 3` to work on three regions side by side in separate processes: the map-data, legal
+  and scoring steps are mostly single-threaded, so this is what keeps every core busy (each job gets
+  its share of `--workers`). It does each region end to end, fetches the next one while the current one computes, marks
   finished regions with `data/out/<region>/done.json` and skips them on a rerun, so stop and restart
   it whenever. `--lidar built` only streams LiDAR for 1 km squares with 200+ buildings (and their
   neighbours), which is where it matters most; open country uses the tree-height model. About 6 min

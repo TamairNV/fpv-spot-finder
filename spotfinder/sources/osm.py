@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -173,7 +174,7 @@ def download(name: str) -> Path:
     md5.raise_for_status()
     want = md5.text.split()[0]
     log.info("OSM: downloading %s", url)
-    tmp = dest.with_suffix(".part")
+    tmp = dest.with_suffix(f".{os.getpid()}.part")  # parallel queue jobs may want the same extract
     h = hashlib.md5()
     with s.get(url, stream=True, timeout=120) as resp, open(tmp, "wb") as f:
         resp.raise_for_status()
@@ -183,7 +184,7 @@ def download(name: str) -> Path:
     if h.hexdigest() != want:
         tmp.unlink()
         raise RuntimeError(f"MD5 mismatch for {url}")
-    tmp.rename(dest)
+    tmp.replace(dest)
     return dest
 
 

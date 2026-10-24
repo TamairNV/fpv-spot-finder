@@ -460,7 +460,9 @@ def write_regions_index() -> list[dict]:
         out.append({"key": key, "name": _grid_name(r, cx, cy) if key.startswith("g") else r.name, "center": [round(cx, 5), round(cy, 5)],
                     "bbox": [round(v, 5) for v in (w, s, e, n)]})
     WEB_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    (WEB_DATA_DIR / "regions.json").write_text(json.dumps(out))
+    tmp = WEB_DATA_DIR / f"regions.json.{os.getpid()}"  # parallel queue jobs each rewrite it
+    tmp.write_text(json.dumps(out))
+    tmp.replace(WEB_DATA_DIR / "regions.json")
     return out
 
 

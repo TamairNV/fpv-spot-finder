@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -45,6 +46,10 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("--skip", default="", help="comma-separated regions to leave out (e.g. done elsewhere)")
             p.add_argument("--fetch-ahead", type=int, default=2, help="regions downloading at once")
             p.add_argument("--lidar-workers", type=int, default=6, help="parallel LiDAR requests per region")
+            p.add_argument("--jobs", type=int, default=1,
+                           help="regions processed side by side, each in its own process; the map-data and "
+                                "scoring steps are mostly single-threaded, so this is what fills all the cores")
+            p.add_argument("--shard", help=argparse.SUPPRESS)  # i/n: set by --jobs for each child
         if name == "lidar":
             p.add_argument("--top", type=int, default=0,
                            help="only fetch the 1 km squares under the best N spots per profile (0 = whole region)")
@@ -68,7 +73,14 @@ def main(argv: list[str] | None = None) -> None:
         from . import queue
 
         skip = set(args.skip.split(","))
-        queue.run([r for r in regions if r.key not in skip], lidar=args.lidar, save_to=args.save_to, redo=args.redo,
+        regions = [r for r in regions if r.key not in skip]
+        if args.jobs > 1 and args.shard is None:
+            queue.run_jobs(argv if argv is not None else sys.argv[1:], args.jobs)
+            return
+        if args.shard is not None:
+            i, n = (int(v) for v in args.shard.split("/"))
+            regions = regions[i::n]
+        queue.run(regions, lidar=args.lidar, save_to=args.save_to, redo=args.redo,
                   workers=args.workers, fetch_ahead=args.fetch_ahead, lidar_workers=args.lidar_workers)
         return
     for region in regions:

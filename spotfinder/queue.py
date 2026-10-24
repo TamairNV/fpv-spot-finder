@@ -15,7 +15,10 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 import shutil
+import subprocess
+import sys
 import tarfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -56,11 +59,12 @@ def save(region: Region, dest: Path) -> None:
 
 
 def run(regions: list[Region], lidar: str = "all", save_to: Path | None = None, redo: bool = False,
-        workers: int = 4, fetch_ahead: int = 1, lidar_workers: int = 6) -> None:
+        workers: int = 4, fetch_ahead: int = 1, lidar_workers: int = 6, retry: bool = True) -> None:
     todo = [r for r in regions if redo or not done_path(r).exists()]
     log.info("queue: %d regions to do, %d already done", len(todo), len(regions) - len(todo))
     if not todo:
         return
+    failed = []
     with ThreadPoolExecutor(max(fetch_ahead, 1)) as net:
         # Keep `fetch_ahead` regions downloading; submit the next one as each is taken for processing,
         # so downloads never get more than that far ahead (disk).
@@ -76,6 +80,7 @@ def run(regions: list[Region], lidar: str = "all", save_to: Path | None = None, 
                 pipeline.score_and_export(region)
             except Exception:
                 log.exception("%s: failed, skipping it", region.key)
+                failed.append(region)
                 continue
             done_path(region).write_text(json.dumps({
                 "done_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -83,3 +88,38 @@ def run(regions: list[Region], lidar: str = "all", save_to: Path | None = None, 
             if save_to:
                 save(region, save_to)
             log.info("queue: %s done (%d/%d)", region.key, i + 1, len(todo))
+    if failed and retry:
+        # Failures so far have all been dropped downloads, so one more go usually clears them.
+        log.info("queue: retrying %d failed regions: %s", len(failed), [r.key for r in failed])
+        run(failed, lidar, save_to, redo, workers, fetch_ahead, lidar_workers, retry=False)
+
+
+def run_jobs(argv: list[str], jobs: int) -> None:
+    """Split the queue into `jobs` child processes (every jobs-th region each), sharing the cores and
+    the LiDAR server between them, and wait for all of them. Each child logs to logs/queue-<i>.log."""
+    cores = os.cpu_count() or 4
+    argv = _without(argv, "--jobs")
+    if not any(a.startswith("--workers") for a in argv):
+        argv += ["--workers", str(max(cores // jobs, 2))]
+    (ROOT / "logs").mkdir(exist_ok=True)
+    procs = []
+    for i in range(jobs):
+        log_path = ROOT / "logs" / f"queue-{i}.log"
+        log.info("queue: job %d/%d logging to %s", i + 1, jobs, log_path)
+        procs.append(subprocess.Popen([sys.executable, "-m", "spotfinder", *argv, "--shard", f"{i}/{jobs}"],
+                                      cwd=ROOT, stdout=open(log_path, "a"), stderr=subprocess.STDOUT))
+    for p in procs:
+        p.wait()
+
+
+def _without(argv: list[str], flag: str) -> list[str]:
+    """argv minus `flag` and its value (as `--flag v` or `--flag=v`)."""
+    out, skip = [], False
+    for a in argv:
+        if skip:
+            skip = False
+        elif a == flag:
+            skip = True
+        elif not a.startswith(flag + "="):
+            out.append(a)
+    return out

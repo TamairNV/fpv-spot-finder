@@ -9,6 +9,9 @@ s3://dataforgood-fb-data/forests/v1/alsgedi_global_v6_float/
 from __future__ import annotations
 
 import logging
+import os
+import threading
+import time
 from pathlib import Path
 
 import geopandas as gpd
@@ -34,15 +37,24 @@ def _download(url: str, dest: Path) -> Path:
     if dest.exists():
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    with requests.get(url, stream=True, timeout=120) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("content-length", 0))
-        with open(tmp, "wb") as f, tqdm(total=total, unit="B", unit_scale=True, desc=dest.name) as bar:
-            for chunk in r.iter_content(chunk_size=1 << 20):
-                f.write(chunk)
-                bar.update(len(chunk))
-    tmp.rename(dest)
+    # A temp name per thread: the queue can fetch two regions that share a tile at the same time.
+    tmp = dest.with_suffix(f"{dest.suffix}.{os.getpid()}-{threading.get_ident()}.part")
+    for attempt in range(3):
+        try:
+            with requests.get(url, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length", 0))
+                with open(tmp, "wb") as f, tqdm(total=total, unit="B", unit_scale=True, desc=dest.name) as bar:
+                    for chunk in r.iter_content(chunk_size=1 << 20):
+                        f.write(chunk)
+                        bar.update(len(chunk))
+            break
+        except requests.RequestException:
+            tmp.unlink(missing_ok=True)
+            if attempt == 2:
+                raise
+            time.sleep(5 * 2 ** attempt)
+    tmp.replace(dest)  # atomic; if another thread got there first, same bytes
     return dest
 
 
