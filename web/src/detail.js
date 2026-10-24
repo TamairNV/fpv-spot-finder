@@ -102,7 +102,7 @@ function takeoffBox(p) {
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
 }
 
-export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, onRate, onLike, onBack }) {
+export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, onRate, onLike, onBack, onNote }) {
   const p = spot.properties;
   const [lon, lat] = spot.geometry.coordinates;
   let rating = ratings.get(profile, p.id);
@@ -170,6 +170,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
         el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
       SANDBOXED ? null : share));
+    kids.push(notesBox(p, ratings, onNote));
   }
 
   const p3dHost = el('div');
@@ -223,6 +224,24 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       'No 3D model for this spot yet: re-run the scorer to make one.'));
   }
   return { dispose: () => { gone = true; preview?.dispose(); } };
+}
+
+// Your own notes on the place, kept on this device and in the ratings download.
+function notesBox(p, ratings, onNote) {
+  const text = ratings.note(p.id);
+  const area = el('textarea', { class: 'note-text', rows: 3, placeholder: 'Parking, access, who to ask, when it is quiet…', 'aria-label': 'Your notes' }, text);
+  let timer;
+  const keep = () => {
+    clearTimeout(timer);
+    ratings.setNote(p.id, area.value, { title: p.title });
+    onNote?.();
+  };
+  area.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ratings.setNote(p.id, area.value, { title: p.title }), 400);
+  });
+  area.addEventListener('change', keep);
+  return el('details', { class: 'box notes', open: !!text }, el('summary', {}, text ? '📝 Your notes' : '📝 Add a note'), area);
 }
 
 // The pipeline's suggested run through the spot, numbered like the markers in the 3D view.

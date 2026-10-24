@@ -466,3 +466,11 @@ dialog#about li { margin: 4px 0; }
   .now { margin-top: 6px; padding: 6px 10px; }
   .spot-head { padding-top: 6px; padding-bottom: 6px; }
 }
+
+/* your notes */
+.notes summary { cursor: pointer; font-weight: 600; }
+.note-text { width: 100%; margin-top: 8px; resize: vertical; min-height: 64px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; font-size: 16px; }
+.note-text:focus { outline: none; border-color: var(--line-2); background: var(--panel-3); }
+@media (min-width: 821px) { .note-text { font-size: 13.5px; } }
+.has-note { margin-left: 5px; font-size: 11px; }

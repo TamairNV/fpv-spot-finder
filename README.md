@@ -40,6 +40,10 @@ Three profiles out of the box:
 - **Ratings**: 👍 / 👎 any spot. "My taste" re-ranks the list with a small model trained on your
   ratings; "More like this" finds spots similar to one you like. Ratings stay in your browser and can
   be exported and fed back into the pipeline.
+- **Filters and notes**: chips above the list narrow it to parks, bandos, water, bridges, hills,
+  sunset spots and so on, or to your 👍 spots. ‹ › on a spot (or ← →) steps through the list. Each
+  spot takes your own notes (parking, access, when it's quiet); they show as 📝 in the list, are
+  searchable, and go in the ratings download.
 - **Works offline** once loaded (add it to your home screen). When the online map can't load, it
   switches to a built-in basemap (main roads, rail, water, woods, built-up areas, place names), so it
   still works in a field with no signal. **GPX export** of the spots for OS Maps or a GPS, and a share
@@ -114,7 +118,7 @@ says which heights it used.
 ### Teach it your taste
 
 In the app, 👍 / 👎 re-rank the list straight away ("My taste"). To make the whole region learn,
-not just the 250 listed spots: **Download my ratings** (bottom left), save the file as
+not just the listed spots: **Download my ratings and notes** (bottom left), save the file as
 `config/ratings/<region>.json` and run `python -m spotfinder score`. Thumbs-up spots become extra
 seeds; places like your thumbs-down spots get pulled down.
 

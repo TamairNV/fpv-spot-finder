@@ -579,7 +579,8 @@ function orderedSpots() {
     }
   }
   const q = state.query.trim().toLowerCase();
-  let list = feats.filter((f) => !q || `${f.properties.title} ${f.properties.locality} ${f.properties.gridref}`.toLowerCase().includes(q));
+  const hay = (p) => `${p.title} ${p.locality} ${p.gridref} ${p.park || ''} ${ratings.note(p.id)}`.toLowerCase();
+  let list = feats.filter((f) => !q || hay(f.properties).includes(q));
   if (state.a3only && isA3()) list = list.filter((f) => f.properties.a3 >= 50);
   if (state.kind && !kindsFor(state.profile).some(([k]) => k === state.kind)) state.kind = null;
   if (state.kind) list = list.filter((f) => hasKind(f, state.kind));
@@ -606,7 +607,8 @@ function spotRow(f, i) {
   return el('li', { class: `row-item${state.selected === p.id ? ' on' : ''}${r < 0 ? ' rated-down' : ''}`, 'data-id': p.id },
     thumbBox(p.preview, el('i', {}, i + 1)),
     el('div', {},
-      el('div', { class: 'spot-name' }, p.title, r > 0 ? el('span', { class: 'rated-up', title: 'You rated it good' }, '▲') : null),
+      el('div', { class: 'spot-name' }, p.title, r > 0 ? el('span', { class: 'rated-up', title: 'You rated it good' }, '▲') : null,
+        ratings.note(p.id) ? el('span', { class: 'has-note', title: ratings.note(p.id) }, '📝') : null),
       el('div', { class: 'spot-sub' }, sub)),
     el('div', { class: 'row-side' },
       el('span', { class: 'score', style: `--c:${scoreColour(p.score)}` }, p.score),
@@ -678,7 +680,7 @@ function clearFilters() {
 function renderFoot() {
   $('#list-foot').replaceChildren(...[
     SANDBOXED ? null : el('a', { href: `${BASE}/spots_${state.profile}.gpx`, download: `fpv-spots-${REGION}-${state.profile}.gpx` }, 'Spots as GPX'),
-    el('button', { class: 'linklike', onclick: exportRatings }, SANDBOXED ? 'Copy my ratings' : 'Download my ratings'),
+    el('button', { class: 'linklike', onclick: exportRatings }, SANDBOXED ? 'Copy my ratings and notes' : 'Download my ratings and notes'),
     el('button', { class: 'linklike', onclick: openAbout }, 'How it works'),
   ].filter(Boolean));
 }
@@ -852,6 +854,7 @@ function showSpot(f, isSeed) {
       $('#list-scroll').scrollTop = 0;
     },
     onBack: () => goBack(),
+    onNote: () => renderList(),
   });
   $('#spot-scroll').scrollTop = 0;
 }
@@ -1059,6 +1062,7 @@ function wireUI() {
   window.addEventListener('keydown', (e) => {
     if (document.querySelector('.p3d-wrap.full') || $('#about').open) return;
     if (e.key === 'Escape') {
+      if (e.target.matches?.('textarea, input')) return e.target.blur();
       if (state.checking) setChecking(false);
       else if (!$('#view-spot').hidden) goBack();
       return;
