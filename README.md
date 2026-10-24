@@ -66,7 +66,7 @@ branch only ever holds the latest build.
 
 ### The pipeline (to re-score, change rules, or add a region)
 
-Python 3.11+.
+Python 3.12+.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate

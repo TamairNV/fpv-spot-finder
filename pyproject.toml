@@ -2,7 +2,7 @@
 name = "fpv-spot-finder"
 version = "0.1.0"
 description = "Finds legal, interesting FPV drone spots in the UK from height data, map data and your own ratings."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.26",
     "pandas>=2.1",
