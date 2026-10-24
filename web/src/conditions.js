@@ -45,6 +45,18 @@ export async function weather(lon, lat) {
   return p;
 }
 
+// Flyability for the next hour at one point, for the banner above the list.
+export async function nowConditions(lon, lat, profile) {
+  const h = (await weather(lon, lat)).hourly;
+  const now = Date.now();
+  let i = h.time.findIndex((t) => new Date(t).getTime() > now - 1800e3);
+  if (i < 0) i = 0;
+  const lim = LIMITS[profile] || LIMITS.freestyle5;
+  const gust = h.wind_gusts_10m[i], wind = h.wind_speed_10m[i], rain = h.precipitation_probability[i] ?? 0;
+  const cls = gust > lim.gust * 1.3 || rain > 60 ? 'no' : gust > lim.gust || wind > lim.wind || rain > 30 ? 'meh' : 'go';
+  return { wind, gust, rain, cls };
+}
+
 // Where to look instead when the forecast can't be fetched (offline, or a host that blocks it).
 function noForecast(box, lon, lat) {
   box.replaceChildren(el('h4', {}, 'Wind and rain'),

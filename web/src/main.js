@@ -5,6 +5,7 @@ import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, s
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
 import { renderSpot, legalBadge, nice } from './detail.js';
+import { nowConditions, sunTimes } from './conditions.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -113,8 +114,35 @@ async function boot() {
   wireUI();
   wireSheet();
   renderList();
+  renderNow();
   syncControls();
   if (!SANDBOXED) loadRegions();
+}
+
+// "Now" banner: wind and rain for the next hour at the middle of the region, and today's light.
+async function renderNow() {
+  const box = $('#now-box');
+  const [lon, lat] = state.meta.region.center;
+  const hm = (d) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const t = sunTimes(lon, lat);
+  const light = Date.now() < t.sunset.getTime()
+    ? `Golden hour from ${hm(t.goldenEveningStart)} · sunset ${hm(t.sunset)}`
+    : `Sunrise tomorrow about ${hm(new Date(t.sunrise.getTime() + 86400e3))}`;
+  box.replaceChildren(el('span', {}, light));
+  box.hidden = false;
+  if (SANDBOXED) return;
+  const profile = state.profile;
+  try {
+    const w = await nowConditions(lon, lat, profile);
+    if (profile !== state.profile) return;
+    const who = state.meta.profiles[profile].short || state.meta.profiles[profile].label;
+    const verdict = { go: `good for the ${who}`, meh: `marginal for the ${who}`, no: `not great for the ${who}` }[w.cls];
+    box.replaceChildren(
+      el('span', { class: w.cls }, el('b', {}, 'Now: '), `wind ${Math.round(w.wind)} mph, gusts ${Math.round(w.gust)}, rain ${w.rain}% · `, el('b', { class: 'v' }, verdict)),
+      el('span', {}, light));
+  } catch {
+    /* no forecast: the light still shows */
+  }
 }
 
 function buildProfileSwitch() {
@@ -426,6 +454,7 @@ function setProfile(key) {
   applyLayerToggles();
   syncControls();
   renderList();
+  renderNow();
   drawSeeds();
 }
 
