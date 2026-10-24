@@ -438,7 +438,7 @@ def _flags_text(flag_bits: int) -> list[str]:
     return [txt for bit, txt in legal.FLAG_TEXT.items() if flag_bits & bit and bit != legal.FLAG_COMMON]
 
 
-def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 120,
+def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 100_000,
               parks: tuple | None = None) -> None:
     out = web_dir(region)
     for old in (out / "previews").glob("*.png"):  # spot ids change between runs

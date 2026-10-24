@@ -105,7 +105,7 @@ def load_ratings(region: Region) -> dict[str, tuple[list, list]]:
     return out
 
 
-def score_and_export(region: Region, n_spots: int = 250, previews: int = 120, strict: bool = False) -> dict:
+def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000, strict: bool = False) -> dict:
     """Score every cell and export the spots. By default legality is a label on each spot, not a filter:
     the app lists potential places and says which rules they meet. No-fly zones, MOD land and danger areas
     stay out either way. strict=True only lists spots each drone may fly under its Open subcategory."""

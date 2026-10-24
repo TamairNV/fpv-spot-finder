@@ -162,8 +162,10 @@ seeds; places like your thumbs-down spots get pulled down.
    "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
 6. **Parks**: the ranking alone favours woods and riversides out of town, so every named park,
    common or recreation ground of 4 ha or more that has no spot yet gets one at its best place
-   (listed after the top 250, with a 3D preview), and every spot inside a park is labelled with it.
+   (listed after the top 250), and every spot inside a park is labelled with it.
    The app's "Parks" chip lists them all.
+7. **3D models**: every spot gets a 320 m square model at 2 m from the same heights (about 20 KB
+   each); `score --previews N` limits them to the top N per drone.
 
 ## Be real about it
 
