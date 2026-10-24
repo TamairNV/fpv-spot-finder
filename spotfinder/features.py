@@ -18,6 +18,7 @@ from scipy import ndimage
 from tqdm import tqdm
 
 from .config import Region
+from . import lines
 from .heights import HeightReader, Tile
 
 try:
@@ -47,6 +48,7 @@ CELL_FEATURES = [
     "h_p90", "tree_h_p90", "bld_h_mean", "bld_h_max", "bld_h_std",
     "edge_tree_m", "edge_bld_m", "gaps", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max",
     "under_frac", "lidar_frac", "gaps_all", "treeline_m", "edge_w_m",
+    "line5", "line5_m", "line5_n", "linew", "linew_m", "linew_n",
 ]
 
 _reader: HeightReader | None = None
@@ -106,7 +108,9 @@ class TileResult:
     lone: list[tuple]
 
 
-def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list, list]:
+def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = False):
+    """Per-cell features, gaps and lone trees for one tile. With want_lines, also the flyable runs found
+    in it: {style name: (nodes, scores, paths)} in tile pixels."""
     ohm, trees = t.ohm, t.trees
     tall = ohm >= TALL_M
     road = t.ways == 1
@@ -131,7 +135,8 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
         flank = g.mean(flank_src)
         tree_frac = g.mean(ndimage.grey_dilation((trees >= TALL_M).astype("float32"), size=(7, 7)))
         com = list(zip(*g.centre()))
-        through = _through(open_ | (ohm < OPEN_M), com, ohm.shape)
+        # open = clear across 3 m, so a speckle hole in a canopy isn't "open on the far side"
+        through = _through(ndimage.maximum_filter(ohm, size=3) < OPEN_M, com, ohm.shape)
         for a, w, f, (r, c), th, tf in zip(area, width, flank, com, through, tree_frac):
             if 3 <= a <= 400 and GAP_MIN_W <= w <= GAP_MAX_W and f >= GAP_MIN_FLANK:
                 gaps.append((r, c, float(w), float(f), float(a), bool(th), float(tf)))
@@ -247,7 +252,26 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE) -> tuple[dict, list
             cells["lone"][i, j] += 1
             cells["lone_h_max"][i, j] = max(cells["lone_h_max"][i, j], h)
             keep_lone.append((t.x0 + c + 0.5, t.y1 - r - 0.5, h, a))
-    return {k: v.astype("float32") for k, v in cells.items()}, keep_gaps, keep_lone
+    # --- Flyable lines: chain the obstacles into runs and keep the best run starting in each cell.
+    runs = {}
+    for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
+        nodes = lines.nodes_from(gaps, lone, treeline, style)
+        nb = lines.links(nodes, ohm, style)
+        scores, paths = lines.all_runs(nodes, nb)
+        runs[name] = (nodes, scores, paths)
+        for k in (name, name + "_m", name + "_n"):
+            cells[k] = np.zeros((grid_n, grid_n), dtype="float32")
+        for i in np.argsort(scores):  # best last, so it wins the cell
+            rr, cc = nodes[i, 0] - m, nodes[i, 1] - m
+            if 0 <= rr < size and 0 <= cc < size:
+                ci, cj = int(rr // n), int(cc // n)
+                cells[name][ci, cj] = scores[i]
+                cells[name + "_m"][ci, cj] = lines.path_length(nodes, paths[i])
+                cells[name + "_n"][ci, cj] = len(paths[i])
+    out = {k: v.astype("float32") for k, v in cells.items()}
+    if want_lines:
+        return out, keep_gaps, keep_lone, runs
+    return out, keep_gaps, keep_lone
 
 
 def _through(open_: np.ndarray, com, shape) -> np.ndarray:

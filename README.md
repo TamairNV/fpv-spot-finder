@@ -139,6 +139,12 @@ seeds; places like your thumbs-down spots get pulled down.
    10 m ring. Edges are tall pixels touching open ground; tree lines are long, narrow belts of trees
    (40 m+ long, under 15 m wide). With LiDAR, the difference between first and last returns finds
    room under the canopy.
+   **Lines**: every fly-through gap, lone tree (orbit), tree 18 m+ (dive) and stretch of tree line
+   (skim, one every 25 m) is a node. Two nodes link when they're 10-70 m apart (5-35 m for the whoop)
+   and nothing taller than 3 m is in the way on the 1 m height grid. From each node a greedy walk
+   picks the next obstacle by its value, a change of move and a smooth heading (no turns over 115°),
+   up to 12 moves, and scores the run with a bonus for variety. Each spot's "flow" is the best run
+   that starts in it, and the spot card gets that run as a suggested line.
 3. **Context** from OSM and Overture: distance to water, bridges and viaducts, bandos (ruins,
    abandoned/disused structures), cliffs and quarries, landmarks, masts and cranes, paths, car parks,
    fast main roads, farmland and public open space; and how busy a place is. A mapped bando only counts

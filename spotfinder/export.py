@@ -32,7 +32,7 @@ PREVIEW_RES = 2
 
 # Spot fields only the spot card uses (gap and tree positions, the why breakdown, outside links):
 # written to spot_details_<profile>.json so the list's file stays small.
-DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links")
+DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links", "line")
 
 # Codes in the legal lookup image (blue channel).
 CODE_CLEAR, CODE_FRZ, CODE_RESTRICTED = 0, 1, 2
@@ -273,6 +273,35 @@ def _flush_pngs() -> None:
         _png_jobs.pop().result()
 
 
+def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float) -> dict | None:
+    """The best flyable run starting within `radius` of the spot, as moves the 3D view can draw:
+    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre."""
+    from . import features, lines
+
+    size = 300
+    x0, y0 = int(round(x - size / 2)), int(round(y - size / 2))
+    t = reader.tile(x0, y0, size, features.MARGIN)
+    _, _, _, runs = features.analyse(t, size=size, want_lines=True)
+    nodes, scores, paths = runs[line_key]
+    if not len(nodes):
+        return None
+    px = t.x0 + nodes[:, 1] + 0.5
+    py = t.y1 - nodes[:, 0] - 0.5
+    inside = np.hypot(px - x, py - y) <= radius
+    if not inside.any():
+        return None
+    i = int(np.flatnonzero(inside)[np.argmax(scores[inside])])
+    path = paths[i]
+    if len(path) < 2:
+        return None
+    moves = []
+    for j in path:
+        lon, lat = bng_to_lonlat(px[j], py[j])
+        moves.append([lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6),
+                      round(px[j] - x, 1), round(py[j] - y, 1)])
+    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path)), "moves": moves}
+
+
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path) -> dict:
     """160 x 160 px at 2 m: R = class*64, G = height above ground (0.25 m), B = ground (0.5 m above min)."""
     half = PREVIEW_M // 2
@@ -374,6 +403,19 @@ def _drivers(comp_vals: dict[str, float], profile: scoring.Profile) -> list[str]
     return [scoring.COMPONENT_TEXT[k] for k, v in pos[:3] if v > 0.02]
 
 
+def _line_mix(line: dict | None) -> str:
+    """'3 gaps, 2 orbits, a dive' from a line's moves."""
+    if not line:
+        return ""
+    from collections import Counter
+
+    order = ["gap", "orbit", "dive", "skim"]
+    n = Counter(m[0] for m in line["moves"])
+    words = {"gap": ("a gap", "gaps"), "orbit": ("an orbit", "orbits"), "dive": ("a dive", "dives"),
+             "skim": ("a skim", "skims")}
+    return ", ".join(words[k][0] if n[k] == 1 else f"{n[k]} {words[k][1]}" for k in order if n[k])
+
+
 def _why_text(k: str, key: str, s: dict) -> str:
     """One line per reason, with the numbers that earned it."""
     plural = lambda n, one, many: f"{n} {one if n == 1 else many}"
@@ -381,6 +423,8 @@ def _why_text(k: str, key: str, s: dict) -> str:
     bando = (f"Ruin or abandoned structure {away(s['bando_m'])}" if s["bando_m"] <= s["bando_site_m"]
              else f"Old industrial site {away(s['bando_site_m'])} (not much left standing)")
     texts = {
+        "flow": (f"A {s['line_moves']}-move line over {s['line_m']} m" + (f": {s['line_mix']}" if s.get("line_mix") else "")
+                 if s.get("line_moves", 0) >= 2 else "Obstacles you can chain into a run"),
         "gaps": (plural(s["gaps_whoop"], "whoop-sized gap", "whoop-sized gaps") + " to thread" if key == "cine85"
                  else plural(s["gaps"], "fly-through gap", "fly-through gaps") + " between trees or buildings"),
         "lone": plural(s["lone_trees"], "lone tree", "lone trees") + f" to orbit, tallest {s['lone_h_max']:.0f} m",
@@ -508,6 +552,10 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     done_previews[(r, c)] = pm
                 preview = {"file": f"previews/{spot_id}.png", **done_previews[(r, c)],
                            "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
+            line = None
+            line_key = {"freestyle5": "line5", "cine85": "linew"}.get(key)
+            if line_key and rank <= previews:
+                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL)
             gr = os_grid_ref(x, y)
             a3_clear = wm("a3_frac")
             if profile.legal_key == "a3_frac":
@@ -545,12 +593,15 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "bando_site_m": int(wmin("dist_bando_site")), "landmark_m": int(wmin("dist_landmark")),
                     "lone_h_max": round(wmax("lone_h_max"), 1), "bld_h_max": round(wmax("bld_h_max"), 1),
                     "gap_q": round(ws("gq5" if key != "cine85" else "gqw"), 1),
+                    "line_moves": len(line["moves"]) if line else int(wmax("line5_n" if key != "cine85" else "linew_n")),
+                    "line_m": line["length_m"] if line else int(wmax("line5_m" if key != "cine85" else "linew_m")),
+                    "line_mix": _line_mix(line),
                 },
                 "legal": {"summary": a_txt, "flags": _flags_text(flag_bits), "a3_clear_pct": round(100 * a3_clear),
                           "a3_edge_m": int(wmin("dist_a3_edge"))},
                 "takeoff": {"lon": round(tlon, 6), "lat": round(tlat, 6), "dx": tx - x, "dy": ty - y,
                             "path_m": int(cells["dist_path"][best]), "parking_m": int(cells["dist_parking"][best])},
-                "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview,
+                "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview, "line": line,
                 "links": {
                     "satellite": f"https://www.google.com/maps/@{lat:.6f},{lon:.6f},250m/data=!3m1!1e3",
                     "streetview": f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat:.6f},{lon:.6f}",

@@ -81,11 +81,12 @@ PROFILES = {
     "freestyle5": Profile(
         key="freestyle5", label="5\" freestyle", short="5\"", drone="5 inch, 800 g (no class mark)",
         category="Open A3", radius_cells=2, spacing_m=400, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
-        weights={"gaps": 0.20, "lone": 0.12, "edges": 0.14, "space": 0.10, "mix": 0.08, "vertical": 0.08,
+        # "flow" is the best run you can chain through the spot; gaps, trees and edges still count on their own.
+        weights={"flow": 0.22, "gaps": 0.12, "lone": 0.08, "edges": 0.10, "space": 0.10, "mix": 0.06, "vertical": 0.08,
                  "relief": 0.10, "bando": 0.10, "water": 0.04, "bridge": 0.04, "sunset": 0.04,
                  "busy": -0.15, "hazard": -0.25, "permission": -0.08, "wet": -0.2,
                  "remote": -0.10, "farm": -0.05, "road": -0.12},
-        style_features=["gaps", "lone", "edges", "space", "mix", "vertical", "relief", "water"],
+        style_features=["flow", "gaps", "lone", "edges", "space", "mix", "vertical", "relief", "water"],
     ),
     "cine5": Profile(
         key="cine5", label="5\" cinematic", short="5\" cine", drone="5 inch, 800 g (no class mark)",
@@ -100,15 +101,16 @@ PROFILES = {
         key="cine85", label="85 mm cinematic", short="85 mm", drone="85 mm whoop, under 250 g", category="Open A1",
         radius_cells=1, spacing_m=250, legal_key="a1_frac", legal_min=0.9,
         # Busy places only cost a little: a whoop at a quiet hour is how the Helix gets flown.
-        weights={"architecture": 0.26, "gaps": 0.10, "trees": 0.14, "under": 0.06, "water": 0.14,
+        weights={"architecture": 0.24, "flow": 0.14, "gaps": 0.06, "trees": 0.12, "under": 0.06, "water": 0.14,
                  "bridge": 0.12, "landmark": 0.10, "plaza": 0.06, "relief": 0.04, "bando": 0.06, "sunset": 0.04,
                  "public": 0.04,
                  "busy": -0.06, "crowds": -0.08, "permission": -0.08, "wet": -0.2, "remote": -0.04},
-        style_features=["architecture", "gaps", "trees", "under", "water", "bridge", "plaza", "relief"],
+        style_features=["architecture", "flow", "gaps", "trees", "under", "water", "bridge", "plaza", "relief"],
     ),
 }
 
 COMPONENT_TEXT = {
+    "flow": "a run you can chain: gaps, orbits, dives and skims with clear air between",
     "gaps": "gaps between trees or buildings to fly through",
     "lone": "lone trees or pillars to orbit and power-loop",
     "edges": "tree lines and edges to skim along",
@@ -148,7 +150,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
     if p.legal_key == "a3_frac" and legal_only:
         L = f["a3_frac"].astype("float64")
         f = dict(f)
-        for k in ("gaps", "gq5", "lone", "edge_tree_m", "edge_bld_m", "treeline_m", "open_frac"):
+        for k in ("gaps", "gq5", "lone", "edge_tree_m", "edge_bld_m", "treeline_m", "open_frac", "line5"):
             f[k] = f[k] * L
         for k in ("h_p90", "relief_250", "steep_frac"):
             f[k] = np.where(L >= 0.5, f[k], 0.0)
@@ -167,6 +169,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
     c["remote"] = ramp(win_min(f["dist_access"], r), 250, 600)
     c["hazard"] = near(win_min(f["dist_hazard"], r), 30, 100)
     if p.key == "freestyle5":
+        c["flow"] = ramp(win_max(f["line5"], r), 3, 15)
         c["gaps"] = sat(win_sum(f["gq5"], r), 20)
         c["lone"] = sat(win_sum(f["lone"] * ramp(f["lone_h_max"], 5, 12), r), 12)
         c["edges"] = 0.6 * sat(win_sum(f["treeline_m"], r), 250) + 0.4 * sat(win_sum(f["edge_tree_m"] + f["edge_bld_m"], r), 700)
@@ -198,6 +201,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         c["architecture"] = (0.5 * sat(win_sum(f["edge_bld_m"], r), 300)
                              + 0.25 * ramp(win_max(f["bld_h_std"], r), 2, 10)
                              + 0.25 * ramp(win_max(f["bld_h_max"], r), 10, 30))
+        c["flow"] = ramp(win_max(f["linew"], r), 3, 15)
         c["gaps"] = sat(win_sum(f["gqw"], r), 10)
         c["trees"] = sat(win_sum(f["edge_tree_m"], r), 300) * ramp(win_max(f["tree_h_p90"], r), 4, 12)
         c["under"] = ramp(win_mean(f["under_frac"], r), 0.1, 0.5) * ramp(win_mean(f["tree_frac"], r), 0.05, 0.3)
