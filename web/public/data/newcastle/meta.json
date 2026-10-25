@@ -87,7 +87,7 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-25T05:07:34+00:00",
+  "generated_at": "2026-10-25T05:35:13+00:00",
   "sources": {
     "computed_at": "2026-10-25T04:18:40+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
@@ -276,7 +276,8 @@
     "512": "Inside a danger area: only fly when it's not active (check NOTAMs)",
     "1024": "Busy pedestrian area: never fly over crowds",
     "2048": "Quarry: private site with workers and vehicles; needs the operator's OK",
-    "4096": "Common land / town moor: public open space, so it counts as a recreational area for A3"
+    "4096": "Common land / town moor: public open space, so it counts as a recreational area for A3",
+    "8192": "English Heritage site: no taking off or landing there, and they ask you not to fly over it"
   },
   "seeds": [
     {
@@ -342,29 +343,29 @@
         "Power lines within 30 m"
       ],
       "components": {
-        "permission": 1.0,
-        "sunset": 0.197,
+        "permission": 0.16,
+        "sunset": 0.19,
         "remote": 0.0,
-        "hazard": 0.198,
+        "hazard": 0.098,
         "flow": 0.0,
-        "gaps": 0.466,
+        "gaps": 0.421,
         "lone": 0.0,
-        "edges": 0.296,
-        "space": 0.018,
+        "edges": 0.293,
+        "space": 0.0,
         "mix": 0.0,
-        "vertical": 0.633,
+        "vertical": 0.55,
         "relief": 1.0,
         "bando": 0.0,
         "water": 1.0,
-        "bridge": 1.0,
+        "bridge": 0.848,
         "beach": 0.0,
         "public": 1.0,
-        "busy": 0.261,
+        "busy": 0.285,
         "wet": 0.0,
         "farm": 0.0,
         "road": 0.0
       },
-      "score": 67,
+      "score": 72,
       "preview": {
         "file": "previews/502-260.png",
         "size": 160,
