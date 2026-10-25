@@ -246,9 +246,10 @@ seeds; places like your thumbs-down spots get pulled down.
    weigh in, and public land is part of the taste match too: without it the taste part filled the top
    with private fields that happen to look like the Town Moor. Height to dive (tall trees or walls, a
    hill) only counts for the 5" where there's open air beside it: a valley side that's woods all the
-   way down is canopy to hop over, not a dive. Bridges,
-   bandos, beaches and landmarks are measured from the middle of the spot, so the best cell is on
-   them, not 300 m away in the next field. 5" cine is led by its subject (landmarks, the coast,
+   way down is canopy to hop over, not a dive. A bridge or viaduct still carrying trains doesn't count
+   for the 5" (lines keep off the tracks, so Hawthorn Dene and Plessey are ones to film, not fly
+   round); it does for cine. Bridges, bandos, beaches and landmarks are measured from the middle of the
+   spot, so the best cell is on them, not 300 m away in the next field. 5" cine is led by its subject (landmarks, the coast,
    bridges) more than by water, hills and sunsets, which every river valley has, a hero most of all
    (a nameless bend of the Browney no longer outranks the Angel), and being busy only
    costs it a little: you film at first light. Spots are

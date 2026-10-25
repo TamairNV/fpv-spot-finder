@@ -797,7 +797,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "tree_pct": round(100 * wm("tree_frac")), "bld_pct": round(100 * wm("bld_frac")),
                     "max_height_m": round(wmax("h_p90"), 1), "relief_m": round(wmax("relief_250"), 1),
                     "water_m": int(wmin("dist_water")), "bando_m": int(wmin("dist_bando")),
-                    "bridge_m": int(wmin("dist_bridge")), "path_m": int(wmin("dist_path")),
+                    "bridge_m": int(wmin("dist_bridge_fly" if key == "freestyle5" and "dist_bridge_fly" in cells
+                                         else "dist_bridge")), "path_m": int(wmin("dist_path")),
                     "parking_m": int(wmin("dist_parking")), "hazard_m": int(wmin("dist_hazard")),
                     "places": int(ws("places_n")), "buildings": int(ws("bld_n")),
                     "lidar_pct": round(100 * wm("lidar_frac")),

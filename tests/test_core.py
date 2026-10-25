@@ -449,6 +449,23 @@ def test_lines_keep_out_of_playgrounds_and_from_under_pylon_lines():
     assert blocked.sum() == 100 + 400
 
 
+def test_a_bridge_carrying_trains_is_not_one_to_fly_round():
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    from spotfinder.context import off_the_tracks
+
+    tracks = gpd.GeoSeries([LineString([(0, 0), (1000, 0)])])  # the Durham Coast Line
+    bridges = gpd.GeoSeries([
+        LineString([(400, 0), (600, 0)]),      # Hawthorn Dene Viaduct: the railway runs along it
+        LineString([(300, -60), (300, 60)]),   # a road bridge over the line
+        LineString([(0, 500), (200, 500)]),    # a footbridge over a river nowhere near it
+    ])
+    kept = off_the_tracks(bridges, tracks)
+    assert list(kept.index) == [1, 2]
+    assert len(off_the_tracks(bridges, gpd.GeoSeries([], dtype="geometry"))) == 3
+
+
 def test_viaduct_deck_gives_arches():
     from spotfinder import lines
 

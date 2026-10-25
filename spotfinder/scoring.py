@@ -116,7 +116,7 @@ PROFILES = {
                  "busy": -0.15, "hazard": -0.2, "permission": -0.08, "wet": -0.2,
                  "remote": -0.10, "farm": -0.05, "road": -0.12},
         style_features=["flow", "gaps", "lone", "edges", "space", "mix", "vertical", "relief", "water", "public"],
-        anchors={"dist_bridge": 50, "dist_bando": 50, "dist_landmark": 50, "dist_beach": 25},
+        anchors={"dist_bridge_fly": 50, "dist_bando": 50, "dist_landmark": 50, "dist_beach": 25},
     ),
     "cine5": Profile(
         key="cine5", label="5\" cinematic", short="5\" cine", drone="5 inch, 800 g (no class mark)",
@@ -223,7 +223,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
                                  0.6 * win_max(f["steep_frac"] * dive_air, r) ** 0.5)
         c["bando"] = near(f["dist_bando"], 30, 350)  # a derelict building LiDAR says is still standing
         c["water"] = near(win_min(f["dist_water"], r), 50, 250)
-        c["bridge"] = near(f["dist_bridge"], 20, 250)
+        c["bridge"] = near(f.get("dist_bridge_fly", f["dist_bridge"]), 20, 250)  # not one still carrying trains
         c["beach"] = near(f["dist_beach"], 0, 200)
         c["public"] = ramp(win_mean(np.maximum(f["public_frac"], f["beach_frac"]), r), 0.1, 0.5)
         c["busy"] = sat(win_sum(f["places_n"], r + 1), 3) * 0.6 + sat(win_sum(f["path_frac"], r), 1.5) * 0.4

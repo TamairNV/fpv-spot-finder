@@ -14,7 +14,7 @@ from scipy import ndimage
 import shapely
 from shapely.geometry import box
 
-from . import bandos, legal
+from . import bandos, legal, rasterize
 from .config import Region
 from .heights import LIDAR_DIRS
 from .sources import osm, overture
@@ -147,6 +147,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     ])
     log.info("bridges: %d flagged segments, %d spans in the air, %d worth flying", len(bridges_seg), len(spans),
              len(big_bridges))
+    fly_bridges = off_the_tracks(big_bridges, lines[lines["tags"].map(osm.is_active_railway)].geometry)
 
     # Bandos: derelict buildings LiDAR says are still standing (see bandos.py; the map shows the same set).
     found = bandos.find(region)
@@ -245,6 +246,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     out = {
         "dist_water": dist_to(pd.concat([big_water.geometry, rivers.geometry])),
         "dist_bridge": dist_to(big_bridges),
+        "dist_bridge_fly": dist_to(fly_bridges),
         "dist_footbridge": dist_to(bridge_lines.geometry),
         "dist_bando": dist_to(found.geometry),
         "dist_beach": dist_to(beaches),
@@ -272,6 +274,16 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     b = overture.load_layer(region, "buildings")
     out["bld_n"] = _counts(b.geometry.centroid, region)
     return out
+
+
+def off_the_tracks(bridges: gpd.GeoSeries, tracks: gpd.GeoSeries) -> gpd.GeoSeries:
+    """The bridges not carrying trains. One that is is one to film, not to fly round: lines keep off the tracks
+    (rasterize.RAIL_CLEAR_M either side), so a 5" spot isn't sold on it (Hawthorn Dene, Plessey, the King Edward
+    VII Bridge). A road bridge over a railway is only near the tracks for a few metres of its length."""
+    if not len(tracks) or not len(bridges):
+        return bridges
+    band = shapely.union_all(tracks.buffer(rasterize.RAIL_CLEAR_M, cap_style="flat").values)
+    return bridges[(bridges.intersection(band).length <= 0.5 * bridges.length).to_numpy()]
 
 
 def _bridge_spans(region: Region, segs: gpd.GeoDataFrame) -> gpd.GeoSeries:
