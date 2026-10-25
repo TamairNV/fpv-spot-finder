@@ -414,7 +414,8 @@ def _flush_pngs() -> None:
 def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float,
               hint: tuple[float, float] | None = None, tries: int = 10) -> dict | None:
     """The best flyable run starting within `radius` of the spot, as moves the 3D view can draw:
-    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre. "takeoff_xy" is where to
+    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre, and [lon, lat, dx, dy] of a
+    bend on the way in after those when the link to it bends round something. "takeoff_xy" is where to
     stand for it (BNG), near `hint` if it can be: the leg from there to the first move stays off homes,
     car parks and roads too, not just the run. When the best run has no such take-off (a tree pocket ringed
     by roads), it's flown the other way round, or the next best run is, of the best `tries`; failing all
@@ -425,7 +426,7 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
     x0, y0 = int(round(x - size / 2)), int(round(y - size / 2))
     t = reader.tile(x0, y0, size, features.MARGIN)
     _, _, _, runs = features.analyse(t, size=size, want_lines=True)
-    nodes, scores, paths, blocked = runs[line_key]
+    nodes, scores, paths, blocked, via = runs[line_key]
     if not len(nodes):
         return None
     px = t.x0 + nodes[:, 1] + 0.5
@@ -449,11 +450,16 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
         return None
     i, path, tk = best
     moves = []
-    for j in path:
+    for k, j in enumerate(path):
         lon, lat = bng_to_lonlat(px[j], py[j])
-        moves.append([lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6),
-                      round(px[j] - x, 1), round(py[j] - y, 1)])
-    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path)), "moves": moves,
+        move = [lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6), round(px[j] - x, 1), round(py[j] - y, 1)]
+        bend = via.get((min(path[k - 1], j), max(path[k - 1], j))) if k else None
+        if bend is not None:  # the way in bends round something: [lon, lat, dx, dy] of the bend
+            bx, by = t.x0 + bend[1] + 0.5, t.y1 - bend[0] - 0.5
+            blon, blat = bng_to_lonlat(bx, by)
+            move.append([round(blon, 6), round(blat, 6), round(bx - x, 1), round(by - y, 1)])
+        moves.append(move)
+    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path, via)), "moves": moves,
             "takeoff_xy": (t.x0 + tk[1] + 0.5, t.y1 - tk[0] - 0.5)}
 
 

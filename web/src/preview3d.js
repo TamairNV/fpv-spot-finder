@@ -354,7 +354,11 @@ export class Preview3D {
     if (!moves.length) return;
     const pts = [this.takeoff.clone().add(new THREE.Vector3(0, 2, 0))];
     let weave = 0;
-    moves.forEach(([kind, , , dx, dy], i) => {
+    moves.forEach(([kind, , , dx, dy, bend], i) => {
+      if (bend) { // the way in bends round something: low past it first
+        const bx = bend[2], bz = -bend[3];
+        pts.push(new THREE.Vector3(bx, this.groundAt(bx, bz) + 2.5, bz));
+      }
       const x = dx, z = -dy, prev = pts.at(-1);
       const into = new THREE.Vector3(x - prev.x, 0, z - prev.z).normalize();
       const ground = this.groundAt(x, z);

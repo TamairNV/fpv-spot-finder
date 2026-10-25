@@ -2,14 +2,16 @@
 
 Every gap you can fly through, lone tree to orbit, tall thing to dive and stretch of tree line to
 skim is a node. Two nodes are linked when they're a sensible distance apart and the air between
-them is clear at low height (the 1 m height grid says nothing taller than ~3 m is in the way).
-From each node we walk the links greedily, preferring good obstacles, a change of move and a
-smooth heading, and keep the best run. A spot's line score is the best run that starts in it.
+them is clear at low height (the 1 m height grid says nothing taller than ~3 m is in the way), flying
+straight or with one bend round whatever's in the way. From each node we walk the links greedily,
+preferring good obstacles, a change of move and a smooth heading, and keep the best run. A spot's
+line score is the best run that starts in it.
 
 Lines stay off people's homes and gardens, car parks, school and hospital grounds, playgrounds, roads,
-working railways and pylon lines, and the 5 inch keeps clear of buildings altogether. A viaduct's arches are obstacles too:
-LiDAR only sees the deck, so where the deck stands high above the ground there's an arch every few
-metres to fly through, and a run can weave from one arch to the next under the deck.
+working railways and pylon lines, and the 5 inch keeps clear of buildings altogether. A viaduct's
+arches are obstacles too: LiDAR only sees the deck, so where the deck stands high above the ground
+there's an arch every few metres to fly through, and a run can weave from one arch to the next under
+the deck.
 """
 
 from __future__ import annotations
@@ -39,6 +41,9 @@ ARCH_R = 8.0        # metres round an arch node that are the viaduct itself
 WEAVE_MAX = 1.6 * ARCH_STEP  # arches this close are side by side: a run weaves from one to the next
 WEAVE_ROOM = 4.0    # ...if there are this many metres of open air beside the deck, both sides, to turn in
 MAX_ARCHES = 4      # ...for this many, so a long viaduct doesn't swamp every other line
+BENDS = (0.25, -0.25, 0.4, -0.4)  # where a link that can't fly straight may bend: off its midpoint, by this
+                                  # share of its length either side (at 0.4 it's 28% longer)
+BEND_COST = 0.85    # a bend in the way there costs a little against flying straight
 TAKEOFF_MIN = 8.0   # metres from the take-off to the first move's obstacle: not on top of it...
 TAKEOFF_MAX = 90.0  # ...and close enough to see it
 
@@ -133,10 +138,25 @@ def room_to_weave(p: np.ndarray, q: np.ndarray, ohm: np.ndarray, deck: np.ndarra
     return True
 
 
+def _clear(ohm: np.ndarray, a: np.ndarray, b: np.ndarray, ra: np.ndarray, rb: np.ndarray,
+           max_len: float) -> np.ndarray:
+    """For each segment a -> b (rows of (row, col)), is nothing CLEAR_H or taller on it, sampled every metre
+    and skipping ra / rb metres at the ends (the obstacles themselves)?"""
+    d = np.hypot(*(b - a).T)
+    steps = np.arange(0.0, max_len + 1.0)
+    t = steps[None, :] / np.maximum(d, 1e-6)[:, None]
+    inside = (steps[None, :] >= ra[:, None]) & (steps[None, :] <= d[:, None] - rb[:, None])
+    h, w = ohm.shape
+    ri = np.clip(np.rint(a[:, :1] + t * (b[:, :1] - a[:, :1])).astype(int), 0, h - 1)
+    ci = np.clip(np.rint(a[:, 1:2] + t * (b[:, 1:2] - a[:, 1:2])).astype(int), 0, w - 1)
+    return ~((ohm[ri, ci] >= CLEAR_H) & inside).any(axis=1)
+
+
 def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray | None = None,
-          deck: np.ndarray | None = None) -> list[list[int]]:
+          deck: np.ndarray | None = None, via: dict | None = None) -> list[list[int]]:
     """Neighbour lists: pairs within range with clear air between them, and not over `blocked` ground.
-    `deck` is the viaduct decks, where arches are."""
+    `deck` is the viaduct decks, where arches are. Pass a dict as `via` and a pair that can't fly straight
+    may link with one bend round what's in the way (BENDS): via[(i, j)], i < j, is where it bends."""
     n = len(nodes)
     nb: list[list[int]] = [[] for _ in range(n)]
     if n < 2:
@@ -163,25 +183,48 @@ def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray 
     if blocked is not None:
         ohm = np.where(blocked, np.float32(99), ohm)
     ohm = ndimage.maximum_filter(ohm, size=style.corridor)
-    steps = np.arange(0.0, style.max_link + 1.0)
-    t = steps[None, :] / d[:, None]
-    ra = nodes[pairs[:, 0], 4][:, None]
-    rb = nodes[pairs[:, 1], 4][:, None]
-    inside = (steps[None, :] >= ra) & (steps[None, :] <= d[:, None] - rb)
-    pr = a[:, :1] + t * (b[:, :1] - a[:, :1])
-    pc = a[:, 1:2] + t * (b[:, 1:2] - a[:, 1:2])
-    h, w = ohm.shape
-    ri = np.clip(np.rint(pr).astype(int), 0, h - 1)
-    ci = np.clip(np.rint(pc).astype(int), 0, w - 1)
-    blocked = ((ohm[ri, ci] >= CLEAR_H) & inside).any(axis=1)
-    for i, j in pairs[~blocked]:
+    ra, rb = nodes[pairs[:, 0], 4], nodes[pairs[:, 1], 4]
+    ok = _clear(ohm, a, b, ra, rb, style.max_link)
+    if via is not None:
+        # The rest may bend once, off the midpoint, where both legs are clear: round a clump of trees
+        # rather than through it.
+        u = (b - a) / d[:, None]
+        normal = np.stack([-u[:, 1], u[:, 0]], axis=1)
+        left = ~ok
+        zero = np.zeros(len(pairs))
+        for f in BENDS:
+            if not left.any():
+                break
+            w = (a + b) / 2 + f * d[:, None] * normal
+            inside = (w[:, 0] >= 0) & (w[:, 0] <= ohm.shape[0] - 1) & (w[:, 1] >= 0) & (w[:, 1] <= ohm.shape[1] - 1)
+            k = np.flatnonzero(left & inside)
+            if not len(k):
+                continue
+            bent = _clear(ohm, a[k], w[k], ra[k], zero[k], style.max_link) & _clear(ohm, w[k], b[k], zero[k], rb[k], style.max_link)
+            for i, j, wp in zip(pairs[k[bent], 0], pairs[k[bent], 1], w[k[bent]]):
+                via[(int(min(i, j)), int(max(i, j)))] = (float(wp[0]), float(wp[1]))
+            ok[k[bent]] = True
+            left[k[bent]] = False
+    for i, j in pairs[ok]:
         nb[i].append(int(j))
         nb[j].append(int(i))
     return nb
 
 
-def best_run(start: int, nodes: np.ndarray, nb: list[list[int]]) -> tuple[float, list[int]]:
-    """Greedy walk from one node: best next obstacle by value, variety and a smooth heading."""
+def _heading(frm: np.ndarray, to: np.ndarray) -> float:
+    dv = to - frm
+    return float(np.degrees(np.arctan2(dv[1], -dv[0])))
+
+
+def _legs(nodes: np.ndarray, i: int, j: int, via: dict | None) -> list[np.ndarray]:
+    """The points flown from node i to node j: straight, or by way of the bend."""
+    w = via.get((min(i, j), max(i, j))) if via else None
+    return [nodes[i, :2], nodes[j, :2]] if w is None else [nodes[i, :2], np.asarray(w), nodes[j, :2]]
+
+
+def best_run(start: int, nodes: np.ndarray, nb: list[list[int]], via: dict | None = None) -> tuple[float, list[int]]:
+    """Greedy walk from one node: best next obstacle by value, variety and a smooth heading. A link with a
+    bend (`via`, from links) leaves along its first leg and arrives along its second."""
     path = [start]
     seen = {start}
     score = VALUE[int(nodes[start, 2])] * nodes[start, 3]
@@ -194,17 +237,17 @@ def best_run(start: int, nodes: np.ndarray, nb: list[list[int]]) -> tuple[float,
         for j in nb[cur]:
             if j in seen or (nodes[j, 2] == ARCH and n_arch >= MAX_ARCHES):
                 continue
-            dv = nodes[j, :2] - nodes[cur, :2]
-            hd = np.degrees(np.arctan2(dv[1], -dv[0]))
+            legs = _legs(nodes, cur, j, via)
+            out_hd, hd = _heading(legs[0], legs[1]), _heading(legs[-2], legs[-1])
             if heading is not None:
-                turn = abs((hd - heading + 180) % 360 - 180)
+                turn = abs((out_hd - heading + 180) % 360 - 180)
                 if turn > MAX_TURN:
                     continue
                 smooth = 1.0 - 0.3 * turn / MAX_TURN
             else:
                 smooth = 1.0
             k = int(nodes[j, 2])
-            v = VALUE[k] * nodes[j, 3] * smooth
+            v = VALUE[k] * nodes[j, 3] * smooth * (BEND_COST if len(legs) == 3 else 1.0)
             if k != int(nodes[cur, 2]):
                 v *= 1.25  # a change of move: gap, then orbit, then a skim...
             if v > best_v:
@@ -222,21 +265,23 @@ def best_run(start: int, nodes: np.ndarray, nb: list[list[int]]) -> tuple[float,
     return float(score), path
 
 
-def all_runs(nodes: np.ndarray, nb: list[list[int]]) -> tuple[np.ndarray, list[list[int]]]:
+def all_runs(nodes: np.ndarray, nb: list[list[int]], via: dict | None = None) -> tuple[np.ndarray, list[list[int]]]:
     scores = np.zeros(len(nodes))
     paths: list[list[int]] = []
     for i in range(len(nodes)):
         if nb[i]:
-            scores[i], p = best_run(i, nodes, nb)
+            scores[i], p = best_run(i, nodes, nb, via)
         else:
             scores[i], p = VALUE[int(nodes[i, 2])] * nodes[i, 3], [i]
         paths.append(p)
     return scores, paths
 
 
-def path_length(nodes: np.ndarray, path: list[int]) -> float:
-    xy = nodes[path, :2]
-    return float(np.hypot(*np.diff(xy, axis=0).T).sum()) if len(path) > 1 else 0.0
+def path_length(nodes: np.ndarray, path: list[int], via: dict | None = None) -> float:
+    if len(path) < 2:
+        return 0.0
+    xy = np.concatenate([_legs(nodes, i, j, via)[:-1] for i, j in zip(path, path[1:])] + [nodes[path[-1:], :2]])
+    return float(np.hypot(*np.diff(xy, axis=0).T).sum())
 
 
 def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndarray, style: Style,

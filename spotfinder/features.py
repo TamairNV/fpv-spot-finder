@@ -115,8 +115,8 @@ class TileResult:
 
 def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = False):
     """Per-cell features, gaps and lone trees for one tile. With want_lines, also the flyable runs found
-    in it: {style name: (nodes, scores, paths, keep-out mask)} in tile pixels, plus "solid" (heights of
-    everything but tree canopy) and "open" (open ground)."""
+    in it: {style name: (nodes, scores, paths, keep-out mask, bends)} in tile pixels, plus "solid" (heights
+    of everything but tree canopy) and "open" (open ground)."""
     ohm, trees = leaf_on(t)
     tall = ohm >= TALL_M
     road = t.ways == 1
@@ -270,14 +270,18 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
             keep_lone.append((t.x0 + c + 0.5, t.y1 - r - 0.5, h, a))
     # --- Flyable lines: chain the obstacles into runs and keep the best run starting in each cell.
     runs = {}
+    # Over a river the heights are zeroed (bridges, water noise), but a line flown low along it still can't
+    # go through the trees hanging over it.
+    air = np.maximum(ohm, t.over_water) if t.over_water is not None else ohm
     d_bld = ndimage.distance_transform_edt(~t.bld) if t.bld.any() else None
     d_road = ndimage.distance_transform_edt(~road) if road.any() else None
     for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
         blocked = lines.keep_out(t.land, d_bld, d_road, style)
         nodes = lines.nodes_from(gaps, lone, treeline, style, blocked, arch)
-        nb = lines.links(nodes, ohm, style, blocked, t.land == VIADUCT_CODE if t.land is not None else None)
-        scores, paths = lines.all_runs(nodes, nb)
-        runs[name] = (nodes, scores, paths, blocked)
+        via: dict = {}
+        nb = lines.links(nodes, air, style, blocked, t.land == VIADUCT_CODE if t.land is not None else None, via)
+        scores, paths = lines.all_runs(nodes, nb, via)
+        runs[name] = (nodes, scores, paths, blocked, via)
         for k in (name, name + "_m", name + "_n"):
             cells[k] = np.zeros((grid_n, grid_n), dtype="float32")
         for i in np.argsort(scores):  # best last, so it wins the cell
@@ -285,7 +289,7 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
             if 0 <= rr < size and 0 <= cc < size:
                 ci, cj = int(rr // n), int(cc // n)
                 cells[name][ci, cj] = scores[i]
-                cells[name + "_m"][ci, cj] = lines.path_length(nodes, paths[i])
+                cells[name + "_m"][ci, cj] = lines.path_length(nodes, paths[i], via)
                 cells[name + "_n"][ci, cj] = len(paths[i])
     out = {k: v.astype("float32") for k, v in cells.items()}
     if want_lines:

@@ -179,7 +179,11 @@ seeds; places like your thumbs-down spots get pulled down.
    room under the canopy.
    **Lines**: every fly-through gap, lone tree (orbit), tree 18 m+ (dive) and stretch of tree line
    (skim, one every 25 m) is a node. Two nodes link when they're 10-70 m apart (5-35 m for the whoop)
-   and a 3 m wide corridor between them is clear below 3 m on the 1 m height grid. Before any of
+   and a 3 m wide corridor between them is clear below 3 m on the 1 m height grid, flying straight or,
+   where a clump of trees is in the way, with one bend round it (off the midpoint by a quarter or 40%
+   of the link's length, and worth a little less than flying straight). Only 1 in 12 pairs in range
+   could fly straight, so most lines were two or three moves. Trees hanging over a river block a link
+   too (heights over water are otherwise zeroed). Before any of
    this, winter LiDAR crowns are "leafed on": 1-2 m holes inside a crown are filled to the crown height,
    and an orbit needs a full 10 m circle of clear air round its crown. From each node a greedy walk
    picks the next obstacle by its value, a change of move and a smooth heading (no turns over 115°),

@@ -940,12 +940,14 @@ function markSelected(id) {
 }
 
 // The moves as a path on the map. Between two arches side by side the line swings out round the pier,
-// alternately either side of the viaduct, like the 3D view draws it.
+// alternately either side of the viaduct, like the 3D view draws it; a move whose way in bends round
+// something carries the bend after its own point ([lon, lat, dx, dy]).
 function weave(moves) {
   const out = [];
   let n = 0;
   moves.forEach((m, i) => {
     const prev = moves[i - 1];
+    if (m[5]) out.push([m[5][0], m[5][1]]);
     if (m[0] === 'arch' && prev?.[0] === 'arch') {
       const ex = m[3] - prev[3], ey = m[4] - prev[4], len = Math.hypot(ex, ey) || 1, side = (n++ % 2 ? 1 : -1) * 9;
       const ox = (-ey / len) * side, oy = (ex / len) * side; // metres across the viaduct

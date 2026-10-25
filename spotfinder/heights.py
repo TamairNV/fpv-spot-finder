@@ -27,6 +27,7 @@ class Tile:
     porosity: np.ndarray | None  # first - last return, m (LiDAR only)
     lidar: np.ndarray  # mask of pixels that came from LiDAR
     land: np.ndarray | None = None  # homes and gardens, car parks, viaduct decks (rasterize.*_CODE)
+    over_water: np.ndarray | None = None  # what LiDAR sees over water (trees hanging over a river), m; 0 elsewhere
 
 
 def lidar_paths(region: Region) -> dict[str, Path] | None:
@@ -76,6 +77,7 @@ class HeightReader:
         bld = bldh > 0
         trees = np.where(bld | water, 0.0, chm).astype("float32")
         porosity = None
+        over_water = None
         lidar = np.zeros_like(bld)
         if self.has_lidar:
             nd = self._read("ndsm", win, 255)
@@ -83,6 +85,7 @@ class HeightReader:
             h = nd.astype("float32") / 4.0
             # LiDAR knows the real heights: trees/walls/anything off-footprint, and roofs on footprints.
             trees = np.where(lidar, np.where(bld | water, 0.0, h), trees)
+            over_water = np.where(lidar & water, h, 0.0).astype("float32")
             roof = np.where(lidar & bld, h, bldh)
             # A footprint LiDAR sees as flat ground is probably demolished (or not built when flown).
             bldh = np.where(lidar & bld & (h < 1.5), 0.0, roof)
@@ -93,4 +96,4 @@ class HeightReader:
         ohm = np.maximum(trees, bldh)
         land = self._read("land", win, 0) if "land" in self.ds else None
         return Tile(x0=x0 - margin, y1=y0 + size + margin, ohm=ohm, trees=trees, bldh=bldh, bld=bld,
-                    water=water, ways=ways, porosity=porosity, lidar=lidar, land=land)
+                    water=water, ways=ways, porosity=porosity, lidar=lidar, land=land, over_water=over_water)

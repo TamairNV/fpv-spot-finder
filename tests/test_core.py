@@ -547,6 +547,31 @@ def test_line_links_need_clear_air():
     assert nb[1] == [0] and nb[2] == []
 
 
+def test_a_link_bends_round_a_clump_of_trees():
+    from spotfinder import lines
+
+    ohm = np.zeros((200, 200), "float32")
+    nodes = np.array([[100, 50, lines.LONE, 1.0, 6], [100, 100, lines.GAP, 1.0, 6]])
+    ohm[95:106, 70:81] = 12  # a clump of trees right in the way
+    assert lines.links(nodes, ohm, lines.FREESTYLE) == [[], []]  # no way straight through
+    via = {}
+    nb = lines.links(nodes, ohm, lines.FREESTYLE, via=via)
+    assert nb == [[1], [0]] and (0, 1) in via
+    r, c = via[(0, 1)]
+    assert abs(c - 75) < 1 and abs(r - 100) >= 0.25 * 50 - 1  # off to one side of the clump
+    straight = lines.path_length(nodes, [0, 1])
+    assert straight == 50 and straight < lines.path_length(nodes, [0, 1], via) <= 1.3 * straight
+    # the walk leaves along the first leg and arrives along the second
+    nodes = np.vstack([nodes, [[100, 150, lines.GAP, 1.0, 6]]])
+    via = {}
+    nb = lines.links(nodes, ohm, lines.FREESTYLE, via=via)
+    score, path = lines.best_run(0, nodes, nb, via)
+    assert path == [0, 1, 2] and score < sum(lines.VALUE[int(k)] for k in nodes[:, 2]) * 1.15
+    ohm[60:141, 70:81] = 12  # a whole wood: no bend gets round it
+    via = {}
+    assert lines.links(nodes[:2], ohm, lines.FREESTYLE, via=via) == [[], []] and not via
+
+
 def test_run_prefers_variety_and_flow():
     from spotfinder import lines
 
@@ -567,6 +592,21 @@ def test_analyse_reports_line_cells():
         ohm[500:508, c:c + 8] = 12
     cells, _, _ = features.analyse(make_tile(ohm), margin=m, size=1000)
     assert cells["line5"].max() > 4 and cells["line5_n"].max() >= 5
+
+
+def test_lines_dont_fly_through_trees_hanging_over_a_river(monkeypatch):
+    from spotfinder import lines
+
+    seen = []
+    links = lines.links
+    monkeypatch.setattr(lines, "links", lambda nodes, ohm, *a, **k: seen.append(ohm) or links(nodes, ohm, *a, **k))
+    n, m = 1080, 40
+    t = make_tile(np.zeros((n, n)))
+    t.water[480:530, :] = True  # a river, with trees hanging over its bank
+    t.over_water = np.zeros((n, n), "float32")
+    t.over_water[480:490, 300:400] = 9
+    features.analyse(t, margin=m, size=1000)
+    assert seen and all(o[485, 350] == 9 and o[520, 350] == 0 for o in seen)
 
 
 def test_tree_in_a_loose_clump_is_not_an_orbit():
