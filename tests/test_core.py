@@ -305,6 +305,22 @@ def test_run_weaves_through_neighbouring_arches():
 
 
 
+def test_takeoff_leg_stays_off_homes():
+    from spotfinder import lines
+
+    ohm = np.zeros((200, 200), "float32")
+    open_ = np.ones((200, 200), bool)
+    blocked = np.zeros((200, 200), bool)
+    blocked[60:80, :] = True  # a street of houses between the path (north) and the first gap
+    tk = lines.takeoff(np.array([100.0, 100.0]), 6.0, ohm, open_, lines.FREESTYLE, blocked, hint=(40.0, 100.0))
+    assert tk is not None and tk[0] > 80  # this side of the houses, not across them
+    assert 6.0 + lines.TAKEOFF_MIN <= np.hypot(tk[0] - 100, tk[1] - 100) <= lines.TAKEOFF_MAX
+    open_[80:94, :] = False  # a pond between the houses and the gap...
+    ohm[107:200, 95:106] = 10  # ...and a wall behind it: the leg has to come in from the side
+    tk = lines.takeoff(np.array([100.0, 100.0]), 6.0, ohm, open_, lines.FREESTYLE, blocked, hint=(40.0, 100.0))
+    assert tk is not None and tk[0] >= 94 and not (tk[0] >= 105 and 93 <= tk[1] <= 107)
+
+
 def test_line_links_need_clear_air():
     from spotfinder import lines
 

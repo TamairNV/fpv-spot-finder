@@ -39,6 +39,8 @@ ARCH_R = 8.0        # metres round an arch node that are the viaduct itself
 WEAVE_MAX = 1.6 * ARCH_STEP  # arches this close are side by side: a run weaves from one to the next
 WEAVE_ROOM = 4.0    # ...if there are this many metres of open air beside the deck, both sides, to turn in
 MAX_ARCHES = 4      # ...for this many, so a long viaduct doesn't swamp every other line
+TAKEOFF_MIN = 8.0   # metres from the take-off to the first move's obstacle: not on top of it...
+TAKEOFF_MAX = 90.0  # ...and close enough to see it
 
 
 @dataclass(frozen=True)
@@ -234,3 +236,31 @@ def all_runs(nodes: np.ndarray, nb: list[list[int]]) -> tuple[np.ndarray, list[l
 def path_length(nodes: np.ndarray, path: list[int]) -> float:
     xy = nodes[path, :2]
     return float(np.hypot(*np.diff(xy, axis=0).T).sum()) if len(path) > 1 else 0.0
+
+
+def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndarray, style: Style,
+            blocked: np.ndarray | None, hint: tuple[float, float] | None = None) -> tuple[int, int] | None:
+    """Where to stand for a run starting at `first` (row, col, with `first_r` metres round it that are the
+    obstacle itself): open ground off homes, car parks and roads, with a straight leg to the first move that
+    stays off them too and doesn't go through anything `solid` (heights of walls, buildings, a viaduct deck:
+    trees are left out, as the quad hops over those on the way in), as close to the first move, and to
+    `hint` (the path-side place picked from the cells), as can be."""
+    ok = open_ & ~blocked if blocked is not None else open_
+    rr, cc = np.nonzero(ok[::3, ::3])
+    rr, cc = rr * 3, cc * 3
+    d = np.hypot(rr - first[0], cc - first[1])
+    keep = (d >= first_r + TAKEOFF_MIN) & (d <= TAKEOFF_MAX)
+    rr, cc, d = rr[keep], cc[keep], d[keep]
+    if not len(rr):
+        return None
+    cost = d if hint is None else d + 0.5 * np.hypot(rr - hint[0], cc - hint[1])
+    clear = ndimage.maximum_filter(np.where(blocked, np.float32(99), solid) if blocked is not None else solid,
+                                   size=style.corridor)
+    h, w = solid.shape
+    for i in np.argsort(cost, kind="stable")[:300]:
+        t = np.arange(0.0, max(d[i] - first_r, 0.0) + 1.0) / d[i]
+        pr = np.clip(np.rint(rr[i] + t * (first[0] - rr[i])).astype(int), 0, h - 1)
+        pc = np.clip(np.rint(cc[i] + t * (first[1] - cc[i])).astype(int), 0, w - 1)
+        if not (clear[pr, pc] >= CLEAR_H).any():
+            return int(rr[i]), int(cc[i])
+    return None

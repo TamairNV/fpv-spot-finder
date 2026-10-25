@@ -294,33 +294,78 @@ def _flush_pngs() -> None:
         _png_jobs.pop().result()
 
 
-def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float) -> dict | None:
+def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float,
+              hint: tuple[float, float] | None = None, tries: int = 10) -> dict | None:
     """The best flyable run starting within `radius` of the spot, as moves the 3D view can draw:
-    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre."""
+    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre. "takeoff_xy" is where to
+    stand for it (BNG), near `hint` if it can be: the leg from there to the first move stays off homes,
+    car parks and roads too, not just the run. When the best run has no such take-off (a tree pocket ringed
+    by roads), it's flown the other way round, or the next best run is, of the best `tries`; failing all
+    of those there's no line."""
     from . import features, lines
 
     size = 300
     x0, y0 = int(round(x - size / 2)), int(round(y - size / 2))
     t = reader.tile(x0, y0, size, features.MARGIN)
     _, _, _, runs = features.analyse(t, size=size, want_lines=True)
-    nodes, scores, paths = runs[line_key]
+    nodes, scores, paths, blocked = runs[line_key]
     if not len(nodes):
         return None
     px = t.x0 + nodes[:, 1] + 0.5
     py = t.y1 - nodes[:, 0] - 0.5
-    inside = np.hypot(px - x, py - y) <= radius
-    if not inside.any():
+    inside = np.flatnonzero((np.hypot(px - x, py - y) <= radius) & (np.array([len(p) for p in paths]) >= 2))
+    if not len(inside):
         return None
-    i = int(np.flatnonzero(inside)[np.argmax(scores[inside])])
-    path = paths[i]
-    if len(path) < 2:
+    style = lines.FREESTYLE if line_key == "line5" else lines.WHOOP
+    hint_rc = None if hint is None else (t.y1 - hint[1] - 0.5, hint[0] - t.x0 - 0.5)
+    best = None
+    for i in inside[np.argsort(-scores[inside], kind="stable")][:tries]:
+        for path in (paths[i], paths[i][::-1]):
+            tk = lines.takeoff(nodes[path[0], :2], float(nodes[path[0], 4]), runs["solid"], runs["open"], style,
+                               blocked, hint_rc)
+            if tk is not None:
+                best = (i, path, tk)
+                break
+        if best:
+            break
+    if best is None:  # every way in crosses gardens, a car park or a road: no line beats a bad one
         return None
+    i, path, tk = best
     moves = []
     for j in path:
         lon, lat = bng_to_lonlat(px[j], py[j])
         moves.append([lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6),
                       round(px[j] - x, 1), round(py[j] - y, 1)])
-    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path)), "moves": moves}
+    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path)), "moves": moves,
+            "takeoff_xy": (t.x0 + tk[1] + 0.5, t.y1 - tk[0] - 0.5)}
+
+
+def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: int = 40) -> tuple[float, float]:
+    """The nearest open ground to (x, y), within `reach` metres, that's off homes and gardens, car parks and
+    roads (and for the 5", clear of buildings): the take-off picked from the 50 m cells can land in a garden."""
+    from scipy import ndimage
+
+    from . import features, lines
+
+    size = 2 * reach
+    m = 20  # context, so a road just outside still counts
+    t = reader.tile(int(round(x - reach)), int(round(y - reach)), size, m)
+    road = t.ways == 1
+    style = lines.WHOOP if whoop else lines.FREESTYLE
+    d_bld = ndimage.distance_transform_edt(~t.bld) if t.bld.any() else None
+    d_road = ndimage.distance_transform_edt(~road) if road.any() else None
+    blocked = lines.keep_out(t.land, d_bld, d_road, style)
+    ok = (t.ohm < features.OPEN_M) & ~t.water & ~road & (t.ways != 3)
+    if blocked is not None:
+        ok &= ~blocked
+    ok[:m, :] = ok[-m:, :] = False
+    ok[:, :m] = ok[:, -m:] = False
+    rr, cc = np.nonzero(ok)
+    if not len(rr):
+        return x, y
+    r0, c0 = t.y1 - y - 0.5, x - t.x0 - 0.5
+    i = int(np.argmin(np.hypot(rr - r0, cc - c0)))
+    return t.x0 + cc[i] + 0.5, t.y1 - rr[i] - 0.5
 
 
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path,
@@ -625,7 +670,16 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             line = None
             line_key = {"freestyle5": "line5", "cine85": "linew"}.get(key)
             if line_key and rank <= previews:
-                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL)
+                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL, (tx, ty))
+            # Where to stand: with a run, where the leg to its first move is clear too; without one, at least
+            # out of gardens, car parks and roads.
+            tk = line.pop("takeoff_xy") if line else None
+            if tk is None:
+                tk = snap_takeoff(reader, tx, ty, whoop=key == "cine85")
+            tx, ty = round(tk[0]), round(tk[1])
+            tlon, tlat = bng_to_lonlat(tx, ty)
+            br, bc = cell_of(region, (tx, ty))
+            best = (min(max(br, 0), H - 1), min(max(bc, 0), W - 1))
             gr = os_grid_ref(x, y)
             a3_clear = wm("a3_frac")
             if profile.legal_key == "a3_frac":

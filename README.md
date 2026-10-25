@@ -26,7 +26,8 @@ Three profiles out of the box:
 - **List and spot card in one panel** beside the map on a computer, and in a bottom sheet you drag
   up and down on a phone. Every spot has a badge: A3 clear, partly A3, or sub-250 g only.
 - **Spot cards**: why it scored (in words and as a breakdown), what's there (gaps, lone trees,
-  edges, tallest thing, drop, distance to water/bando/bridge), a suggested take-off point, the
+  edges, tallest thing, drop, distance to water/bando/bridge), a suggested take-off point (off
+  gardens, car parks and roads), the
   legal picture for that drone, land-owner warnings, sunrise/golden hour, and an 18-hour wind and
   rain strip from Open-Meteo.
 - **3D model of each top spot** (320 m square at 2 m) with the real sun for today: drag the slider
@@ -183,13 +184,18 @@ seeds; places like your thumbs-down spots get pulled down.
    and an orbit needs a full 10 m circle of clear air round its crown. From each node a greedy walk
    picks the next obstacle by its value, a change of move and a smooth heading (no turns over 115°),
    up to 12 moves, and scores the run with a bonus for variety. Each spot's "flow" is the best run
-   that starts in it, and the spot card gets that run as a suggested line.
+   that starts in it, and the spot card gets that run as a suggested line, with a take-off on open
+   ground 8 m+ clear of the first obstacle and a straight leg to it that keeps off the same homes, car
+   parks and roads and doesn't go through a wall, building or viaduct deck (trees it hops over). If
+   the best run has no such way in, it's flown backwards, or the next best one is; no line at all if
+   none of the best ten has one.
    Lines keep off people's homes and gardens (residential land that isn't a park or a big green),
    car parks and roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building;
    gaps and lone trees in gardens or on car parks don't count at all. A railway or footpath viaduct
    whose deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and a move of its own.
    Neighbouring arches link under the deck, so a run can weave through up to four of them (out
-   through one, round the pier, back through the next). `land_1m.tif` holds those homes,
+   through one, round the pier, back through the next), where there's 4 m of open air beside the
+   deck on both sides to turn in. `land_1m.tif` holds those homes,
    car parks and viaduct decks.
 3. **Context** from OSM and Overture: distance to water, the sea and beaches, bridges and viaducts,
    bandos, cliffs and quarries, landmarks, masts and cranes, paths, car parks, fast main roads,
