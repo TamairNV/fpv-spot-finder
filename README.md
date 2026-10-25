@@ -28,7 +28,8 @@ Three profiles out of the box:
 - **Spot cards**: why it scored (in words and as a breakdown), what's there (gaps, lone trees,
   edges, tallest thing, drop, distance to water/bando/bridge), a suggested take-off point (off
   gardens, car parks, playgrounds, railways and roads) and what it's on (public open space and its
-  name, a beach, or farmland: ask the farmer), the legal picture for that drone, land-owner warnings,
+  name, with a nudge to check the park's byelaws; a beach; or farmland: ask the farmer), the legal
+  picture for that drone, land-owner warnings,
   sunrise/golden hour, and an 18-hour wind and rain strip from Open-Meteo.
 - **3D model of each top spot** (320 m square at 2 m) with the real sun for today: drag the slider
   through the day to see where the shadows and golden light fall. Pink rings are the detected gaps,

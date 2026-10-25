@@ -121,7 +121,7 @@ function takeoffBox(p) {
   // what it's on, from the map: public open space, a beach, or a farmer's field
   const named = t.on_name ? ` (${t.on_name})` : '';
   const on = {
-    public: `It's on public open space${named}.`,
+    public: `It's on public open space${named}. Many parks' byelaws ban flying models, so check first.`,
     beach: `It's on the beach${named}.`,
     farm: "It's farmland: ask the farmer before you take off.",
   }[t.on] || '';
