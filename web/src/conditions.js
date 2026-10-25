@@ -12,6 +12,16 @@ export function sunTimes(lon, lat, date = new Date()) {
   };
 }
 
+// Where the sun is in the middle of each golden hour today: { am, pm } of { time, bearing (° from north) }.
+export function goldenSun(lon, lat, date = new Date()) {
+  const t = SunCalc.getTimes(date, lat, lon);
+  const at = (a, b) => {
+    const time = new Date((a.getTime() + b.getTime()) / 2);
+    return { time: hm(time), bearing: ((SunCalc.getPosition(time, lat, lon).azimuth * 180) / Math.PI + 180) % 360 };
+  };
+  return { am: at(t.sunrise, t.goldenHourEnd), pm: at(t.goldenHour, t.sunset) };
+}
+
 export function sunBox(lon, lat) {
   const t = sunTimes(lon, lat);
   const box = el('div', { class: 'box' },

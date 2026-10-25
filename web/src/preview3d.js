@@ -26,7 +26,7 @@ const DRONES = {
 const G = 9.81;
 // the suggested line's moves, numbered in the order to fly them
 const MOVE_COLOUR = { gap: '#ff3d7f', orbit: '#ffc400', dive: '#a78bfa', skim: '#22d3ee', edge: '#22d3ee', wall: '#22d3ee', arch: '#fb923c' };
-const DECK = 6; // preview class: a viaduct deck, drawn as a slab in the air so its arches show
+const DECK = 6; // preview class: a bridge or viaduct deck, drawn as a slab in the air with open air under it
 const DECK_T = 2.5; // m, how thick the deck slab is
 const WEAVE_OUT = 9; // m either side of a viaduct that a weave swings out to between arches
 const LINE_SPEED = { freestyle5: 15, cine5: 11, cine85: 6 }; // m/s for "Watch the line"
@@ -189,9 +189,12 @@ export class Preview3D {
     return k < 0 ? 0 : this.g[k];
   }
 
-  topAt(x, z) {
+  // the top of what's at (x, z) for something at height y: under a bridge's deck there's open air
+  topAt(x, z, y = Infinity) {
     const k = this.idx(x, z);
-    return k < 0 ? -Infinity : this.g[k] + (this.h[k] >= 0.75 ? this.h[k] : 0);
+    if (k < 0) return -Infinity;
+    const h = this.h[k] >= 0.75 ? this.h[k] : 0;
+    return this.cls[k] === DECK && y < this.g[k] + h - DECK_T ? this.g[k] : this.g[k] + h;
   }
 
   buildTerrain() {
@@ -350,6 +353,7 @@ export class Preview3D {
 
   buildLine() {
     this.lineSprites = [];
+    if (!this.spot.line?.moves?.length && this.spot.shot) return this.buildShot(this.spot.shot);
     const moves = (this.spot.line?.moves || []).filter((m) => Math.abs(m[3]) <= this.half && Math.abs(m[4]) <= this.half);
     if (!moves.length) return;
     const pts = [this.takeoff.clone().add(new THREE.Vector3(0, 2, 0))];
@@ -403,10 +407,43 @@ export class Preview3D {
       this.lineSprites.push(sp);
       this.markers.add(sp);
     });
+    this.drawLine(pts);
+  }
+
+  drawLine(pts) {
     this.line = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(this.line, Math.max(80, pts.length * 12), 0.35, 6, false),
+    this.tube = new THREE.Mesh(new THREE.TubeGeometry(this.line, Math.max(80, pts.length * 12), 0.35, 6, false),
       new THREE.MeshBasicMaterial({ color: 0x5cc8ff, transparent: true, opacity: 0.85 }));
-    this.markers.add(tube);
+    this.markers.add(this.tube);
+  }
+
+  // The 5" cine's shot, flown level at its height: an orbit round the subject, or a pass beside a bridge's
+  // deck. "Watch the shot" flies it with the camera on the subject (shotLook: where to look from a point on it).
+  buildShot(s) {
+    const pts = [], gm = this.preview.ground_min;
+    const level = s.alt != null && gm != null ? s.alt - gm : null; // the model's ground is metres over gm
+    if (s.kind === 'orbit') {
+      const [cx, cy] = s.c, ground = this.groundAt(cx, -cy), n = Math.max(8, Math.round(s.deg / 5));
+      for (let k = 0; k <= n; k++) {
+        const b = ((s.from + (s.deg * k) / n) * Math.PI) / 180;
+        pts.push(new THREE.Vector3(cx + Math.sin(b) * s.r, level ?? ground + s.h, -(cy + Math.cos(b) * s.r)));
+      }
+      const [tx, ty] = s.top || s.c; // the camera's on its highest point: the lighthouse, not its cottages
+      const target = new THREE.Vector3(tx, this.groundAt(tx, -ty) + Math.max(2, s.subject_h * 0.7), -ty);
+      this.shotLook = () => target;
+    } else {
+      const [ax, ay] = s.a, [bx, by] = s.b;
+      const along = (k) => [ax + (bx - ax) * k, -(ay + (by - ay) * k)];
+      let low = Infinity;
+      for (let k = 0; k <= 20; k++) low = Math.min(low, this.groundAt(...along(k / 20)));
+      for (let k = 0; k <= 10; k++) {
+        const [x, z] = along(k / 10);
+        pts.push(new THREE.Vector3(x, level ?? low + s.h, z));
+      }
+      const r = (s.side * Math.PI) / 180, back = new THREE.Vector3(-Math.sin(r), -0.15, Math.cos(r)).multiplyScalar(s.off);
+      this.shotLook = (p) => p.clone().add(back); // across at the deck
+    }
+    this.drawLine(pts);
   }
 
   // nearest [.., dx, dy] row of a gaps/lone list within maxD metres of (x, z) in scene space
@@ -455,7 +492,8 @@ export class Preview3D {
     this.camera.updateProjectionMatrix();
     this.lineSprites.forEach((sp) => { sp.visible = false; });
     this.dot ||= new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), new THREE.MeshBasicMaterial({ color: 0x5cc8ff }));
-    this.scene.add(this.dot);
+    if (!this.shotLook) this.scene.add(this.dot);
+    else this.tube.visible = false; // a shot's seen from the drone itself, so its own path isn't in the way
     this.playBtn?.classList.add('on');
     if (this.playBtn) this.playBtn.textContent = '■ Stop';
     const at = (m) => this.line.getPointAt(Math.min(1, Math.max(0, m / len)));
@@ -465,14 +503,19 @@ export class Preview3D {
       if (!this.play || this.disposed) return;
       const u = Math.min(1, (performance.now() - this.play.t0) / this.play.dur), m = u * len;
       const p = at(m), ahead = at(m + 5);
-      const want = at(m - 9).add(new THREE.Vector3(0, 3.5, 0));
-      want.y = Math.max(want.y, this.topAt(want.x, want.z) + 1.5); // keep the camera out of the trees
-      if (first) cam.copy(want);
-      else cam.lerp(want, 0.2);
-      first = false;
-      this.dot.position.copy(p);
-      this.camera.position.copy(cam);
-      this.camera.lookAt(ahead);
+      if (this.shotLook) { // a shot: the drone's own camera, on the subject
+        this.camera.position.copy(p);
+        this.camera.lookAt(this.shotLook(p));
+      } else {
+        const want = at(m - 9).add(new THREE.Vector3(0, 3.5, 0));
+        want.y = Math.max(want.y, this.topAt(want.x, want.z, want.y) + 1.5); // keep the camera out of the trees
+        if (first) cam.copy(want);
+        else cam.lerp(want, 0.2);
+        first = false;
+        this.dot.position.copy(p);
+        this.camera.position.copy(cam);
+        this.camera.lookAt(ahead);
+      }
       this.renderer.render(this.scene, this.camera);
       if (u >= 1) return this.stopLine();
       this.raf = requestAnimationFrame(loop);
@@ -486,8 +529,9 @@ export class Preview3D {
     cancelAnimationFrame(this.raf);
     this.lineSprites.forEach((sp) => { sp.visible = true; });
     if (this.dot) this.scene.remove(this.dot);
+    if (this.tube) this.tube.visible = true;
     this.playBtn?.classList.remove('on');
-    if (this.playBtn) this.playBtn.textContent = '▶ Watch the line';
+    if (this.playBtn) this.playBtn.textContent = this.playLabel;
     this.camera.fov = 45;
     this.camera.near = 0.1;
     this.camera.updateProjectionMatrix();
@@ -547,7 +591,8 @@ export class Preview3D {
       this.tools.prepend(this.flyBtn);
     }
     if (this.line) {
-      this.playBtn = el('button', { class: 'p3d-pill', onclick: () => this.playLine() }, '▶ Watch the line');
+      this.playLabel = this.shotLook ? '▶ Watch the shot' : '▶ Watch the line';
+      this.playBtn = el('button', { class: 'p3d-pill', onclick: () => this.playLine() }, this.playLabel);
       this.tools.prepend(this.playBtn);
     }
     const rowJump = el('div', { class: 'p3d-row p3d-chips' },
@@ -558,7 +603,7 @@ export class Preview3D {
       this.spot.gaps_list?.length ? el('span', {}, el('b', { style: 'color:#ff3d7f' }, '◯'), ' gaps') : null,
       this.spot.lone_list?.length ? el('span', {}, el('b', { style: 'color:#ffc400' }, '◯'), ' lone trees') : null,
       this.spot.takeoff ? el('span', {}, el('b', { style: 'color:#22c55e' }, '●'), ' take-off') : null,
-      this.line ? el('span', {}, el('b', { style: 'color:#5cc8ff' }, '━'), ' line to fly') : null,
+      this.line ? el('span', {}, el('b', { style: 'color:#5cc8ff' }, '━'), this.shotLook ? ' shot to fly' : ' line to fly') : null,
       this.radiusM ? el('span', {}, '- - spot area') : null,
     ].filter(Boolean);
     const legend = keys.length ? el('div', { class: 'p3d-legend' }, keys) : null;
@@ -759,7 +804,7 @@ export class Preview3D {
       }
     }
     // ground, trees, buildings, edge of the model
-    const top = this.topAt(f.pos.x, f.pos.z);
+    const top = this.topAt(f.pos.x, f.pos.z, f.pos.y + s.radius);
     if (f.pos.y < top + s.radius) {
       const hard = f.vel.length() > 3 || top - this.groundAt(f.pos.x, f.pos.z) > 0.5;
       if (hard && f.armed && thr > 0.02) {

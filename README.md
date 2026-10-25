@@ -31,6 +31,10 @@ Three profiles out of the box:
   name, with a nudge to check the park's byelaws; a beach; or farmland: ask the farmer), the legal
   picture for that drone, land-owner warnings,
   sunrise/golden hour, and an 18-hour wind and rain strip from Open-Meteo.
+- **Shots for the 5" cine**: a spot named after a lighthouse, castle, monument or ruin gets an orbit
+  round it, and a bridge or viaduct a pass along its side at deck height, drawn on the map and in 3D,
+  with where the golden-hour sun is (lit from the front, or a silhouette). "Watch the shot" flies it
+  with the camera on the subject.
 - **3D model of each top spot** (320 m square at 2 m) with the real sun for today: drag the slider
   through the day to see where the shadows and golden light fall. Pink rings are the detected gaps,
   yellow loops the lone trees, green the take-off.
@@ -295,11 +299,20 @@ change.
    (listed after the top 250), and every spot inside a park is labelled with it.
    The app's "Parks" chip lists them all.
 7. **3D models**: every spot gets a 320 m square model at 2 m from the same heights (about 20 KB
-   each); `score --previews N` limits them to the top N per drone.
+   each); `score --previews N` limits them to the top N per drone. A bridge or viaduct mapped in OSM
+   is a deck in the air with open air under it, over a river too, and "Fly it" flies under it.
 8. **Bandos**: `bandos.geojson` has every bando as a point with what it was (from its OSM tags),
    how tall its walls still stand (LiDAR, 95th percentile on the footprint, tree crowns left out) and
    how much roof it has. Buildings of one site (a depot's sheds, a works) are one point. Each gets a 3D
    close-up (160 m square at 1 m) that opens from its card.
+9. **Shots** (5" cine spots with a 3D model): the subject is the sight the spot is named after. A
+   bridge or viaduct gets a pass, the longest clear stretch (60 m or more) of the lines 25, 35 or 50 m
+   off either side of its deck, flown at deck height. Anything else gets an orbit 25 to 70 m out from
+   its edge and 5 m over its top: the closest ring with half a turn clear, or at least a quarter. Both
+   are flown level and keep off the ground a line keeps off, with the ground (from the DTM) and
+   everything on it at least 5 m under them, so a viaduct's pass is the stretch over its valley and an
+   orbit doesn't cut into the hillside behind a monument. A subject over 120 m across (a castle's whole
+   grounds) gets none.
 
 ## Be real about it
 
