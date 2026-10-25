@@ -219,6 +219,8 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
                 eligible &= scoring.win_mean(cells[profile.legal_key], profile.radius_cells) >= profile.legal_window_min
         else:  # anywhere outside flight restriction zones
             eligible = land & (cells["a1_frac"] >= 0.9) & ~keep_out
+        if "inst_frac" in cells:  # never a spot on a school, hospital or prison's grounds
+            eligible &= cells["inst_frac"] < scoring.INSTITUTION_MAX
         groups = [seed_group(region, s, profile, (H, W)) for s in seeds if s.profile == key]
         groups = [g for g in groups if g is not None]
         up, down = rated.get(key, ([], []))

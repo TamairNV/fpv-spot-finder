@@ -190,14 +190,16 @@ seeds; places like your thumbs-down spots get pulled down.
    the best run has no such way in, it's flown backwards, or the next best one is; no line at all if
    none of the best ten has one.
    Lines keep off people's homes and gardens (residential land that isn't a park or a big green),
-   car parks and roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building;
-   gaps and lone trees in gardens or on car parks don't count at all. A railway or footpath viaduct
+   car parks, school, college, university, hospital and prison grounds (playing fields included) and
+   roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building; gaps and lone
+   trees in gardens, on car parks or in school grounds don't count at all. A railway or footpath viaduct
    (tagged as one, or a bridge called one) whose deck is 8 m+ above the ground has an arch every 15 m:
    a fly-through gap and a move of its own.
    Neighbouring arches link under the deck, so a run can weave through up to four of them (out
    through one, round the pier, back through the next), where there's 4 m of open air beside the
    deck on both sides to turn in. `land_1m.tif` holds those homes,
-   car parks and viaduct decks.
+   car parks, school and hospital grounds and viaduct decks. No spot is ever pinned on school,
+   hospital or prison grounds, and a school's playing field isn't public land.
 3. **Context** from OSM and Overture: distance to water, the sea and beaches, bridges and viaducts,
    bandos, cliffs and quarries, landmarks, masts and cranes, paths, car parks, fast main roads,
    farmland and public open space; and how busy a place is. A bando is a mapped building or works

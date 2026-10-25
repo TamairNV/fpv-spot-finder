@@ -723,7 +723,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             best, best_cost = (r, c), 1e9
             for rr in range(win[0].start, win[0].stop):
                 for cc in range(win[1].start, win[1].stop):
-                    if cells["open_frac"][rr, cc] < 0.5 or cells["a1_frac"][rr, cc] < 0.9:
+                    if cells["open_frac"][rr, cc] < 0.5 or cells["a1_frac"][rr, cc] < 0.9 or (
+                            "inst_frac" in cells and cells["inst_frac"][rr, cc] >= scoring.INSTITUTION_MAX):
                         continue
                     cost = cells["dist_path"][rr, cc] + 0.5 * CELL * math.hypot(rr - r, cc - c)
                     if cells[profile.legal_key][rr, cc] < 0.9:

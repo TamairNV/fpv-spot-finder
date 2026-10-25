@@ -17,6 +17,7 @@ from scipy import ndimage
 
 CELL = 50
 TASTE = 0.4  # share of the final score that is "like your seed spots"; the rest is the rules
+INSTITUTION_MAX = 0.25  # a cell this much school, hospital or prison ground is never a spot or a take-off
 ANCHOR_REACH = 0.85   # a spot's pin moves onto a viaduct, landmark... up to this much of the spacing away
 ANCHOR_MARGIN = 0.06  # ...if it scores at most this much less there
 ANCHOR_PULL = 0.01    # ...and each step up in subject (beach, bando, bridge, icon) counts as this much more score

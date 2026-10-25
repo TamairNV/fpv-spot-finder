@@ -406,6 +406,20 @@ def test_lines_keep_off_homes_and_roads():
     assert nb[0] == [2]
 
 
+def test_lines_keep_out_of_school_grounds():
+    from spotfinder import lines
+    from spotfinder.rasterize import INSTITUTION_CODE
+    from spotfinder.sources.osm import is_institution
+
+    land = np.zeros((50, 50), "uint8")
+    land[:, 30:] = INSTITUTION_CODE  # Ryton Junior School's playing field
+    blocked = lines.keep_out(land, None, None, lines.WHOOP)
+    assert blocked[:, 30:].all() and not blocked[:, :30].any()
+    assert is_institution({"amenity": "school", "name": "Ryton Junior School"})
+    assert is_institution({"amenity": "hospital", "name": "Royal Victoria Infirmary"})
+    assert not is_institution({"landuse": "recreation_ground"})
+
+
 def test_viaduct_deck_gives_arches():
     from spotfinder import lines
 

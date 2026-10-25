@@ -239,3 +239,12 @@ def is_country_park(t: dict) -> bool:
     caravan site that calls itself one."""
     return bool(COUNTRY_PARK.search(t.get("name") or "")) and not any(
         k in t for k in ("amenity", "building", "shop", "tourism")) and t.get("landuse") != "residential"
+
+
+INSTITUTION_AMENITY = {"school", "kindergarten", "childcare", "college", "university", "hospital", "prison"}
+
+
+def is_institution(t: dict) -> bool:
+    """School, college, university, hospital or prison grounds: private, full of people, and a hospital
+    may have the air ambulance landing. Their playing fields are part of them, not a park."""
+    return t.get("amenity") in INSTITUTION_AMENITY or t.get("landuse") == "education"

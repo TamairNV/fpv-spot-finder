@@ -48,6 +48,7 @@ RAIL_CODE = 3
 HOMES_CODE = 1    # houses and their gardens (residential land that isn't a park or a big green)
 PARKING_CODE = 2  # car parks: cars and people getting in and out
 VIADUCT_CODE = 3  # the deck of a railway or footpath viaduct or aqueduct (not a road one)
+INSTITUTION_CODE = 4  # school, college, university, hospital or prison grounds, playing fields and all
 GREEN_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "village_green", "golf_course", "pitch"}
 GREEN_LANDUSE = {"recreation_ground", "village_green", "forest", "meadow", "grass"}
 GREEN_NATURAL = {"wood", "scrub", "grassland", "heath", "wetland"}
@@ -155,7 +156,7 @@ def build_vector_rasters(region: Region, tile_m: int = 2000, refresh: bool = Fal
 
 
 def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False) -> Path:
-    """land_1m.tif: homes and gardens, car parks and viaduct decks (codes above), from OpenStreetMap."""
+    """land_1m.tif: homes and gardens, car parks, viaduct decks and institutions (codes above), from OpenStreetMap."""
     from .sources import osm
 
     out = region.cache_dir / "land_1m.tif"
@@ -170,6 +171,7 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
     green = polys[(tag("leisure").isin(GREEN_LEISURE) | tag("landuse").isin(GREEN_LANDUSE)
                    | tag("natural").isin(GREEN_NATURAL)) & (polys.geometry.area >= GREEN_MIN_M2)]
     parking = polys[(tag("amenity") == "parking") | tag("parking").isin(["surface", "multi-storey"])]
+    institutions = polys[polys["tags"].map(osm.is_institution)]
     # Viaducts: the mapped deck outline where there is one, else the line, 8 m wide. Road viaducts and
     # the Metro (traffic, overhead wires) don't count.
     l = o["lines"]
@@ -181,9 +183,11 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
     layers = [(gpd.GeoDataFrame(geometry=list(g), crs=BNG), code) for g, code in
               ((homes.geometry, HOMES_CODE), (parking.geometry, PARKING_CODE), (viaducts, VIADUCT_CODE))]
     green = gpd.GeoDataFrame(geometry=list(green.geometry), crs=BNG)
+    institutions = gpd.GeoDataFrame(geometry=list(institutions.geometry), crs=BNG)
     for g, _ in layers:
         g.sindex
     green.sindex
+    institutions.sindex
 
     xmin, ymin, xmax, ymax = region.bbox
     tmp = out.with_suffix(".part.tif")
@@ -205,6 +209,7 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
         for gdf, code in layers:
             land[burn(gdf, tb, tr, shape) > 0] = code
         land[(land == HOMES_CODE) & (burn(green, tb, tr, shape) > 0)] = 0  # a park inside an estate is a park
+        land[(burn(institutions, tb, tr, shape) > 0) & (land != VIADUCT_CODE)] = INSTITUTION_CODE  # a school field isn't
         return win, land
 
     jobs = [(x0, y0) for y0 in range(ymin, ymax, tile_m) for x0 in range(xmin, xmax, tile_m)]

@@ -11,6 +11,7 @@ import pandas as pd
 import rasterio
 from rasterio.enums import Resampling
 from scipy import ndimage
+import shapely
 from shapely.geometry import box
 
 from . import bandos, legal
@@ -217,6 +218,11 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     public = pa[pa["tags"].map(lambda t: t.get("leisure") in PUBLIC_LEISURE or t.get("landuse") in PUBLIC_LANDUSE
                                or t.get("designation") == "common"
                                or t.get("access") in {"yes", "permissive"} or osm.is_country_park(t))].geometry
+    # A school's playing field is often mapped as a recreation ground: it's still the school's.
+    institutions = pa[pa["tags"].map(osm.is_institution)].geometry
+    if len(institutions):
+        public = public.difference(shapely.union_all(institutions.values))
+        public = public[~public.is_empty]
     farm = pa[pa["tags"].map(lambda t: t.get("landuse") in FARM_LANDUSE)].geometry
 
     golf = polys(areas[areas["tags"].map(lambda t: t.get("leisure") == "golf_course")]).geometry
@@ -256,6 +262,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
         "public_frac": frac_of(public),
         "farm_frac": frac_of(farm),
         "beach_frac": frac_of(beaches),
+        "inst_frac": frac_of(institutions),
     }
 
     # Busyness: shops/cafes/etc. and buildings nearby, as counts per cell.

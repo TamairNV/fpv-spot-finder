@@ -6,10 +6,10 @@ them is clear at low height (the 1 m height grid says nothing taller than ~3 m i
 From each node we walk the links greedily, preferring good obstacles, a change of move and a
 smooth heading, and keep the best run. A spot's line score is the best run that starts in it.
 
-Lines stay off people's homes and gardens, car parks and roads, and the 5 inch keeps clear of
-buildings altogether. A viaduct's arches are obstacles too: LiDAR only sees the deck, so where the
-deck stands high above the ground there's an arch every few metres to fly through, and a run can weave
-from one arch to the next under the deck.
+Lines stay off people's homes and gardens, car parks, school and hospital grounds and roads, and the
+5 inch keeps clear of buildings altogether. A viaduct's arches are obstacles too: LiDAR only sees the
+deck, so where the deck stands high above the ground there's an arch every few metres to fly through,
+and a run can weave from one arch to the next under the deck.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import numpy as np
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
-from .rasterize import HOMES_CODE, PARKING_CODE
+from .rasterize import HOMES_CODE, INSTITUTION_CODE, PARKING_CODE
 
 # Node kinds and what each is worth in a run.
 GAP, LONE, DIVE, SKIM, ARCH = 0, 1, 2, 3, 4
@@ -58,10 +58,11 @@ WHOOP = Style(min_link=5.0, max_link=35.0, gap_max_w=5.0, corridor=3, bld_clear=
 
 
 def keep_out(land: np.ndarray | None, d_bld: np.ndarray | None, d_road: np.ndarray | None, style: Style) -> np.ndarray | None:
-    """Pixels a line can't use: homes and gardens, car parks, near a road, and for the 5 inch near any
-    building. d_bld / d_road are metres to the nearest building / road pixel (None: there's none)."""
+    """Pixels a line can't use: homes and gardens, car parks, school and hospital grounds, near a road, and
+    for the 5 inch near any building. d_bld / d_road are metres to the nearest building / road pixel (None:
+    there's none)."""
     out = None
-    for m in ((land == HOMES_CODE) | (land == PARKING_CODE) if land is not None else None,
+    for m in (np.isin(land, (HOMES_CODE, PARKING_CODE, INSTITUTION_CODE)) if land is not None else None,
               d_road <= style.road_clear if d_road is not None else None,
               d_bld <= style.bld_clear if d_bld is not None and style.bld_clear > 0 else None):
         if m is not None:
