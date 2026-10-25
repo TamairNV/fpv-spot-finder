@@ -28,7 +28,7 @@ function liteStyle() {
     version: 8,
     sources: {
       lite: {
-        type: 'vector', tiles: [`${abs(`${BASE}/tiles/`)}{z}/{x}/{y}.pbf`], minzoom: 8, maxzoom: 12, bounds: regionBounds(),
+        type: 'vector', tiles: [liteTiles()], minzoom: 8, maxzoom: 12, bounds: regionBounds(),
         attribution: '© OpenStreetMap contributors, Overture Maps',
       },
     },
@@ -54,6 +54,18 @@ function liteStyle() {
     ],
   };
 }
+// A sandboxed host serves no .pbf, so there the tiles come in one file (base64 by z/x/y, from scripts/artifact.mjs).
+let liteTileSet = null;
+function liteTiles() {
+  if (!SANDBOXED) return `${abs(`${BASE}/tiles/`)}{z}/{x}/{y}.pbf`;
+  maplibregl.addProtocol('lite', async ({ url }) => {
+    liteTileSet ||= fetch(`${BASE}/tiles.json`).then((r) => r.json());
+    const b64 = (await liteTileSet)[url.slice('lite://'.length)];
+    return { data: b64 ? Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer : new ArrayBuffer(0) };
+  });
+  return 'lite://{z}/{x}/{y}';
+}
+
 const SATELLITE = {
   type: 'raster', tileSize: 256, maxzoom: 19,
   tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
@@ -69,6 +81,7 @@ const state = {
   query: '',
   a3only: false,
   kind: null,
+  bandoList: false, // the list shows bandos instead of spots
   saved: false,
   more: {},
   moreOpen: false,
@@ -103,7 +116,7 @@ const isA3 = (key = state.profile) => /A3/.test(state.meta.profiles[key]?.catego
 // Spot types to filter the list by: the reasons worth 2+ points of a spot's score (kinds, from the
 // pipeline). A type nearly every spot has, or only one or two do, isn't worth a chip.
 const KINDS = {
-  park: 'Parks', bando: 'Bandos', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', relief: 'Hills and banks', sunset: 'Sunset',
+  park: 'Parks', water: 'Water', bridge: 'Bridges', landmark: 'Landmarks', hero: 'Big landmarks', relief: 'Hills and banks', sunset: 'Golden hour', coast: 'Coast', beach: 'Beaches',
   plaza: 'Plazas', under: 'Under the trees', public: 'Public space', edges: 'Tree lines', space: 'Wide open', flow: 'Good lines',
 };
 const hasKind = (f, k) => f.properties.kinds?.includes(k) ?? (f.properties.why || []).some((w) => w.key === k && w.pts >= 2);
@@ -132,7 +145,7 @@ function upper(get, step) {
 }
 // chip: how the step reads on the Filters chip once the panel is shut
 const MORE = [
-  { key: 'bando', label: 'Bando within', title: 'A ruin or derelict building that LiDAR says is still standing', opts: () => near, fmt: dist, chip: (v) => `Bando ≤ ${dist(v)}`, test: (s, v) => s.bando_m <= v },
+  { key: 'bando', label: 'Bando within', title: 'A derelict building that LiDAR says is still standing', opts: () => near, fmt: dist, chip: (v) => `Bando ≤ ${dist(v)}`, test: (s, v) => s.bando_m <= v },
   { key: 'gaps', label: 'Gaps', title: 'Openings between trees or buildings to fly through', opts: () => upper(gapsOf), fmt: (v) => `${v}+`, chip: (v) => `${v}+ gaps`, test: (s, v) => gapsOf(s) >= v },
   { key: 'lone', label: 'Lone trees', title: 'Single trees with room all round, to orbit and power loop', opts: () => upper((s) => s.lone_trees), fmt: (v) => `${v}+`, chip: (v) => `${v}+ lone trees`, test: (s, v) => s.lone_trees >= v },
   { key: 'tall', label: 'Tallest thing', title: 'The tallest tree or building in the spot, to dive', opts: () => upper((s) => s.max_height_m, 1), fmt: (v) => `${v} m+`, chip: (v) => `${v} m+ tall`, test: (s, v) => s.max_height_m >= v },
@@ -508,7 +521,7 @@ function addOverlays() {
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, ['match', ['get', 'k'], 'takeoff', 5, 'move', 4, 2], 17, ['match', ['get', 'k'], 'takeoff', 9, 'move', 8, 5.5]],
       'circle-color': ['match', ['get', 'k'], 'gap', '#ff3d7f', 'lone', '#ffc400', 'takeoff', '#22c55e',
-        'move', ['match', ['get', 'kind'], 'gap', '#ff3d7f', 'orbit', '#ffc400', 'dive', '#a78bfa', '#22d3ee'], '#fff'],
+        'move', ['match', ['get', 'kind'], 'gap', '#ff3d7f', 'orbit', '#ffc400', 'dive', '#a78bfa', 'arch', '#fb923c', '#22d3ee'], '#fff'],
       'circle-stroke-color': ['match', ['get', 'k'], 'takeoff', '#ffffff', '#1b2328'],
       'circle-stroke-width': ['match', ['get', 'k'], 'takeoff', 2.5, 1],
     },
@@ -714,6 +727,7 @@ function renderFilters() {
     more,
     isA3() ? chip('a3', state.a3only, 'Only spots that are mostly 150 m clear of houses and parks', 'A3-clear only') : null,
     saved ? chip('saved', state.saved, 'Spots you rated 👍', 'Your 👍', saved) : null,
+    hasBandos() ? chip('bandos', state.bandoList, 'List the derelict buildings themselves', 'Bandos', bandoCount()) : null,
     ...kindsFor(state.profile).map(([k, n]) => chip(`kind:${k}`, state.kind === k, `Spots with ${KINDS[k].toLowerCase()}`, KINDS[k], n)),
   ].filter(Boolean));
   box.hidden = !box.children.length;
@@ -755,6 +769,7 @@ function renderMore() {
 }
 
 function renderList() {
+  if (state.bandoList && hasBandos()) return renderBandoList();
   const { list, note, label } = orderedSpots();
   renderFilters();
   const noteBox = $('#taste-note');
@@ -789,6 +804,7 @@ function clearFilters() {
   state.query = '';
   state.a3only = false;
   state.kind = null;
+  state.bandoList = false;
   state.saved = false;
   state.more = {};
   $('#search').value = '';
@@ -855,6 +871,7 @@ function seedSpot(s) {
 
 function renderSeeds(label) {
   const box = $('#seeds-box');
+  box.hidden = false;
   const seeds = seedsFor(state.profile);
   const showSeeds = seeds.length && !state.query && !state.like;
   box.replaceChildren(...[
@@ -934,6 +951,26 @@ function markSelected(id) {
   state.pins.forEach((m) => m.getElement().classList.toggle('on', m.getElement().dataset.id === id));
 }
 
+// The moves as a path on the map. Between two arches side by side the line swings out round the pier,
+// alternately either side of the viaduct, like the 3D view draws it; a move whose way in bends round
+// something carries the bend after its own point ([lon, lat, dx, dy]).
+function weave(moves) {
+  const out = [];
+  let n = 0;
+  moves.forEach((m, i) => {
+    const prev = moves[i - 1];
+    if (m[5]) out.push([m[5][0], m[5][1]]);
+    if (m[0] === 'arch' && prev?.[0] === 'arch') {
+      const ex = m[3] - prev[3], ey = m[4] - prev[4], len = Math.hypot(ex, ey) || 1, side = (n++ % 2 ? 1 : -1) * 9;
+      const ox = (-ey / len) * side, oy = (ex / len) * side; // metres across the viaduct
+      const lat = (prev[2] + m[2]) / 2;
+      out.push([(prev[1] + m[1]) / 2 + ox / (111320 * Math.cos((lat * Math.PI) / 180)), lat + oy / 110540]);
+    }
+    out.push([m[1], m[2]]);
+  });
+  return out;
+}
+
 function showSelection(f) {
   const p = f.properties;
   const feats = [{ type: 'Feature', geometry: circlePolygon(f.geometry.coordinates, state.meta.profiles[state.profile].radius_m), properties: { k: 'area' } }];
@@ -942,7 +979,7 @@ function showSelection(f) {
   const moves = p.line?.moves || [];
   if (moves.length) { // the suggested line: take-off, then each move in order
     const start = p.takeoff ? [[p.takeoff.lon, p.takeoff.lat]] : [];
-    feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [...start, ...moves.map((m) => [m[1], m[2]])] }, properties: { k: 'path' } });
+    feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [...start, ...weave(moves)] }, properties: { k: 'path' } });
     moves.forEach((m, i) => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [m[1], m[2]] }, properties: { k: 'move', n: i + 1, kind: m[0] } }));
   }
   if (p.takeoff) feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.takeoff.lon, p.takeoff.lat] }, properties: { k: 'takeoff' } });
@@ -1097,7 +1134,7 @@ function closeCheck() {
 
 const BANDO_COLOUR = '#c084fc';
 const hasBandos = () => !!state.meta.sources?.bandos;
-const bandosWanted = () => hasBandos() && (state.bandos || state.kind === 'bando' || state.more.bando != null);
+const bandosWanted = () => hasBandos() && (state.bandos || state.bandoList || state.more.bando != null);
 let bandosData = null, bandosLoad = null, bandoOpen = false;
 
 function loadBandos() {
@@ -1145,10 +1182,54 @@ function showAllBandos(list) {
 }
 
 // Searching names a bando too ("priory", "mine", "bunker"; "bandos" lists the lot), above the spots.
+const bandoCount = () => {
+  const c = state.meta.sources?.bandos;
+  return c ? (c.standing || 0) + (c.unknown || 0) : null;
+};
+const bandoSub = (p) => [p.n ? p.k : null, p.b > 1 ? `${p.b} buildings` : null, BANDO_STATE[p.s](p.h),
+  `${Math.round(p.a / 10) * 10} m² of roof`].filter(Boolean).join(' · ');
+
+// The Bandos chip: the derelict buildings themselves, biggest first, instead of spots near them.
+function renderBandoList() {
+  renderFilters();
+  if (!bandosData) {
+    loadBandos().then(() => state.bandoList && renderList());
+    $('#spot-list').replaceChildren();
+    return;
+  }
+  const q = state.query.trim().toLowerCase();
+  const list = bandosData.features
+    .filter((f) => !q || /^bandos?$/.test(q) || `${f.properties.n || ''} ${f.properties.k}`.toLowerCase().includes(q))
+    .sort((a, b) => (b.properties.s === 1) - (a.properties.s === 1) || b.properties.a - a.properties.a);
+  $('#taste-note').hidden = true;
+  $('#seeds-box').hidden = true;
+  $('#bando-hits').replaceChildren(el('div', { class: 'section-label bando-label' }, 'Derelict buildings, still standing',
+    list.length > 1 ? el('button', { class: 'linklike', onclick: () => showAllBandos(list) }, 'Show all on the map') : null));
+  $('#spot-list').replaceChildren(...list.map((f) => {
+    const p = f.properties;
+    return el('li', { class: 'row-item bando-row', title: 'Show it on the map', onclick: () => showBandoOnMap(f) },
+      thumbBox(p.p, el('i', { class: `bdot s${p.s}` })),
+      el('div', {},
+        el('div', { class: 'spot-name' }, p.n || p.k),
+        el('div', { class: 'spot-sub' }, [state.me ? metres(haversine(state.me, f.geometry.coordinates)) : null, bandoSub(p)].filter(Boolean).join(' · '))));
+  }));
+  const empty = $('#list-empty');
+  empty.hidden = list.length > 0;
+  if (!list.length) empty.replaceChildren(`No bandos match “${state.query}”.`);
+  $('#list-count').textContent = `${list.length} bandos`;
+  renderFoot();
+  state.order = [];
+  state.visible = [];
+  map?.getSource('spots')?.setData({ type: 'FeatureCollection', features: [] });
+  syncBandos();
+  drawPins();
+  watchThumbs($('#list-scroll'), $('#list-scroll'));
+}
+
 function renderBandoHits() {
   const box = $('#bando-hits');
   const q = state.query.trim().toLowerCase();
-  if (q.length < 3 || !hasBandos()) return box.replaceChildren();
+  if (q.length < 3 || !hasBandos() || state.bandoList) return box.replaceChildren();
   if (!bandosData) {
     loadBandos().then(() => state.query.trim().toLowerCase() === q && renderBandoHits());
     return box.replaceChildren();
@@ -1168,7 +1249,7 @@ function renderBandoHits() {
         el('i', { class: `bdot s${p.s}` }),
         el('div', {},
           el('div', { class: 'spot-name' }, p.n || p.k),
-          el('div', { class: 'spot-sub' }, [p.n ? p.k : null, BANDO_STATE[p.s](p.h), p.m ? 'protected site' : null].filter(Boolean).join(' · '))));
+          el('div', { class: 'spot-sub' }, bandoSub(p))));
     })));
 }
 
@@ -1311,6 +1392,7 @@ function wireUI() {
       state.a3only = !state.a3only;
       savePrefs();
     } else if (f === 'saved') state.saved = !state.saved;
+    else if (f === 'bandos') state.bandoList = !state.bandoList;
     else if (f.startsWith('kind:')) state.kind = state.kind === f.slice(5) ? null : f.slice(5);
     renderList();
     $('#list-scroll').scrollTop = 0;
@@ -1346,7 +1428,7 @@ function wireUI() {
   });
   $('#spot-list').addEventListener('click', (e) => {
     const li = e.target.closest('.row-item');
-    if (li) select(li.dataset.id, true);
+    if (li?.dataset.id) select(li.dataset.id, true);
   });
   // hovering a row lights up its pin on the map
   $('#spot-list').addEventListener('mouseover', (e) => {
@@ -1448,16 +1530,17 @@ function aboutHtml() {
   <ul>
     <li><b>Gaps</b>: openings 2–12 m wide between trees or buildings at least 5 m tall (whoop gaps up to 6 m).</li>
     <li><b>Lone trees</b>: single trees with open ground all round, for orbits and power loops.</li>
-    <li><b>Edges, open space, tall stuff, slopes, water, bridges, bandos</b> nearby, and for the whoop: architecture, plazas, landmarks and under-canopy space.</li>
+    <li><b>Viaducts and bridges</b> (arches to fly through), <b>beaches</b>, <b>public land</b> to fly from, and <b>edges, open space, tall stuff, slopes, water and bandos</b> nearby; for 5" cine: a subject to film (a lighthouse, castle, pier, viaduct or the coast) with big water, hills and a sunrise or sunset round it; for the whoop: architecture, plazas, landmarks and under-canopy space. A spot's pin sits on the viaduct, landmark or beach it's about, and a run can weave through a viaduct's arches where trees don't crowd it.</li>
+    <li><b>Lines</b>: each top spot gets a suggested line chaining its gaps, trees, arches, tree lines and the edges of woods through clear air (straight, or with one bend round a clump of trees), from a take-off on open ground with a clean way in. Lines keep off gardens, car parks, roads, school and hospital grounds, playgrounds, working railways and power lines.</li>
     <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
     <li><b>Parks</b>: every public park or common of 4 ha or more gets a spot at its best place, even if it doesn't make the top 250. Tap “Parks” above the list to see them.</li>
-    <li><b>Bandos</b>: every ruin and derelict building on OpenStreetMap, checked against LiDAR. Solid purple dots still have something standing (tap one for a 3D close-up from the LiDAR); rings are old sites with little left. Turn them on in Layers, tap “Bandos” or Filters › Bando within, or search “bandos”.</li>
+    <li><b>Bandos</b>: derelict, abandoned and disused buildings mapped on OpenStreetMap, still standing at least 4 m tall in the LiDAR. Ruins in parks, monuments, old pit sites and capped shafts aren't bandos, so they're left out. Tap the “Bandos” chip to list them biggest first, tap one for its card and a 3D close-up, or use Filters › Bando within for spots near one.</li>
   </ul>
   <h3>Places worth a look, not permission</h3>
   <p>Spots are suggestions to go and check. Each one says how it sits with the rules: the 800 g 5" flies Open <b>A3</b>
   (150 m from houses, businesses, schools and parks; 50 m from buildings and busy roads), so parks show up but are marked
   <b>sub-250 g only</b> unless they're A3-clear; the 85 mm flies <b>A1</b>. Airport and prison flight restriction zones and
-  MOD land are left out. Land-owner rules (National Trust, Forestry England, Woodland Trust, nature reserves) show as warnings.
+  MOD land are left out. Land-owner rules (National Trust, English Heritage, Forestry England, Woodland Trust, nature reserves) show as warnings.
   Use <b>Can I fly here?</b>, right-click or long-press the map to check any point.</p>
   <h3>Be real about it</h3>
   <ul>

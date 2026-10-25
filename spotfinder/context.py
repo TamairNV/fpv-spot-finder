@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import geopandas as gpd
 import numpy as np
@@ -10,8 +11,10 @@ import pandas as pd
 import rasterio
 from rasterio.enums import Resampling
 from scipy import ndimage
+import shapely
+from shapely.geometry import box
 
-from . import legal
+from . import bandos, legal, rasterize
 from .config import Region
 from .heights import LIDAR_DIRS
 from .sources import osm, overture
@@ -22,25 +25,53 @@ CELL = 50
 RES = legal.RES  # 5 m working grid
 K = int(CELL / RES)  # 10 pixels per cell
 
-# Old structures pilots call bandos. Castles and manors are left out: they're landmarks with
-# owners and visitors, not derelict buildings.
-# Town-wall towers, gates, forts and abbeys are landmarks with visitors, not bandos.
-BANDO_HISTORIC = {"ruins", "mine", "mine_shaft", "bunker", "aircraft", "wreck", "lime_kiln", "kiln", "industrial",
-                  "coaldrop"}
-BANDO_MIN_H = 2.5   # something at least this tall must still be standing (LiDAR) to count as a real bando
-BANDO_LOOK_M = 15   # ...within this far of the mapped outline
-# Lifecycle-prefixed keys that mean a disused *structure*. A closed shop or car park
-# (disused:amenity=parking, disused:shop=...) isn't one.
-BANDO_PREFIXED = {f"{life}:{key}" for life in ("abandoned", "disused", "ruins")
-                  for key in ("building", "man_made", "industrial", "power", "military", "aeroway", "bridge")}
-BANDO_STRUCTURE_KEYS = {"building", "man_made", "industrial", "power", "military", "bridge"}
 LANDMARK_MAN_MADE = {"lighthouse", "water_tower", "chimney", "windmill", "tower", "obelisk"}
+BEACH_NATURAL = {"beach", "sand", "shingle"}
+BEACH_MIN_M2 = 1500  # smaller sand is a sandpit or a long-jump pit; golf bunkers are left out too
+BRIDGE_UP_M = 4.0    # a bridge deck this high above the ground (LiDAR) is really in the air...
+BRIDGE_SPAN_M = 30   # ...and a run of it this long is a bridge worth flying, if it crosses water
+BRIDGE_BIG_M = 80    # ...or this long anywhere (a valley, a railway cutting)
+FAMOUS_BRIDGE_M = 20  # a listed bridge, or one with its own Wikidata entry, this long counts whatever it crosses
 LANDMARK_HISTORIC = {"castle", "monument", "fort", "ruins", "city_gate", "tower", "monastery", "abbey", "citywalls"}
+# Icons: landmarks you'd build a cinematic shot round, with a name to them (a lighthouse, a castle, an abbey,
+# a monument, a named pier or viaduct), rather than a viewpoint bench, a water tower or a chimney. A ruin or
+# monument needs a Wikidata entry or a listing too: OSM has every war memorial, drinking fountain and old
+# ferry landing as historic=monument or ruins.
+ICON_MAN_MADE = {"lighthouse", "windmill", "obelisk"}
+ICON_PIER = {"pier", "breakwater", "groyne"}
+ICON_MAX_M2 = 10e4  # a sculpture or a priory, not a whole estate or park tagged as an attraction
+# Heroes: icons that stand up, for a 5" cine shot to fly round on their own (the Angel of the North, Penshaw
+# Monument, a castle on a mound): a lighthouse, windmill, castle or priory, or any other icon LiDAR sees
+# HERO_UP_M+ tall on its footprint, or a whole site (Northumberlandia is a hill). Not bridges, which count
+# as bridges, and not a war memorial or fountain mapped as a point, unless its name says column or tower.
+HERO_KIND_MAN_MADE = {"lighthouse", "windmill"}
+HERO_KIND_HISTORIC = {"castle", "abbey", "monastery"}
+HERO_UP_M = 8.0
+HERO_SITE_M2 = 2e4
+HERO_NAME = re.compile(r"\b(column|obelisk|tower|castle|priory|abbey|lighthouse|windmill)\b", re.I)
 # Land you can usually walk onto and fly from, if the rules allow: parks, commons, open access grass.
 PUBLIC_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "dog_park", "village_green"}
 PUBLIC_LANDUSE = {"recreation_ground", "village_green"}
 FARM_LANDUSE = {"farmland", "farmyard", "orchard", "greenhouse_horticulture", "plant_nursery", "allotments"}
 HAZARD_MAN_MADE = {"mast", "communications_tower", "crane"}
+
+
+def is_public(t: dict) -> bool:
+    """Public open space (PUBLIC_*), a common, open access land or a country park. A school's playing field is
+    often mapped as a recreation ground: it's still the school's (osm.is_institution)."""
+    return (t.get("leisure") in PUBLIC_LEISURE or t.get("landuse") in PUBLIC_LANDUSE or t.get("designation") == "common"
+            or t.get("access") in {"yes", "permissive"} or osm.is_country_park(t))
+
+
+def is_farm(t: dict) -> bool:
+    return t.get("landuse") in FARM_LANDUSE
+
+
+def stands_up(t: dict, up_m: float = 0.0, area_m2: float = 0.0) -> bool:
+    """Whether an icon is a hero (see HERO_*); one mapped as a point can only say so by its kind or name."""
+    return (t.get("man_made") in HERO_KIND_MAN_MADE or t.get("historic") in HERO_KIND_HISTORIC
+            or up_m >= HERO_UP_M or area_m2 >= HERO_SITE_M2
+            or (area_m2 == 0 and bool(HERO_NAME.search(t.get("name") or ""))))
 
 
 def _cell_min(a: np.ndarray) -> np.ndarray:
@@ -56,24 +87,6 @@ def _cell_mean(a: np.ndarray) -> np.ndarray:
 def _cell_max(a: np.ndarray) -> np.ndarray:
     h, w = a.shape
     return a.reshape(h // K, K, w // K, K).max(axis=(1, 3))
-
-
-def _is_bando(t: dict) -> bool:
-    if t.get("building") in osm.BUILDING_BANDO:
-        return True
-    if "yes" in (t.get("abandoned"), t.get("disused"), t.get("ruins")) and any(k in t for k in BANDO_STRUCTURE_KEYS):
-        return True
-    if any(k in BANDO_PREFIXED for k in t):
-        return True
-    if t.get("abandoned:landuse") in {"industrial", "quarry", "railway", "military"}:
-        return True
-    # brownfield is left out on purpose: in OSM it's mostly cleared land or building sites
-    return t.get("historic") in BANDO_HISTORIC
-
-
-def _is_pit_marker(t: dict) -> bool:
-    return t.get("historic") in {"mine", "mine_shaft"} and t.get("building") not in osm.BUILDING_BANDO \
-        and not any(k.startswith(("ruins", "abandoned:", "disused:")) for k in t)
 
 
 def load_dtm(region: Region) -> tuple[np.ndarray, str]:
@@ -131,24 +144,24 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     seg = overture.load_layer(region, "segments")
     bridges_seg = seg[seg["is_bridge"].fillna(False).astype(bool) & (seg.geometry.length >= 25)]
     bridge_lines = lines[lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct", "yes", "boardwalk"})]
-    # A bridge worth filming crosses water or is a viaduct; a 60 m flyover across a dual carriageway isn't.
+    # A bridge worth filming crosses water or is a viaduct; a 60 m flyover across a dual carriageway or a
+    # lane over a culvert isn't. Measured on the span LiDAR sees in the air, not the flagged segment.
     water_union = pd.concat([big_water.geometry, rivers.geometry]).union_all()
-    long_seg = bridges_seg[bridges_seg.geometry.length >= 60]
+    spans = _bridge_spans(region, bridges_seg)
+    viaducts = bridge_lines[bridge_lines["tags"].map(osm.is_viaduct)]
+    famous_spans = bridge_lines[bridge_lines["tags"].map(osm.famous_bridge)]
     big_bridges = pd.concat([
-        long_seg[long_seg.geometry.distance(water_union) <= 30].geometry,
-        bridges_seg[bridges_seg.geometry.length >= 150].geometry,
-        bridge_lines[bridge_lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"})].geometry,
+        spans[(spans.length >= BRIDGE_SPAN_M) & (spans.distance(water_union) <= 30)],
+        spans[spans.length >= BRIDGE_BIG_M],
+        viaducts.geometry,
+        famous_spans[famous_spans.length >= FAMOUS_BRIDGE_M].geometry,  # Causey Arch: 30 m, but 24 m up a gorge
     ])
+    log.info("bridges: %d flagged segments, %d spans in the air, %d worth flying", len(bridges_seg), len(spans),
+             len(big_bridges))
+    fly_bridges = off_the_tracks(big_bridges, lines[lines["tags"].map(osm.is_active_railway)].geometry)
 
-    b_tags = pd.concat([areas["tags"][areas["tags"].map(_is_bando)], nodes["tags"][nodes["tags"].map(_is_bando)]])
-    bando_all = pd.concat([areas[areas["tags"].map(_is_bando)].geometry, nodes[nodes["tags"].map(_is_bando)].geometry])
-    standing = _standing_height(region, bando_all)
-    # A pit or shaft marker is where a colliery was; whatever LiDAR sees there now is usually a new shed.
-    standing[b_tags.map(_is_pit_marker).to_numpy() & (bando_all.geom_type == "Point").to_numpy()] = 0.0
-    log.info("bandos: %d mapped, %d with something still standing", len(bando_all), int((standing >= BANDO_MIN_H).sum()))
-    # Mapped with no LiDAR to check (NaN) still count; mapped but flat (an old pit site) only as a "site".
-    bando_real = bando_all[~(standing < BANDO_MIN_H)]
-    bando_site = bando_all[standing < BANDO_MIN_H]
+    # Bandos: derelict buildings LiDAR says are still standing (see bandos.py; the map shows the same set).
+    found = bandos.find(region)
 
     land = overture.load_layer(region, "land")
     cliffs = pd.concat([
@@ -158,15 +171,48 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     ])
     quarry = areas[areas["tags"].map(lambda t: t.get("landuse") == "quarry" or "quarry" in str(t.get("abandoned:landuse", "")))]
 
+    famous = lambda t: bool(t.get("wikidata") or t.get("heritage") or t.get("listed_status"))
+    # A viaduct with a name (Nine Arches, Hownsgill) is a landmark whether or not it's listed, and so is a
+    # bridge famous in its own right (Causey Arch); a little listed footbridge over a burn isn't.
+    named_viaduct = lambda t: osm.is_viaduct(t) and bool(osm.bridge_name(t))
+    deck = lambda t: t.get("man_made") == "bridge" and (famous(t) or named_viaduct(t)
+                                                         or bool(osm.VIADUCT_NAME.search(osm.bridge_name(t))))
+    viaduct_lines = lines[lines["tags"].map(lambda t: osm.is_viaduct(t) and (famous(t) or named_viaduct(t)))]
+    famous_bridges = lines[lines["tags"].map(osm.famous_bridge)]
+    famous_bridges = famous_bridges[famous_bridges.length >= FAMOUS_BRIDGE_M]
     landmarks = pd.concat([
         nodes[nodes["tags"].map(lambda t: t.get("tourism") in {"viewpoint", "attraction"}
                                 or t.get("man_made") in LANDMARK_MAN_MADE
-                                or t.get("historic") in LANDMARK_HISTORIC)].geometry,
+                                or t.get("historic") in LANDMARK_HISTORIC
+                                or (t.get("tourism") == "artwork" and bool(t.get("wikidata"))))].geometry,
         polys(areas[areas["tags"].map(lambda t: t.get("historic") in LANDMARK_HISTORIC
-                                      or t.get("tourism") == "attraction")]).geometry,
+                                      or t.get("tourism") == "attraction" or t.get("man_made") in LANDMARK_MAN_MADE
+                                      or (t.get("tourism") == "artwork" and bool(t.get("wikidata"))) or deck(t))]).geometry,
+        viaduct_lines.geometry,
+        famous_bridges.geometry,
     ])
+    named = lambda t: bool(t.get("name") or t.get("wikidata"))
+    icon = lambda t: named(t) and (t.get("man_made") in ICON_MAN_MADE
+                                   or (t.get("historic") in LANDMARK_HISTORIC and famous(t))
+                                   or (t.get("tourism") in {"artwork", "attraction"} and bool(t.get("wikidata"))))
+    icon_areas = polys(areas[areas["tags"].map(lambda t: icon(t) or deck(t))])
+    icons = pd.concat([
+        nodes[nodes["tags"].map(icon)].geometry,
+        icon_areas[icon_areas.geometry.area <= ICON_MAX_M2].geometry,
+        viaduct_lines.geometry,
+        famous_bridges[famous_bridges["tags"].map(lambda t: bool(osm.bridge_name(t)))].geometry,
+        lines[lines["tags"].map(lambda t: t.get("man_made") in ICON_PIER and named(t))].geometry,
+    ])
+    hero_areas = icon_areas[icon_areas["tags"].map(lambda t: icon(t) and "bridge" not in t and t.get("man_made") != "bridge")
+                            & (icon_areas.geometry.area <= ICON_MAX_M2)]
+    up = np.nan_to_num(bandos.standing_height(region, hero_areas.geometry, q=100))
+    heroes = pd.concat([
+        hero_areas[[stands_up(t, h, a) for t, h, a in zip(hero_areas["tags"], up, hero_areas.geometry.area)]].geometry,
+        nodes[nodes["tags"].map(lambda t: icon(t) and stands_up(t))].geometry,
+    ])
+    log.info("icons: %d, %d of them heroes", len(icons), len(heroes))
     hazards = pd.concat([
-        lines[lines["tags"].map(lambda t: t.get("power") in {"line", "minor_line"})].geometry,
+        lines[lines["tags"].map(osm.is_power_line)].geometry,
         nodes[nodes["tags"].map(lambda t: t.get("man_made") in HAZARD_MAN_MADE
                                 or (t.get("power") == "generator" and t.get("generator:source") == "wind"))].geometry,
     ])
@@ -181,10 +227,26 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
 
     roads_busy = seg[(seg["subtype"] == "road") & seg["class"].isin(["motorway", "trunk", "primary"])]
     pa = polys(areas)
-    public = pa[pa["tags"].map(lambda t: t.get("leisure") in PUBLIC_LEISURE or t.get("landuse") in PUBLIC_LANDUSE
-                               or t.get("designation") == "common"
-                               or t.get("access") in {"yes", "permissive"})].geometry
-    farm = pa[pa["tags"].map(lambda t: t.get("landuse") in FARM_LANDUSE)].geometry
+    public = pa[pa["tags"].map(is_public)].geometry
+    institutions = pa[pa["tags"].map(osm.is_institution)].geometry
+    if len(institutions):
+        public = public.difference(shapely.union_all(institutions.values))
+        public = public[~public.is_empty]
+    farm = pa[pa["tags"].map(is_farm)].geometry
+
+    golf = polys(areas[areas["tags"].map(lambda t: t.get("leisure") == "golf_course")]).geometry
+    beaches = pd.concat([
+        polys(areas[areas["tags"].map(lambda t: t.get("natural") in BEACH_NATURAL)]).geometry,
+        land[land["class"].isin(list(BEACH_NATURAL))].geometry,
+    ])
+    beaches = beaches[beaches.area >= BEACH_MIN_M2]
+    if len(golf):
+        beaches = beaches[~beaches.intersects(golf.union_all())]
+    # The sea: whatever in the box isn't land (Overture's land polygons follow the coastline, so the
+    # Tyne stops being sea at its mouth).
+    box_ = box(*region.bbox)
+    landmass = land[land["class"].isin(["land", "island"])].geometry.intersection(box_).union_all()
+    sea = [box_.difference(landmass)] if not landmass.is_empty else []
 
     def frac_of(geoms) -> np.ndarray:
         return _cell_mean(legal.burn(list(geoms), shape_, transform, all_touched=False).astype("float32"))
@@ -192,12 +254,16 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     out = {
         "dist_water": dist_to(pd.concat([big_water.geometry, rivers.geometry])),
         "dist_bridge": dist_to(big_bridges),
+        "dist_bridge_fly": dist_to(fly_bridges),
         "dist_footbridge": dist_to(bridge_lines.geometry),
-        "dist_bando": dist_to(bando_real),
-        "dist_bando_site": dist_to(bando_site),
+        "dist_bando": dist_to(found.geometry),
+        "dist_beach": dist_to(beaches),
+        "dist_sea": dist_to(sea),
         "dist_cliff": dist_to(cliffs),
         "dist_quarry": dist_to(quarry.geometry),
         "dist_landmark": dist_to(landmarks),
+        "dist_icon": dist_to(icons),
+        "dist_hero": dist_to(heroes),
         "dist_hazard": dist_to(hazards),
         "dist_parking": dist_to(parking),
         "dist_path": dist_to(paths.geometry),
@@ -205,6 +271,8 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
         "dist_road_busy": dist_to(roads_busy.geometry),
         "public_frac": frac_of(public),
         "farm_frac": frac_of(farm),
+        "beach_frac": frac_of(beaches),
+        "inst_frac": frac_of(institutions),
     }
 
     # Busyness: shops/cafes/etc. and buildings nearby, as counts per cell.
@@ -216,36 +284,51 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     return out
 
 
-def _standing_height(region: Region, geoms: gpd.GeoSeries) -> np.ndarray:
-    """Tallest solid thing (LiDAR, low first-minus-last return so not a tree) on or next to each geometry.
-    NaN where there's no LiDAR to look at."""
+def off_the_tracks(bridges: gpd.GeoSeries, tracks: gpd.GeoSeries) -> gpd.GeoSeries:
+    """The bridges not carrying trains. One that is is one to film, not to fly round: lines keep off the tracks
+    (rasterize.RAIL_CLEAR_M either side), so a 5" spot isn't sold on it (Hawthorn Dene, Plessey, the King Edward
+    VII Bridge). A road bridge over a railway is only near the tracks for a few metres of its length."""
+    if not len(tracks) or not len(bridges):
+        return bridges
+    band = shapely.union_all(tracks.buffer(rasterize.RAIL_CLEAR_M, cap_style="flat").values)
+    return bridges[(bridges.intersection(band).length <= 0.5 * bridges.length).to_numpy()]
+
+
+def _bridge_spans(region: Region, segs: gpd.GeoDataFrame) -> gpd.GeoSeries:
+    """The part of each bridge-flagged road or path that's really up in the air: runs where LiDAR sees
+    the deck BRIDGE_UP_M+ above the ground. Overture flags a whole segment, so without this a 1 km lane
+    with a culvert in it counts as a 1 km bridge. Without LiDAR, the segments as they are."""
+    from shapely.geometry import LineString
+
     from .heights import lidar_paths
 
-    out = np.full(len(geoms), np.nan, dtype="float32")
     lp = lidar_paths(region)
-    if not lp or len(geoms) == 0:
-        return out
-    from rasterio.windows import from_bounds
-
+    if not lp or not len(segs):
+        return segs.geometry
+    step = 2.0
+    pieces = []
     with rasterio.open(lp["ndsm"]) as nd:
         por = rasterio.open(lp["porosity"]) if "porosity" in lp else None
-        for i, g in enumerate(geoms):
-            if g is None or g.is_empty:
+        for g in segs.geometry:
+            if g is None or g.is_empty or g.geom_type != "LineString":
                 continue
-            x0, y0, x1, y1 = g.buffer(BANDO_LOOK_M).bounds
-            win = from_bounds(x0, y0, x1, y1, nd.transform).round_offsets().round_lengths()
-            h = nd.read(1, window=win, boundless=True, fill_value=255)
-            valid = h != 255
-            if valid.mean() < 0.5:
-                continue
-            hm = np.where(valid, h / 4.0, 0)
-            if por is not None:
-                p = por.read(1, window=win, boundless=True, fill_value=255)
-                hm = np.where((p != 255) & (p / 4.0 > 0.5 * hm) & (hm > 3), 0, hm)  # see-through: a tree
-            out[i] = float(hm.max())
+            d = np.arange(0, g.length, step)
+            pts = [g.interpolate(x) for x in d]
+            xy = [(p.x, p.y) for p in pts]
+            h = np.array([v[0] for v in nd.sample(xy)], dtype="float32")
+            up = (h != 255) & (h / 4.0 >= BRIDGE_UP_M)
+            if por is not None:  # a road under trees isn't up in the air: crowns let the laser through
+                pr = np.array([v[0] for v in por.sample(xy)], dtype="float32")
+                up &= ~((pr != 255) & (pr > 0.5 * h))
+            # runs of "up" samples, allowing a one-sample dropout
+            up = up | (np.r_[up[1:], False] & np.r_[False, up[:-1]])
+            edges = np.flatnonzero(np.diff(np.r_[0, up.astype(int), 0]))
+            for i, j in zip(edges[::2], edges[1::2]):
+                if j - i >= 2:
+                    pieces.append(LineString([(p.x, p.y) for p in pts[i:j]]))
         if por is not None:
             por.close()
-    return out
+    return gpd.GeoSeries(pieces, crs=segs.crs)
 
 
 def _counts(points: gpd.GeoSeries, region: Region) -> np.ndarray:

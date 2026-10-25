@@ -7,6 +7,7 @@ const NICE = {
   gaps: 'Gaps', lone: 'Lone trees', edges: 'Tree lines / edges', space: 'Open space', mix: 'Obstacle mix',
   vertical: 'Tall stuff', relief: 'Slopes / drops', bando: 'Bando nearby', water: 'Water', bridge: 'Bridge / viaduct',
   architecture: 'Architecture', trees: 'Trees', under: 'Under-canopy space', landmark: 'Landmark', plaza: 'Plazas',
+  hero: 'Big landmark to fly round',
   busy: 'Busy (minus)', hazard: 'Masts / cranes (minus)', crowds: 'Crowds (minus)', wet: 'Mostly water (minus)',
   permission: 'Owner permission (minus)',
 };
@@ -117,9 +118,16 @@ function takeoffBox(p) {
   if (!t) return null;
   const d = Math.hypot(t.dx, t.dy);
   const where = d < 30 ? 'right by the pin' : `${metres(d)} ${compass(t.dx, t.dy)} of the pin`;
+  // what it's on, from the map: public open space, a beach, or a farmer's field
+  const named = t.on_name ? ` (${t.on_name})` : '';
+  const on = {
+    public: `It's on public open space${named}. Many parks' byelaws ban flying models, so check first.`,
+    beach: `It's on the beach${named}.`,
+    farm: "It's farmland: ask the farmer before you take off.",
+  }[t.on] || '';
   return el('div', { class: 'box' },
     el('h4', {}, 'Getting there'),
-    el('p', {}, `Suggested take-off ${where} (the green dot).`),
+    el('p', {}, `Suggested take-off ${where} (the green dot).${on ? ` ${on}` : ''}`),
     el('p', { class: 'muted small' }, `Nearest path ${metres(t.path_m)} · nearest car park ${metres(t.parking_m)}.`),
     el('div', { class: 'links' },
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
@@ -269,7 +277,7 @@ function notesBox(p, ratings, onNote) {
 }
 
 // The pipeline's suggested run through the spot, numbered like the markers in the 3D view.
-const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the edge' };
+const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the edge', arch: 'Through the viaduct arch' };
 function lineBox(p) {
   const moves = p.line?.moves;
   if (!moves?.length) return null;
@@ -278,7 +286,8 @@ function lineBox(p) {
     el('h4', {}, 'A line to fly'),
     head ? el('p', { class: 'muted small' }, `${head}. From the take-off, in this order; the 3D view numbers them and “Watch the line” rides it.`) : null,
     el('ol', { class: 'moves' }, moves.map(([kind], i) => el('li', {},
-      el('span', { class: `mv mv-${kind}` }, i + 1), MOVE_TEXT[kind] || kind))));
+      el('span', { class: `mv mv-${kind}` }, i + 1),
+      kind === 'arch' && moves[i - 1]?.[0] === 'arch' ? 'Round the pier and back through the next arch' : MOVE_TEXT[kind] || kind))));
 }
 
 export function nice(k) {

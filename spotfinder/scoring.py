@@ -16,6 +16,11 @@ import numpy as np
 from scipy import ndimage
 
 CELL = 50
+TASTE = 0.4  # share of the final score that is "like your seed spots"; the rest is the rules
+INSTITUTION_MAX = 0.25  # a cell this much school, hospital or prison ground is never a spot or a take-off
+ANCHOR_REACH = 0.85   # a spot's pin moves onto a viaduct, landmark... up to this much of the spacing away
+ANCHOR_MARGIN = 0.06  # ...if it scores at most this much less there
+ANCHOR_PULL = 0.01    # ...and each step up in subject (beach, bando, bridge, icon) counts as this much more score
 
 
 def sat(x, k):
@@ -61,6 +66,16 @@ def win_or(a, r):
     return out
 
 
+def permission(flags, r):
+    """How much of the spot is on land that needs the owner's OK, all of it from half: you can take off
+    beside Penshaw Monument (National Trust) or Tynemouth Priory (English Heritage), not on a golf course."""
+    from . import legal
+
+    bits = (legal.FLAG_NATIONAL_TRUST | legal.FLAG_ENGLISH_HERITAGE | legal.FLAG_FORESTRY | legal.FLAG_WOODLAND_TRUST
+            | legal.FLAG_NATURE_RESERVE | legal.FLAG_CEMETERY | legal.FLAG_GOLF | legal.FLAG_QUARRY)
+    return np.clip(2 * win_mean(((flags.astype("int64") & bits) > 0).astype("float64"), r), 0, 1)
+
+
 @dataclass
 class Profile:
     key: str
@@ -75,6 +90,18 @@ class Profile:
     legal_window_min: float = 0.0  # ...averaged over the whole spot
     weights: dict[str, float] = field(default_factory=dict)
     style_features: list[str] = field(default_factory=list)
+    anchors: dict[str, float] = field(default_factory=dict)  # what a pin snaps onto: distance feature -> metres,
+                                                              # strongest subject first
+
+    def anchor(self, f: dict[str, np.ndarray]) -> np.ndarray | None:
+        """Cells on something worth flying, for pick_spots: 0 for none, else higher for a stronger subject."""
+        if not self.anchors:
+            return None
+        out = np.zeros(next(iter(f.values())).shape, dtype="int8")
+        for i, (k, m) in enumerate(self.anchors.items()):
+            if k in f:
+                out = np.maximum(out, np.where(f[k] <= m, len(self.anchors) - i, 0).astype("int8"))
+        return out
 
 
 PROFILES = {
@@ -82,20 +109,25 @@ PROFILES = {
         key="freestyle5", label="5\" freestyle", short="5\"", drone="5 inch, 800 g (no class mark)",
         category="Open A3", radius_cells=2, spacing_m=400, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
         # "flow" is the best run you can chain through the spot; gaps, trees and edges still count on their own.
+        # Viaducts and bridges are dive and gap spots in their own right, and a derelict building still
+        # standing is the classic freestyle spot; public land is where you can turn up.
         weights={"flow": 0.22, "gaps": 0.12, "lone": 0.08, "edges": 0.10, "space": 0.10, "mix": 0.06, "vertical": 0.08,
-                 "relief": 0.10, "bando": 0.10, "water": 0.04, "bridge": 0.04, "sunset": 0.04,
-                 "busy": -0.15, "hazard": -0.25, "permission": -0.08, "wet": -0.2,
+                 "relief": 0.10, "bando": 0.16, "water": 0.04, "bridge": 0.12, "beach": 0.08, "public": 0.12, "sunset": 0.04,
+                 "busy": -0.15, "hazard": -0.2, "permission": -0.08, "wet": -0.2,
                  "remote": -0.10, "farm": -0.05, "road": -0.12},
-        style_features=["flow", "gaps", "lone", "edges", "space", "mix", "vertical", "relief", "water"],
+        style_features=["flow", "gaps", "lone", "edges", "space", "mix", "vertical", "relief", "water", "public"],
+        anchors={"dist_bridge_fly": 50, "dist_bando": 50, "dist_landmark": 50, "dist_beach": 25},
     ),
     "cine5": Profile(
         key="cine5", label="5\" cinematic", short="5\" cine", drone="5 inch, 800 g (no class mark)",
         category="Open A3", radius_cells=3, spacing_m=600, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
-        # Long smooth lines over big scenery: rivers, coast, viaducts, hills, ruins, a sunset to fly into.
-        weights={"water": 0.18, "relief": 0.16, "bridge": 0.14, "landmark": 0.12, "sunset": 0.14, "space": 0.10,
-                 "edges": 0.08, "bando": 0.08,
-                 "busy": -0.12, "hazard": -0.25, "permission": -0.08, "wet": -0.2, "remote": -0.08, "road": -0.10},
+        # Long smooth lines over big scenery (rivers, coast, hills, a sunset to fly into) round a subject: a
+        # lighthouse, castle, viaduct, bridge or ruin. Busy only costs a little: you film at first light.
+        weights={"water": 0.18, "relief": 0.16, "bridge": 0.14, "landmark": 0.16, "hero": 0.16, "sunset": 0.10,
+                 "space": 0.10, "edges": 0.08, "bando": 0.08, "coast": 0.16,
+                 "busy": -0.06, "hazard": -0.2, "permission": -0.08, "wet": -0.2, "remote": -0.08, "road": -0.10},
         style_features=["water", "relief", "bridge", "landmark", "sunset", "space", "edges", "bando"],
+        anchors={"dist_icon": 50, "dist_bridge": 50, "dist_bando": 50, "dist_beach": 25},
     ),
     "cine85": Profile(
         key="cine85", label="85 mm cinematic", short="85 mm", drone="85 mm whoop, under 250 g", category="Open A1",
@@ -106,6 +138,7 @@ PROFILES = {
                  "public": 0.04,
                  "busy": -0.06, "crowds": -0.08, "permission": -0.08, "wet": -0.2, "remote": -0.04},
         style_features=["architecture", "flow", "gaps", "trees", "under", "water", "bridge", "plaza", "relief"],
+        anchors={"dist_bridge": 25, "dist_landmark": 25},
     ),
 }
 
@@ -121,12 +154,15 @@ COMPONENT_TEXT = {
     "bando": "abandoned / ruined structures nearby",
     "water": "water nearby for reflections",
     "bridge": "a bridge or viaduct nearby",
+    "beach": "a beach: open sand to carry speed along the water",
+    "coast": "the coast: a beach or the sea in shot",
     "architecture": "interesting buildings and edges",
     "trees": "trees to weave through",
     "under": "tall, see-through trees that may have room underneath",
     "landmark": "a landmark in shot",
+    "hero": "a castle, lighthouse or monument to fly round",
     "plaza": "open plazas between buildings",
-    "sunset": "a clear view west for golden hour",
+    "sunset": "a clear view of the sunset or sunrise for golden hour",
     "public": "public open space to fly from",
     "busy": "busy with people",
     "hazard": "power lines, masts or cranes close by",
@@ -156,20 +192,22 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
             f[k] = np.where(L >= 0.5, f[k], 0.0)
 
     c: dict[str, np.ndarray] = {}
-    perm_bits = (legal.FLAG_NATIONAL_TRUST | legal.FLAG_FORESTRY | legal.FLAG_WOODLAND_TRUST
-                 | legal.FLAG_NATURE_RESERVE | legal.FLAG_CEMETERY | legal.FLAG_GOLF | legal.FLAG_QUARRY)
-    c["permission"] = ((win_or(flags, r) & perm_bits) > 0).astype("float64")
-    # Mapped ruins with something still standing; a mapped site with nothing left only counts a little.
-    bando = lambda full, zero: np.maximum(near(win_min(f["dist_bando"], r), full, zero),
-                                          0.3 * near(win_min(f["dist_bando_site"], r), full, zero))
-    # Golden hour: either you look down on the sunset, or there's a tree line / wall facing it with open
-    # ground in front to film from.
-    c["sunset"] = np.maximum(ramp(-win_min(f["sunset_horizon"], r), 0.0, 3.0),
-                             0.6 * sat(win_sum(f["edge_w_m"], r), 600 * (2 * r + 1)))
+    c["permission"] = permission(flags, r)
+    # Power lines and main roads: full marks off if the middle of the spot is on one, otherwise up to half,
+    # by how much of the spot is near one. One crossing a corner doesn't sink a viaduct.
+    share = lambda d, full, zero: np.maximum(near(d, full, zero), 0.5 * win_mean(near(d, full, zero), r))
+    # The things a spot is about (a bridge, a bando, a beach, a landmark) are measured from its middle,
+    # so the best cell, and the pin, is on the viaduct rather than in the field next to it.
+    wet = ramp(np.clip(f["water_frac"] - f.get("beach_frac", 0), 0, 1), 0.3, 0.8)  # the beach isn't the sea
+    # Golden hour: either you look down on the sunset (or the sunrise: the coast here faces east), or
+    # there's a tree line / wall facing the sunset with open ground in front to film from.
+    c["sunset"] = np.maximum.reduce([ramp(-win_min(f["sunset_horizon"], r), 0.0, 3.0),
+                                     ramp(-win_min(f["sunrise_horizon"], r), 0.0, 3.0),
+                                     0.6 * sat(win_sum(f["edge_w_m"], r), 600 * (2 * r + 1))])
     c["remote"] = ramp(win_min(f["dist_access"], r), 250, 600)
-    c["hazard"] = near(win_min(f["dist_hazard"], r), 30, 100)
+    c["hazard"] = share(f["dist_hazard"], 15, 50)
     if p.key == "freestyle5":
-        c["flow"] = ramp(win_max(f["line5"], r), 2, 10)
+        c["flow"] = ramp(win_max(f["line5"], r), 5, 13)  # (runs got longer when links could bend, and skim wood edges)
         c["gaps"] = sat(win_sum(f["gq5"], r), 20)
         c["lone"] = sat(win_sum(f["lone"] * ramp(f["lone_h_max"], 5, 12), r), 12)
         c["edges"] = 0.6 * sat(win_sum(f["treeline_m"], r), 250) + 0.4 * sat(win_sum(f["edge_tree_m"] + f["edge_bld_m"], r), 700)
@@ -177,26 +215,40 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         tall_m = win_mean(f["tall_frac"], r)
         c["space"] = 0.5 * ramp(open_m, 0.3, 0.7) + 0.5 * ramp(win_max(f["open_r_m"], r), 50, 200)
         c["mix"] = np.clip(1 - np.abs(tall_m - 0.25) / 0.25, 0, 1)
-        c["vertical"] = ramp(win_max(f["h_p90"], r), 10, 25)
-        c["relief"] = np.maximum(ramp(win_max(f["relief_250"], r), 8, 45), 0.6 * win_max(f["steep_frac"], r) ** 0.5)
-        c["bando"] = bando(60, 300)
+        # Height only counts with open air beside it to dive into: tree faces at a wood's edge, a grassy
+        # hill. Inside a wood, or down a valley side that's trees all the way, it's canopy to hop over.
+        c["vertical"] = ramp(win_max(f["h_p90"] * ramp(f["open_frac"], 0.15, 0.4), r), 10, 25)
+        dive_air = ramp(f["open_frac"], 0.2, 0.5)
+        c["relief"] = np.maximum(ramp(win_max(f["relief_250"] * dive_air, r), 8, 45),
+                                 0.6 * win_max(f["steep_frac"] * dive_air, r) ** 0.5)
+        c["bando"] = near(f["dist_bando"], 30, 350)  # a derelict building LiDAR says is still standing
         c["water"] = near(win_min(f["dist_water"], r), 50, 250)
-        c["bridge"] = near(win_min(f["dist_bridge"], r), 40, 200)
+        c["bridge"] = near(f.get("dist_bridge_fly", f["dist_bridge"]), 20, 250)  # not one still carrying trains
+        c["beach"] = near(f["dist_beach"], 0, 200)
+        c["public"] = ramp(win_mean(np.maximum(f["public_frac"], f["beach_frac"]), r), 0.1, 0.5)
         c["busy"] = sat(win_sum(f["places_n"], r + 1), 3) * 0.6 + sat(win_sum(f["path_frac"], r), 1.5) * 0.4
-        c["wet"] = ramp(f["water_frac"], 0.3, 0.8)
+        c["wet"] = wet
         c["farm"] = ramp(win_mean(f["farm_frac"], r), 0.3, 0.9)
-        c["road"] = near(win_min(f["dist_road_busy"], r), 30, 120)
+        c["road"] = share(f["dist_road_busy"], 30, 120)
     elif p.key == "cine5":
-        c["water"] = near(win_min(f["dist_water"], r), 30, 300)
+        # a river or the sea in shot, and how much of it: a big river or the sea fills the frame, a burn doesn't
+        c["water"] = (0.6 * near(win_min(f["dist_water"], r), 30, 300)
+                      + 0.4 * ramp(win_mean(np.clip(f["water_frac"] - f["beach_frac"], 0, 1), r), 0.03, 0.2))
         c["relief"] = np.maximum(ramp(win_max(f["relief_250"], r), 10, 60), 0.7 * win_max(f["steep_frac"], r) ** 0.5)
-        c["bridge"] = near(win_min(f["dist_bridge"], r), 60, 300)
-        c["landmark"] = near(win_min(f["dist_landmark"], r), 80, 400)
+        c["bridge"] = near(f["dist_bridge"], 60, 450)
+        # a named lighthouse, castle, monument, pier... counts in full; a viewpoint or water tower only partly
+        c["landmark"] = np.maximum(near(f["dist_icon"], 60, 600), 0.6 * near(f["dist_landmark"], 80, 550))
+        # ...and one that stands up is a shot on its own: the Angel of the North needs no beach to be worth it
+        c["hero"] = near(f["dist_hero"] if "dist_hero" in f else f["dist_icon"], 40, 250)
         c["space"] = ramp(win_max(f["open_r_m"], r), 75, 300)
         c["edges"] = sat(win_sum(f["treeline_m"], r), 400)
-        c["bando"] = bando(60, 300)
+        c["bando"] = near(f["dist_bando"], 40, 400)
+        # a beach by the sea (a river's shingle isn't the coast), or the sea itself
+        c["coast"] = np.maximum(near(f["dist_beach"], 0, 300) * near(f["dist_sea"], 300, 1000), near(f["dist_sea"], 50, 500))
         c["busy"] = sat(win_sum(f["places_n"], r + 1), 4) * 0.6 + sat(win_sum(f["path_frac"], r), 2.5) * 0.4
-        c["wet"] = ramp(f["water_frac"], 0.3, 0.8)
-        c["road"] = near(win_min(f["dist_road_busy"], r), 30, 120)
+        c["wet"] = wet
+        # filming from the air, a main road beside the subject only matters as far as it fills the spot
+        c["road"] = win_mean(near(f["dist_road_busy"], 30, 120), r)
     else:
         c["architecture"] = (0.5 * sat(win_sum(f["edge_bld_m"], r), 300)
                              + 0.25 * ramp(win_max(f["bld_h_std"], r), 2, 10)
@@ -215,7 +267,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         bld_m = win_mean(f["bld_frac"], r)
         c["plaza"] = ramp(win_mean(f["open_frac"], r), 0.2, 0.5) * ramp(bld_m, 0.05, 0.25)
         c["relief"] = ramp(win_max(f["relief_250"], r), 8, 40)
-        c["bando"] = bando(40, 200)
+        c["bando"] = near(win_min(f["dist_bando"], r), 40, 200)
         c["public"] = ramp(win_mean(f["public_frac"], r), 0.1, 0.5)
         c["busy"] = sat(win_sum(f["places_n"], r + 1), 6) * 0.7 + sat(win_sum(f["road_frac"], r), 2) * 0.3
         c["crowds"] = ((win_or(flags, r) & legal.FLAG_CROWDS) > 0).astype("float64")
@@ -268,8 +320,14 @@ def pct_rank(a: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return out
 
 
-def pick_spots(score: np.ndarray, eligible: np.ndarray, spacing_m: float, n: int) -> list[tuple[int, int]]:
-    """Greedy non-max suppression on the score grid."""
+def pick_spots(score: np.ndarray, eligible: np.ndarray, spacing_m: float, n: int,
+               anchor: np.ndarray | None = None, anchor_margin: float = ANCHOR_MARGIN) -> list[tuple[int, int]]:
+    """Greedy non-max suppression on the score grid, best first.
+
+    `anchor` marks cells on something worth flying (a viaduct, landmark, bando, beach), higher for a
+    stronger subject. When one is within reach of a spot and scores nearly as well, the pin goes there,
+    with a stronger subject pulling a little harder: the best cell of a spot is often the field next to
+    the viaduct, or the beach below the lighthouse, but the viaduct or the lighthouse is the spot."""
     cand = np.argwhere(eligible)
     order = np.argsort(-score[eligible])
     picked: list[tuple[int, int]] = []
@@ -278,24 +336,45 @@ def pick_spots(score: np.ndarray, eligible: np.ndarray, spacing_m: float, n: int
     rad = int(np.ceil(min_d))
     yy, xx = np.mgrid[-rad:rad + 1, -rad:rad + 1]
     disk = (yy ** 2 + xx ** 2) <= min_d ** 2
+    reach = (yy ** 2 + xx ** 2) <= (ANCHOR_REACH * min_d) ** 2
+    on = np.where(eligible, anchor, 0) if anchor is not None else None
     H, W = score.shape
+
+    def window(r, c):
+        r0, r1 = max(r - rad, 0), min(r + rad + 1, H)
+        c0, c1 = max(c - rad, 0), min(c + rad + 1, W)
+        return (slice(r0, r1), slice(c0, c1)), (slice(r0 - r + rad, r1 - r + rad), slice(c0 - c + rad, c1 - c + rad))
+
     for i in order:
         r, c = cand[i]
         if taken[r, c]:
             continue
-        picked.append((int(r), int(c)))
-        r0, r1 = max(r - rad, 0), min(r + rad + 1, H)
-        c0, c1 = max(c - rad, 0), min(c + rad + 1, W)
-        taken[r0:r1, c0:c1] |= disk[r0 - r + rad: r1 - r + rad, c0 - c + rad: c1 - c + rad]
+        win, k = window(r, c)
+        pin = (int(r), int(c))
+        if on is not None:
+            ok = (on[win] > 0) & reach[k] & ~taken[win] & (score[win] >= score[r, c] - anchor_margin)
+            if ok.any():
+                j = np.argmax(np.where(ok, score[win] + ANCHOR_PULL * on[win], -np.inf))
+                pin = (win[0].start + j // ok.shape[1], win[1].start + j % ok.shape[1])
+        picked.append(pin)
+        taken[win] |= disk[k]
+        if pin != (r, c):
+            win, k = window(*pin)
+            taken[win] |= disk[k]
         if len(picked) >= n:
             break
-    return picked
+    return sorted(picked, key=lambda rc: -score[rc])
 
 
 def style_vector(c: dict[str, np.ndarray], p: Profile, cells) -> np.ndarray:
     """A seed's mean raw style features over its cells, to carry it into another region."""
     feats = np.stack([c[k] for k in p.style_features], axis=-1)
     return np.mean([feats[r, cc] for r, cc in cells], axis=0)
+
+
+def blend(rule_n: np.ndarray, sim: np.ndarray | None) -> np.ndarray:
+    """The final score: rules, plus taste when there are seed spots or ratings to compare with."""
+    return rule_n if sim is None else (1 - TASTE) * rule_n + TASTE * sim
 
 
 def soft_cap(x: np.ndarray, knee: float = 0.9) -> np.ndarray:
