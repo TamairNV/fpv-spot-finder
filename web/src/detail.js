@@ -7,6 +7,7 @@ const NICE = {
   gaps: 'Gaps', lone: 'Lone trees', edges: 'Tree lines / edges', space: 'Open space', mix: 'Obstacle mix',
   vertical: 'Tall stuff', relief: 'Slopes / drops', bando: 'Bando nearby', water: 'Water', bridge: 'Bridge / viaduct',
   architecture: 'Architecture', trees: 'Trees', under: 'Under-canopy space', landmark: 'Landmark', plaza: 'Plazas',
+  hero: 'Big landmark to fly round',
   busy: 'Busy (minus)', hazard: 'Masts / cranes (minus)', crowds: 'Crowds (minus)', wet: 'Mostly water (minus)',
   permission: 'Owner permission (minus)',
 };

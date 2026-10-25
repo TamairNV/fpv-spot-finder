@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import geopandas as gpd
 import numpy as np
@@ -38,11 +39,27 @@ LANDMARK_HISTORIC = {"castle", "monument", "fort", "ruins", "city_gate", "tower"
 ICON_MAN_MADE = {"lighthouse", "windmill", "obelisk"}
 ICON_PIER = {"pier", "breakwater", "groyne"}
 ICON_MAX_M2 = 10e4  # a sculpture or a priory, not a whole estate or park tagged as an attraction
+# Heroes: icons that stand up, for a 5" cine shot to fly round on their own (the Angel of the North, Penshaw
+# Monument, a castle on a mound): a lighthouse, windmill, castle or priory, or any other icon LiDAR sees
+# HERO_UP_M+ tall on its footprint, or a whole site (Northumberlandia is a hill). Not bridges, which count
+# as bridges, and not a war memorial or fountain mapped as a point, unless its name says column or tower.
+HERO_KIND_MAN_MADE = {"lighthouse", "windmill"}
+HERO_KIND_HISTORIC = {"castle", "abbey", "monastery"}
+HERO_UP_M = 8.0
+HERO_SITE_M2 = 2e4
+HERO_NAME = re.compile(r"\b(column|obelisk|tower|castle|priory|abbey|lighthouse|windmill)\b", re.I)
 # Land you can usually walk onto and fly from, if the rules allow: parks, commons, open access grass.
 PUBLIC_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "dog_park", "village_green"}
 PUBLIC_LANDUSE = {"recreation_ground", "village_green"}
 FARM_LANDUSE = {"farmland", "farmyard", "orchard", "greenhouse_horticulture", "plant_nursery", "allotments"}
 HAZARD_MAN_MADE = {"mast", "communications_tower", "crane"}
+
+
+def stands_up(t: dict, up_m: float = 0.0, area_m2: float = 0.0) -> bool:
+    """Whether an icon is a hero (see HERO_*); one mapped as a point can only say so by its kind or name."""
+    return (t.get("man_made") in HERO_KIND_MAN_MADE or t.get("historic") in HERO_KIND_HISTORIC
+            or up_m >= HERO_UP_M or area_m2 >= HERO_SITE_M2
+            or (area_m2 == 0 and bool(HERO_NAME.search(t.get("name") or ""))))
 
 
 def _cell_min(a: np.ndarray) -> np.ndarray:
@@ -173,6 +190,14 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
         famous_bridges[famous_bridges["tags"].map(lambda t: bool(osm.bridge_name(t)))].geometry,
         lines[lines["tags"].map(lambda t: t.get("man_made") in ICON_PIER and named(t))].geometry,
     ])
+    hero_areas = icon_areas[icon_areas["tags"].map(lambda t: icon(t) and "bridge" not in t and t.get("man_made") != "bridge")
+                            & (icon_areas.geometry.area <= ICON_MAX_M2)]
+    up = np.nan_to_num(bandos.standing_height(region, hero_areas.geometry, q=100))
+    heroes = pd.concat([
+        hero_areas[[stands_up(t, h, a) for t, h, a in zip(hero_areas["tags"], up, hero_areas.geometry.area)]].geometry,
+        nodes[nodes["tags"].map(lambda t: icon(t) and stands_up(t))].geometry,
+    ])
+    log.info("icons: %d, %d of them heroes", len(icons), len(heroes))
     hazards = pd.concat([
         lines[lines["tags"].map(lambda t: t.get("power") in {"line", "minor_line"})].geometry,
         nodes[nodes["tags"].map(lambda t: t.get("man_made") in HAZARD_MAN_MADE
@@ -222,6 +247,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
         "dist_quarry": dist_to(quarry.geometry),
         "dist_landmark": dist_to(landmarks),
         "dist_icon": dist_to(icons),
+        "dist_hero": dist_to(heroes),
         "dist_hazard": dist_to(hazards),
         "dist_parking": dist_to(parking),
         "dist_path": dist_to(paths.geometry),

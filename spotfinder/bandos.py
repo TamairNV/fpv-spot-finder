@@ -144,9 +144,10 @@ def _footprints(region: Region, points: gpd.GeoDataFrame) -> gpd.GeoSeries:
     return out
 
 
-def standing_height(region: Region, geoms: gpd.GeoSeries) -> np.ndarray:
+def standing_height(region: Region, geoms: gpd.GeoSeries, q: float = 95) -> np.ndarray:
     """How tall the solid stuff on each footprint still is (LiDAR, not see-through tree crowns): the 95th
-    percentile, so walls of a roofless shell count but one stray pixel doesn't. NaN with no LiDAR."""
+    percentile, so walls of a roofless shell count but one stray pixel doesn't (q=100 for the top of a
+    column on a wide plinth). NaN with no LiDAR."""
     from .heights import lidar_paths
 
     out = np.full(len(geoms), np.nan, dtype="float32")
@@ -169,7 +170,7 @@ def standing_height(region: Region, geoms: gpd.GeoSeries) -> np.ndarray:
             if por is not None:
                 p = por.read(1, window=win, boundless=True, fill_value=255)
                 hm = np.where((p != 255) & (p / 4.0 > 0.5 * hm) & (hm > 3), 0, hm)  # see-through: a tree
-            out[i] = float(np.percentile(hm[valid], 95))
+            out[i] = float(np.percentile(hm[valid], q))
         if por is not None:
             por.close()
     return out

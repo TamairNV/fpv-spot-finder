@@ -112,8 +112,8 @@ PROFILES = {
         category="Open A3", radius_cells=3, spacing_m=600, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
         # Long smooth lines over big scenery (rivers, coast, hills, a sunset to fly into) round a subject: a
         # lighthouse, castle, viaduct, bridge or ruin. Busy only costs a little: you film at first light.
-        weights={"water": 0.18, "relief": 0.16, "bridge": 0.14, "landmark": 0.16, "sunset": 0.10, "space": 0.10,
-                 "edges": 0.08, "bando": 0.08, "coast": 0.16,
+        weights={"water": 0.18, "relief": 0.16, "bridge": 0.14, "landmark": 0.16, "hero": 0.16, "sunset": 0.10,
+                 "space": 0.10, "edges": 0.08, "bando": 0.08, "coast": 0.16,
                  "busy": -0.06, "hazard": -0.2, "permission": -0.08, "wet": -0.2, "remote": -0.08, "road": -0.10},
         style_features=["water", "relief", "bridge", "landmark", "sunset", "space", "edges", "bando"],
         anchors={"dist_icon": 50, "dist_bridge": 50, "dist_bando": 50, "dist_beach": 25},
@@ -149,6 +149,7 @@ COMPONENT_TEXT = {
     "trees": "trees to weave through",
     "under": "tall, see-through trees that may have room underneath",
     "landmark": "a landmark in shot",
+    "hero": "a castle, lighthouse or monument to fly round",
     "plaza": "open plazas between buildings",
     "sunset": "a clear view of the sunset or sunrise for golden hour",
     "public": "public open space to fly from",
@@ -228,6 +229,8 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         c["bridge"] = near(f["dist_bridge"], 60, 450)
         # a named lighthouse, castle, monument, pier... counts in full; a viewpoint or water tower only partly
         c["landmark"] = np.maximum(near(f["dist_icon"], 60, 600), 0.6 * near(f["dist_landmark"], 80, 550))
+        # ...and one that stands up is a shot on its own: the Angel of the North needs no beach to be worth it
+        c["hero"] = near(f["dist_hero"] if "dist_hero" in f else f["dist_icon"], 40, 250)
         c["space"] = ramp(win_max(f["open_r_m"], r), 75, 300)
         c["edges"] = sat(win_sum(f["treeline_m"], r), 400)
         c["bando"] = near(f["dist_bando"], 40, 400)

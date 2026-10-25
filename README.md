@@ -213,7 +213,10 @@ seeds; places like your thumbs-down spots get pulled down.
    monument, pier, viaduct or famous bridge) are icons, and count in full for 5" cine where a viewpoint, water tower
    or chimney only counts in part. A ruin or
    monument needs a Wikidata entry or a listing to be an icon: OSM has every war memorial and
-   drinking fountain as a monument. A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
+   drinking fountain as a monument. Icons that stand up are heroes, a shot on their own for 5" cine
+   (the Angel of the North, Penshaw Monument, Prudhoe Castle): a lighthouse, windmill, castle or priory,
+   any other icon LiDAR sees 8 m+ tall on its footprint, or a whole site of 2 ha+ (Northumberlandia).
+   A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
    golf course (so no bunkers or long-jump pits); for 5" cine only a beach by the sea is "the coast".
    Power lines (within 50 m) and fast roads cost a spot in full only when its middle is on one, and
    otherwise up to half, by how much of it is near one; for 5" cine a road only costs by how much of
@@ -237,7 +240,8 @@ seeds; places like your thumbs-down spots get pulled down.
    way down is canopy to hop over, not a dive. Bridges,
    bandos, beaches and landmarks are measured from the middle of the spot, so the best cell is on
    them, not 300 m away in the next field. 5" cine is led by its subject (landmarks, the coast,
-   bridges) more than by water, hills and sunsets, which every river valley has, and being busy only
+   bridges) more than by water, hills and sunsets, which every river valley has, a hero most of all
+   (a nameless bend of the Browney no longer outranks the Angel), and being busy only
    costs it a little: you film at first light. Spots are
    suggestions to go and look at, so legality is a label rather than a filter: anywhere outside
    flight restriction zones and away from MOD land can be picked, and each spot says how much of it

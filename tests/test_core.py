@@ -273,6 +273,34 @@ def test_spot_names_say_where_not_what():
     assert display_name({"name": "former Calders site", "landuse": "brownfield"}) == "Former Calders site"
 
 
+def test_heroes_stand_up():
+    from spotfinder.context import stands_up
+
+    angel = {"name": "Angel of the North", "tourism": "artwork", "wikidata": "Q1325290"}
+    assert stands_up(angel, up_m=19.8, area_m2=66)
+    assert not stands_up(angel, up_m=0.0, area_m2=66)  # without LiDAR it's only a sculpture
+    assert stands_up({"name": "Prudhoe Castle", "historic": "castle"}, area_m2=1004)
+    assert stands_up({"name": "Northumberlandia", "historic": "geoglyph"}, up_m=0.0, area_m2=54184)  # a hill
+    assert not stands_up({"name": "Disappearing Gun Turret", "historic": "monument"}, up_m=3.2, area_m2=136)
+    assert stands_up({"name": "Column to Liberty", "historic": "monument"})  # a point: its name says so
+    assert not stands_up({"name": "Charlton Memorial Fountain", "historic": "monument"})
+
+def test_a_wartime_pillbox_is_not_mod_land():
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from spotfinder import legal
+
+    areas = gpd.GeoDataFrame({"tags": [
+        {"building": "yes", "military": "bunker"},  # on St Mary's Island
+        {"military": "bunker", "name": "Dawdon Blast Beach machine gun emplacement"},
+        {"landuse": "military", "name": "Army Reserve Centre"},
+        {"building": "yes", "military": "barracks"},
+        {"landuse": "military", "military": "bunker"},  # a bunker on a base is still the base
+    ]}, geometry=[box(0, 0, 10, 10)] * 5, crs="EPSG:27700")
+    assert list(legal.classify_areas(areas)["military"]) == [False, False, True, True, True]
+
+
 def test_ruins_in_a_monuments_grounds_are_not_bandos():
     import geopandas as gpd
     from shapely.geometry import box
