@@ -565,6 +565,25 @@ def test_line_links_need_clear_air():
     assert nb[1] == [0] and nb[2] == []
 
 
+def test_lines_keep_off_school_grounds_right_up_to_the_hedge():
+    from spotfinder import lines
+
+    # The first few metres off a hedge are skipped for heights (that's the hedge), not for keep-off ground.
+    blocked = np.zeros((60, 60), bool)
+    blocked[37:39, 27:29] = True  # the corner of a school field, a few metres off the hedge
+    nodes = np.array([[40, 30, lines.SKIM, 1.0, lines.END_SKIP], [30, 10, lines.SKIM, 1.0, 1.5],
+                      [50, 10, lines.SKIM, 1.0, 1.5]])
+    nb = lines.links(nodes, np.zeros((60, 60), "float32"), lines.WHOOP, blocked)
+    assert nb[0] == [2]  # off the hedge the other way, not over the corner of the field
+    # and the take-off leg in to the first move
+    blocked = np.zeros((200, 200), bool)
+    blocked[96:98, 90:111] = True  # the end of a school field just short of the hedge, on the path side
+    tk = lines.takeoff(np.array([100.0, 100.0]), lines.END_SKIP, np.zeros((200, 200), "float32"),
+                       np.ones((200, 200), bool), lines.FREESTYLE, blocked, hint=(40.0, 100.0))
+    leg = np.rint(np.array(tk) + np.linspace(0, 1, 500)[:, None] * (np.array([100.0, 100.0]) - tk)).astype(int)
+    assert not blocked[leg[:, 0], leg[:, 1]].any()
+
+
 def test_a_link_bends_round_a_clump_of_trees():
     from spotfinder import lines
 

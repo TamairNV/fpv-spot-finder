@@ -188,6 +188,19 @@ def _clear(ohm: np.ndarray, a: np.ndarray, b: np.ndarray, ra: np.ndarray, rb: np
     return ~((ohm[ri, ci] >= CLEAR_H) & inside).any(axis=1)
 
 
+def _off(blocked: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """For each segment a -> b, does it keep off `blocked` ground all the way, sampled every half metre? Unlike
+    the heights nothing is skipped at the ends: a link may leave the tree line it skims, but not over the
+    school field beside it."""
+    if not len(a):
+        return np.ones(0, bool)
+    t = np.linspace(0.0, 1.0, int(2 * np.hypot(*(b - a).T).max()) + 2)
+    h, w = blocked.shape
+    ri = np.clip(np.rint(a[:, :1] + t * (b[:, :1] - a[:, :1])).astype(int), 0, h - 1)
+    ci = np.clip(np.rint(a[:, 1:2] + t * (b[:, 1:2] - a[:, 1:2])).astype(int), 0, w - 1)
+    return ~blocked[ri, ci].any(axis=1)
+
+
 def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray | None = None,
           deck: np.ndarray | None = None, via: dict | None = None) -> list[list[int]]:
     """Neighbour lists: pairs within range with clear air between them, and not over `blocked` ground.
@@ -215,12 +228,16 @@ def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray 
     if not len(pairs):
         return nb
     # Sample every metre along each link, skipping the ends, and check nothing tall is in the way across
-    # the whole corridor: LiDAR speckle inside a wood leaves 1 m holes that aren't a way through.
+    # the whole corridor: LiDAR speckle inside a wood leaves 1 m holes that aren't a way through. Keep-off
+    # ground is checked on the line itself from end to end too.
     if blocked is not None:
         ohm = np.where(blocked, np.float32(99), ohm)
     ohm = ndimage.maximum_filter(ohm, size=style.corridor)
     ra, rb = nodes[pairs[:, 0], 4], nodes[pairs[:, 1], 4]
     ok = _clear(ohm, a, b, ra, rb, style.max_link)
+    if blocked is not None:
+        k = np.flatnonzero(ok)
+        ok[k] = _off(blocked, a[k], b[k])
     if via is not None:
         # The rest may bend once, off the midpoint, where both legs are clear: round a clump of trees
         # rather than through it.
@@ -237,6 +254,9 @@ def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray 
             if not len(k):
                 continue
             bent = _clear(ohm, a[k], w[k], ra[k], zero[k], style.max_link) & _clear(ohm, w[k], b[k], zero[k], rb[k], style.max_link)
+            if blocked is not None:
+                j = np.flatnonzero(bent)
+                bent[j] = _off(blocked, a[k[j]], w[k[j]]) & _off(blocked, w[k[j]], b[k[j]])
             for i, j, wp in zip(pairs[k[bent], 0], pairs[k[bent], 1], w[k[bent]]):
                 via[(int(min(i, j)), int(max(i, j)))] = (float(wp[0]), float(wp[1]))
             ok[k[bent]] = True
@@ -343,6 +363,7 @@ def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndar
         t = np.arange(0.0, max(d[i] - first_r, 0.0) + 1.0) / d[i]
         pr = np.clip(np.rint(rr[i] + t * (first[0] - rr[i])).astype(int), 0, h - 1)
         pc = np.clip(np.rint(cc[i] + t * (first[1] - cc[i])).astype(int), 0, w - 1)
-        if not (clear[pr, pc] >= CLEAR_H).any():
+        if not (clear[pr, pc] >= CLEAR_H).any() and (
+                blocked is None or _off(blocked, np.array([[rr[i], cc[i]]], dtype=float), first[None, :2])[0]):
             return int(rr[i]), int(cc[i])
     return None

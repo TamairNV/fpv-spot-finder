@@ -214,9 +214,12 @@ change.
    and often overhead wires), power lines (15 m either side of a pylon line: the wires hang well out
    from the pylons; 5 m of a wooden-pole one, whose wires are low) and roads (6 m for the 5", 3 m for
    the whoop), and the 5" keeps 12 m from any building; gaps and lone trees in any of those places don't
-   count at all. A footpath or disused railway viaduct (tagged as one, or a bridge called one) whose
-   deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and a move of its own. One
-   still carrying trains (Plessey, Ouseburn, Willington Dene) has none: you'd be under a train line.
+   count at all. That holds right up to each obstacle: the metres next to a tree line or a tree that a
+   link skips for heights (they're the trees themselves) still can't cross a garden or a school field
+   beside it, and nor can the take-off leg. A footpath or disused railway viaduct (tagged as one, or a
+   bridge called one) whose deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and
+   a move of its own. One still carrying trains (Plessey, Ouseburn, Willington Dene) has none: you'd be
+   under a train line.
    Neighbouring arches link under the deck, so a run can weave through up to four of them (out through
    one, round the pier, back through the next), where there's 4 m of open air beside the deck on both
    sides to turn in. `land_1m.tif` holds those homes, car parks, school and hospital grounds,
