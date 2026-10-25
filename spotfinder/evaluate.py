@@ -21,7 +21,8 @@ from .config import CONFIG_DIR, Region, lonlat_to_bng
 log = logging.getLogger(__name__)
 
 TOP = 50          # "found": a listed spot this high or better lands on it
-CLOSE_M = 100     # ...within the known spot's radius plus this
+CLOSE_M = 100     # ...within the known spot's radius plus this, plus the profile's own window (a pin that
+                  # frames the subject from the next field still counts)
 
 
 @dataclass(frozen=True)
@@ -121,14 +122,15 @@ def grade(region: Region, known: list[KnownSpot] | None = None) -> list[dict]:
             final, heat = res["final"], res["heat"]
             r, c = max(inside, key=lambda rc: final[rc])
             listed = [s for s in res["spots"] if s not in res["park_spots"]]
+            reach = spot.radius_m + CLOSE_M + p.radius_cells * scoring.CELL
             near = []
             for i, (sr, sc) in enumerate(listed):
                 sx, sy = export.cell_center(region, sr, sc)
                 d = math.hypot(sx - x, sy - y)
-                if d <= spot.radius_m + CLOSE_M:
+                if d <= reach:
                     near.append((i + 1, d))
             rank = min(near)[0] if near else None
-            park = any(math.hypot(*(np.subtract(export.cell_center(region, *s), (x, y)))) <= spot.radius_m + CLOSE_M
+            park = any(math.hypot(*(np.subtract(export.cell_center(region, *s), (x, y)))) <= reach
                        for s in res["park_spots"])
             pos = sum(w for w in p.weights.values() if w > 0)
             contrib = {k: float(p.weights[k] * res["comps"][k][r, c] / pos) for k in p.weights}
