@@ -87,9 +87,9 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-25T11:00:39+00:00",
+  "generated_at": "2026-10-25T14:35:09+00:00",
   "sources": {
-    "computed_at": "2026-10-25T10:57:36+00:00",
+    "computed_at": "2026-10-25T14:32:15+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
     "lidar_coverage": 0.9205005168914795,
     "terrain": "AWS terrain tiles (EA 2 m LiDAR DTM in England)",
@@ -415,7 +415,7 @@
         "crowds": 1.0,
         "wet": 0.0
       },
-      "score": 58,
+      "score": 57,
       "preview": {
         "file": "previews/412-381.png",
         "size": 160,
