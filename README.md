@@ -189,33 +189,34 @@ change.
    (40 m+ long, under 15 m wide). With LiDAR, the difference between first and last returns finds
    room under the canopy.
    **Lines**: every fly-through gap, lone tree (orbit), tree 18 m+ (dive) and stretch of tree line
-   (skim, one every 25 m) is a node. So is the edge of a wood along a field, for the 5": skim nodes
-   every 25 m in the open, 3.5-6 m off a wall of trees 8 m+ tall, where there's a field beside it (open
-   air 12 m from any tree close by) rather than a ride through the wood. Two nodes link when they're
-   10-70 m apart (5-35 m for the whoop) and a 3 m wide corridor between them is clear below 3 m on the
-   1 m height grid, flying straight or, where a clump of trees is in the way, with one bend round it
-   (off the midpoint by a quarter or 40% of the link's length, and worth a little less than flying
-   straight). Only 1 in 12 pairs in range could fly straight, so most lines were two or three moves.
-   Trees hanging over a river block a link too (heights over water are otherwise zeroed). Before any of
-   this, winter LiDAR crowns are "leafed on": 1-2 m holes inside a crown are filled to the crown
-   height, and an orbit needs a full 10 m circle of clear air round its crown. From each node a greedy
-   walk picks the next obstacle by its value, a change of move and a smooth heading (no turns over
-   115°), up to 12 moves, and scores the run with a bonus for variety. Each spot's "flow" is the best
-   run that starts in it, and the spot card gets that run as a suggested line, with a take-off on open
-   ground 8 m+ clear of the first obstacle and a straight leg to it that keeps off the same homes, car
-   parks, playgrounds, railways and roads and doesn't go through a wall, building or viaduct deck
-   (trees it hops over). If the best run has no such way in, it's flown backwards, or the next best one
-   is; no line at all if none of the best ten has one.
+   (skim, one every 25 m) is a node. So is a wall skimmed from the open beside it: for the 5" the edge
+   of a wood along a field, skim nodes every 25 m in the open, 3.5-6 m off a wall of trees 8 m+ tall,
+   where there's a field beside it (open air 12 m from any tree close by) rather than a ride through the
+   wood; for the whoop a building's side too, closer in, 2.5-4.5 m off a wall 6 m+ tall with open air
+   8 m out (a square, not an alley). Two nodes link when they're 10-70 m apart (5-35 m for the whoop)
+   and a 3 m wide corridor between them is clear below 3 m on the 1 m height grid, flying straight or,
+   where a clump of trees is in the way, with one bend round it (off the midpoint by a quarter or 40% of
+   the link's length, and worth a little less than flying straight). Only 1 in 12 pairs in range could
+   fly straight, so most lines were two or three moves. Trees hanging over a river block a link too
+   (heights over water are otherwise zeroed). Before any of this, winter LiDAR crowns are "leafed on":
+   1-2 m holes inside a crown are filled to the crown height, and an orbit needs a full 10 m circle of
+   clear air round its crown. From each node a greedy walk picks the next obstacle by its value, a
+   change of move and a smooth heading (no turns over 115°), up to 12 moves, and scores the run with a
+   bonus for variety. Each spot's "flow" is the best run that starts in it, and the spot card gets that
+   run as a suggested line, with a take-off on open ground 8 m+ clear of the first obstacle and a
+   straight leg to it that keeps off the same homes, car parks, playgrounds, railways and roads and
+   doesn't go through a wall, building or viaduct deck (trees it hops over). If the best run has no such
+   way in, it's flown backwards, or the next best one is; no line at all if none of the best ten has
+   one.
    Lines keep off people's homes and gardens (residential land that isn't a park or a big green), car
-   parks, school, college, university, hospital and prison grounds (playing fields included),
-   children's playgrounds (10 m round), working railways and the Metro in the open air (8 m either
-   side: trains, and often overhead wires), power lines (15 m either side of a pylon line: the wires hang
-   well out from the pylons; 5 m of a wooden-pole one, whose wires are low) and roads (6 m for the 5",
-   3 m for the whoop), and the 5" keeps 12 m from any building;
-   gaps and lone trees in any of those places don't count at all. A footpath or disused railway viaduct
-   (tagged as one, or a bridge called one) whose deck is 8 m+ above the ground has an arch every 15 m:
-   a fly-through gap and a move of its own. One still carrying trains (Plessey, Ouseburn, Willington
-   Dene) has none: you'd be under a train line.
+   parks, school, college, university, hospital and prison grounds (playing fields included), children's
+   playgrounds (10 m round), working railways and the Metro in the open air (8 m either side: trains,
+   and often overhead wires), power lines (15 m either side of a pylon line: the wires hang well out
+   from the pylons; 5 m of a wooden-pole one, whose wires are low) and roads (6 m for the 5", 3 m for
+   the whoop), and the 5" keeps 12 m from any building; gaps and lone trees in any of those places don't
+   count at all. A footpath or disused railway viaduct (tagged as one, or a bridge called one) whose
+   deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and a move of its own. One
+   still carrying trains (Plessey, Ouseburn, Willington Dene) has none: you'd be under a train line.
    Neighbouring arches link under the deck, so a run can weave through up to four of them (out through
    one, round the pier, back through the next), where there's 4 m of open air beside the deck on both
    sides to turn in. `land_1m.tif` holds those homes, car parks, school and hospital grounds,

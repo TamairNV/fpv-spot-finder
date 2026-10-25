@@ -620,16 +620,37 @@ def test_a_woods_edge_is_skimmed_from_the_field():
     ohm[300:700, 200:500] = 12  # a wood in the middle of a field...
     ohm[490:500, 200:500] = 0  # ...with a 10 m ride through it
     _, _, _, runs = features.analyse(make_tile(ohm), margin=m, size=1000, want_lines=True)
-    nodes = runs["line5"][0]
-    lane = nodes[(nodes[:, 2] == lines.SKIM) & (nodes[:, 4] == lines.LANE_R)]
-    assert len(lane) >= 20  # all round the wood, one every SKIM_STEP or so
-    r, c = lane[:, 0], lane[:, 1]
-    ride = (r >= 490) & (r < 500)
-    off = np.maximum.reduce([300 - r, r - 699, 200 - c, c - 499])[~ride]  # metres out from the wood
-    assert (off >= lines.LANE_IN - 1).all() and (off <= lines.LANE_OUT + 1).all() and (lane[:, 3] == 1.0).all()
-    assert not (ride & (c >= 210) & (c < 490)).any()  # not along the ride, past its mouths: no room there
-    assert not (runs["linew"][0][:, 4] == lines.LANE_R).any()  # the whoop sticks to tree lines
-    assert runs["line5"][1].max() > 2  # and they chain into a run along the edge
+    for name, lane in (("line5", lines.WOOD_EDGE), ("linew", lines.WALLS)):  # the whoop skims it closer in
+        nodes = runs[name][0]
+        on = nodes[(nodes[:, 2] == lines.SKIM) & (nodes[:, 4] == lane.r)]
+        assert len(on) >= 20  # all round the wood, one every SKIM_STEP or so
+        r, c = on[:, 0], on[:, 1]
+        ride = (r >= 490) & (r < 500)
+        off = np.maximum.reduce([300 - r, r - 699, 200 - c, c - 499])[~ride]  # metres out from the wood
+        assert (off >= lane.near - 1).all() and (off <= lane.far + 1).all() and (on[:, 3] == 1.0).all()
+        assert not (ride & (c >= 210) & (c < 490)).any()  # not along the ride, past its mouths: no room there
+        assert runs[name][1].max() > 2  # and they chain into a run along the edge
+
+
+def test_the_whoop_skims_a_buildings_side_and_the_5_inch_keeps_off():
+    from spotfinder import lines
+
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    bld = np.zeros((n, n), dtype=bool)
+    ohm[450:550, 300:700] = 15  # an office block on a big square
+    bld[450:550, 300:700] = True
+    ohm[600:604, 300:700] = 4  # with a low wall across the square: not tall enough to skim
+    _, _, _, runs = features.analyse(make_tile(ohm, trees=np.zeros((n, n)), bld=bld), margin=m, size=1000,
+                                     want_lines=True)
+    nodes = runs["linew"][0]
+    on = nodes[(nodes[:, 2] == lines.SKIM) & (nodes[:, 4] == lines.WALLS.r)]
+    assert len(on) >= 30
+    r, c = on[:, 0], on[:, 1]
+    off = np.maximum.reduce([450 - r, r - 549, 300 - c, c - 699])
+    assert (off >= lines.WALLS.near - 1).all() and (off <= lines.WALLS.far + 1).all()
+    assert runs["linew"][1].max() > 2
+    assert not (runs["line5"][0][:, 2] == lines.SKIM).any()  # 800 g keeps 12 m off buildings
 
 
 def test_lines_dont_fly_through_trees_hanging_over_a_river(monkeypatch):
