@@ -273,6 +273,17 @@ def test_spot_names_say_where_not_what():
     assert display_name({"name": "former Calders site", "landuse": "brownfield"}) == "Former Calders site"
 
 
+def test_where_is_a_town_not_a_business_park():
+    from spotfinder.export import is_place, place_cost
+
+    # Penshaw Monument: Cox Green is a bit nearer, but it's in Penshaw
+    assert place_cost({"place": "village"}, 1247) < place_cost({"place": "hamlet"}, 1175)
+    assert not is_place({"name": "Swans Offshore Energy Park", "place": "locality"})
+    assert not is_place({"name": "Middle Docks (Disused)", "place": "locality"})
+    assert is_place({"name": "Lizard Point", "place": "locality"})
+    assert is_place({"name": "Spring Gardens", "place": "suburb"})
+
+
 def test_heroes_stand_up():
     from spotfinder.context import stands_up
 
@@ -299,6 +310,32 @@ def test_a_wartime_pillbox_is_not_mod_land():
         {"landuse": "military", "military": "bunker"},  # a bunker on a base is still the base
     ]}, geometry=[box(0, 0, 10, 10)] * 5, crs="EPSG:27700")
     assert list(legal.classify_areas(areas)["military"]) == [False, False, True, True, True]
+
+
+def test_heritage_owners_need_permission():
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    areas = gpd.GeoDataFrame({"tags": [
+        {"historic": "castle", "name": "Prudhoe Castle", "operator": "English Heritage"},
+        {"historic": "monument", "name": "West Backworth Medieval Settlement (English Heritage Scheduled Monument)"},
+        {"historic": "monument", "name": "Penshaw Monument", "wikidata": "Q7164734"},  # NT, not tagged in OSM
+        {"historic": "monument", "name": "Grey's Monument"},
+    ]}, geometry=[box(0, 0, 10, 10)] * 4, crs="EPSG:27700")
+    cls = legal.classify_areas(areas)
+    assert list(cls["english_heritage"]) == [True, False, False, False]
+    assert list(cls["national_trust"]) == [False, False, True, False]
+
+
+def test_permission_by_share_of_the_spot():
+    flags = np.zeros((9, 9), "float32")
+    flags[4, 4] = legal.FLAG_NATIONAL_TRUST  # one monument cell in the middle
+    flags[:, 7:] = legal.FLAG_GOLF | legal.FLAG_RAILWAY  # a golf course down one side, a railway along it
+    flags[0, 0] = legal.FLAG_RAILWAY  # only a warning, not someone's permission
+    perm = scoring.permission(flags, 2)
+    assert 0 < perm[4, 4] < 0.5  # a monument you can take off beside
+    assert perm[4, 8] == 1.0  # the middle of the golf course
+    assert perm[0, 0] == perm[1, 1] == 0
 
 
 def test_ruins_in_a_monuments_grounds_are_not_bandos():

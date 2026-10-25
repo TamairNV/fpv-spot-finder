@@ -65,6 +65,16 @@ def win_or(a, r):
     return out
 
 
+def permission(flags, r):
+    """How much of the spot is on land that needs the owner's OK, all of it from half: you can take off
+    beside Penshaw Monument (National Trust) or Tynemouth Priory (English Heritage), not on a golf course."""
+    from . import legal
+
+    bits = (legal.FLAG_NATIONAL_TRUST | legal.FLAG_ENGLISH_HERITAGE | legal.FLAG_FORESTRY | legal.FLAG_WOODLAND_TRUST
+            | legal.FLAG_NATURE_RESERVE | legal.FLAG_CEMETERY | legal.FLAG_GOLF | legal.FLAG_QUARRY)
+    return np.clip(2 * win_mean(((flags.astype("int64") & bits) > 0).astype("float64"), r), 0, 1)
+
+
 @dataclass
 class Profile:
     key: str
@@ -181,9 +191,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
             f[k] = np.where(L >= 0.5, f[k], 0.0)
 
     c: dict[str, np.ndarray] = {}
-    perm_bits = (legal.FLAG_NATIONAL_TRUST | legal.FLAG_FORESTRY | legal.FLAG_WOODLAND_TRUST
-                 | legal.FLAG_NATURE_RESERVE | legal.FLAG_CEMETERY | legal.FLAG_GOLF | legal.FLAG_QUARRY)
-    c["permission"] = ((win_or(flags, r) & perm_bits) > 0).astype("float64")
+    c["permission"] = permission(flags, r)
     # Power lines and main roads: full marks off if the middle of the spot is on one, otherwise up to half,
     # by how much of the spot is near one. One crossing a corner doesn't sink a viaduct.
     share = lambda d, full, zero: np.maximum(near(d, full, zero), 0.5 * win_mean(near(d, full, zero), r))

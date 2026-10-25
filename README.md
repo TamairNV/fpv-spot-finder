@@ -230,8 +230,11 @@ seeds; places like your thumbs-down spots get pulled down.
    land and 50 m from buildings and busy roads; flight restriction zones and restricted areas block
    both drones. MOD land and danger areas are never suggested, and nor is anywhere a spot would
    reach onto them (wartime pillboxes and gun emplacements, mapped as military bunkers all along
-   the coast, aren't MOD land). National Trust, Forestry England, Woodland Trust, nature reserves, golf courses,
-   cemeteries, railways (not ones in tunnels) and power lines are flagged.
+   the coast, aren't MOD land). National Trust, English Heritage (no recreational take-off or landing
+   at all, and they ask you not to fly over), Forestry England, Woodland Trust, nature reserves, golf
+   courses, cemeteries, railways (not ones in tunnels) and power lines are flagged. Land that needs the
+   owner's OK costs a spot points by how much of the spot is on it, the full amount from half the spot
+   on: you can take off beside Penshaw Monument or Tynemouth Priory, not in the middle of a golf course.
 5. **Score**: a weighted rule score blended 60/40 with similarity to your seed spots. For the 5",
    public land (parks, commons, country parks, beaches), bridges and viaducts, and bandos most of all
    weigh in, and public land is part of the taste match too: without it the taste part filled the top
@@ -269,7 +272,8 @@ seeds; places like your thumbs-down spots get pulled down.
   day and private land aren't in it. Go and look first, and take a spotter when you fly in goggles.
 - Land use and land owners come from OpenStreetMap. If a park or a National Trust boundary isn't
   mapped, it isn't known here. Chopwell Wood, for example, has no operator tag in OSM, so it isn't
-  flagged as Forestry England land.
+  flagged as Forestry England land. Penshaw Monument has none either, so it's listed by hand in
+  `legal.KNOWN_OWNERS` (adding `operator=National Trust` on the map is the better fix).
 - Without LiDAR, trees under ~4 m and narrow gaps get missed and building heights are estimates.
 - The A3 check is distance-based and a bit conservative around edges (20 m pixels). The "can I fly
   here" verdict is a planning aid, not legal advice: check the CAA Drone Code and a drone safety map

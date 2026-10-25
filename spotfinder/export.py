@@ -17,7 +17,7 @@ import pandas as pd
 import shapely
 from PIL import Image
 from shapely import STRtree
-from shapely.geometry import Point, mapping
+from shapely.geometry import LineString, Point, mapping
 
 from . import legal, scoring
 from . import bandos as bando_mod
@@ -240,6 +240,23 @@ SIGHT_M = 90  # a spot this close to a named viaduct, bridge or landmark is name
 BY_M = 250  # ...else after a named place it's in, or one this close
 FAMOUS_PULL_M = 20
 FAMOUS_HISTORIC = {"abbey", "monastery", "ruins", "fort", "tower", "city_gate", "manor"}  # ...if it's listed
+# Where a spot is: a village a bit further off says it better than a farm or a headland (place=locality is
+# both), so Penshaw Monument is in Penshaw, not Cox Green. Business parks don't say it at all.
+PLACE_WEIGHT = {"hamlet": 1.3, "locality": 1.5}
+PLACE_M = 6000
+BUSINESS = re.compile(r"\b(business|industrial|technology|energy|enterprise|trading|retail|estate|offshore|yard|docks?)\b"
+                      r"|\(disused\)", re.I)
+WIDE_RIVER_M = 50  # the two banks of the Tyne or the Wear down here are different towns
+
+
+def is_place(t: dict) -> bool:
+    return bool(t.get("name")) and t.get("place") in {  # (Spring Gardens is a place)
+        "city", "town", "village", "hamlet", "suburb", "neighbourhood", "quarter", "locality"} and not (
+        t["place"] == "locality" and BUSINESS.search(t["name"]))
+
+
+def place_cost(t: dict, d: float) -> float:
+    return d * PLACE_WEIGHT.get(t["place"], 1.0)
 
 
 class Namer:
@@ -256,9 +273,11 @@ class Namer:
         self.areas = good_area.reset_index(drop=True)
         self.area_tree = STRtree(self.areas.geometry.values)
         pts = named(n)
-        self.places = n[n["tags"].map(lambda t: bool(t.get("name")) and t.get("place") in {  # (Spring Gardens is a place)
-            "city", "town", "village", "hamlet", "suburb", "neighbourhood", "quarter", "locality"})].reset_index(drop=True)
+        self.places = n[n["tags"].map(is_place)].reset_index(drop=True)
         self.place_tree = STRtree(self.places.geometry.values)
+        river = a[a["tags"].map(lambda t: t.get("water") == "river" or t.get("waterway") == "riverbank")]
+        wide = shapely.get_parts(river.geometry.buffer(-WIDE_RIVER_M / 2).values)
+        self.river_tree = STRtree(wide[~shapely.is_empty(wide)])
         # (memorial points are mostly plaques)
         feats = pts[pts["tags"].map(lambda t: any(k in t for k in ("natural", "historic", "tourism", "man_made"))
                                     and t.get("tourism") not in NOT_A_PLACE and t.get("historic") != "memorial")]
@@ -295,6 +314,17 @@ class Namer:
         d = frame.geometry.iloc[i].distance(p)
         return (frame.iloc[i], d) if d <= max_d else (None, None)
 
+    def _locality(self, p: Point):
+        """The nearest place by PLACE_WEIGHT, on this side of a wide river (Albert Edward Dock isn't in South Shields)."""
+        idx = self.place_tree.query(p, predicate="dwithin", distance=PLACE_M)
+        if not len(idx):
+            return None
+        order = sorted(idx, key=lambda i: place_cost(self.places["tags"].iloc[i], self.places.geometry.iloc[i].distance(p)))
+        for i in order[:5]:
+            if not len(self.river_tree.query(LineString([p, self.places.geometry.iloc[i]]), predicate="intersects")):
+                return self.places.iloc[i]
+        return self.places.iloc[order[0]]
+
     def _by(self, p: Point):
         """The named place a spot is by: the nearest within BY_M, though a famous one wins over one up to
         FAMOUS_PULL_M nearer (by the BALTIC, not by the building firm's yard next door)."""
@@ -326,7 +356,7 @@ class Namer:
                 row, d = self._nearest(self.feat_tree, self.feats, p, 300)
                 if row is not None:
                     title = f"Near {osm.bridge_name(row['tags']) if 'bridge' in row['tags'] else display_name(row['tags'])}"
-        loc_row, _ = self._nearest(self.place_tree, self.places, p, 6000)
+        loc_row = self._locality(p)
         locality = loc_row["tags"]["name"] if loc_row is not None else ""
         if not title:
             title = f"Spot near {locality}" if locality else "Unnamed spot"
