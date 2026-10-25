@@ -38,7 +38,8 @@ BANDO_PREVIEW_RES = 1
 
 # Spot fields only the spot card uses (gap and tree positions, the why breakdown, outside links):
 # written to spot_details_<profile>.json so the list's file stays small.
-DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links", "line")
+DETAIL_KEYS = ("gaps_list", "lone_list", "why", "links", "line", "shot")
+FOOT_HIGHWAYS = {"footway", "path", "cycleway", "bridleway", "steps", "track", "pedestrian"}
 
 # Codes in the legal lookup image (blue channel).
 CODE_CLEAR, CODE_FRZ, CODE_RESTRICTED = 0, 1, 2
@@ -335,16 +336,24 @@ class Namer:
         return self.areas.iloc[min(idx, key=lambda i: self.areas.geometry.iloc[i].distance(p)
                                    - FAMOUS_PULL_M * famous(self.areas["tags"].iloc[i]))]
 
+    def subject(self, x: float, y: float):
+        """The thing a spot is named after when it's something to film (a viaduct, a bridge, a lighthouse, a
+        listed ruin...): its OSM row, or None."""
+        p = Point(x, y)
+        sight, _ = self._nearest(self.sight_tree, self.sights, p, SIGHT_M)
+        if sight is not None:
+            return sight
+        if len(self.area_tree.query(p, predicate="intersects")):
+            return None  # in a named place, which names it
+        return self._nearest(self.minor_tree, self.minor_sights, p, SIGHT_M)[0]
+
     def name(self, x: float, y: float) -> tuple[str, str]:
         p = Point(x, y)
         title = None
-        sight, _ = self._nearest(self.sight_tree, self.sights, p, SIGHT_M)
+        subject = self.subject(x, y)
         cont = [i for i in self.area_tree.query(p, predicate="intersects")]
-        minor = None if sight is not None or cont else self._nearest(self.minor_tree, self.minor_sights, p, SIGHT_M)[0]
-        if sight is not None:
-            title = sight["tags"].get("bridge:name") or display_name(sight["tags"])
-        elif minor is not None:
-            title = display_name(minor["tags"])
+        if subject is not None:
+            title = subject["tags"].get("bridge:name") or display_name(subject["tags"])
         elif cont:
             best = min(cont, key=lambda i: self.areas.geometry.iloc[i].area)
             title = display_name(self.areas["tags"].iloc[best])
@@ -391,6 +400,22 @@ class Ground:
         kind, tags = self.areas.at[row, "kind"], self.areas.at[row, "tags"]
         return kind, display_name(tags) if proper(tags) else None
 
+    def public(self, x0: float, y1: float, shape: tuple[int, int]) -> np.ndarray:
+        """Where it's public ground or a beach on a 1 m grid with (x0, y1) at its top left corner, by the same
+        rule as `at`: the smallest area round a pixel says, and a beach wins."""
+        from rasterio import features as rfeatures
+        from rasterio.transform import from_origin
+
+        h, w = shape
+        rows = self.areas.iloc[self.tree.query(shapely.box(x0, y1 - h, x0 + w, y1))]
+        # biggest first, so the smallest area round a pixel is burnt last, and beaches after the rest
+        rows = rows.iloc[np.lexsort((-rows.geometry.area.values, (rows["kind"] == "beach").values))]
+        if not len(rows):
+            return np.zeros(shape, bool)
+        burnt = rfeatures.rasterize(zip(rows.geometry.values, np.where(rows["kind"] == "farm", 1, 2)), out_shape=shape,
+                                    transform=from_origin(x0, y1, 1, 1), fill=0, dtype="uint8")
+        return burnt == 2
+
 
 # ---------------------------------------------------------------- previews
 
@@ -412,11 +437,11 @@ def _flush_pngs() -> None:
 
 
 def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float,
-              hint: tuple[float, float] | None = None, tries: int = 10) -> dict | None:
+              hint: tuple[float, float] | None = None, tries: int = 10, ground: Ground | None = None) -> dict | None:
     """The best flyable run starting within `radius` of the spot, as moves the 3D view can draw:
     each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre, and [lon, lat, dx, dy] of a
     bend on the way in after those when the link to it bends round something. "takeoff_xy" is where to
-    stand for it (BNG), near `hint` if it can be: the leg from there to the first move stays off homes,
+    stand for it (BNG), near `hint` and on public `ground` if it can be: the leg from there to the first move stays off homes,
     car parks and roads too, not just the run. When the best run has no such take-off (a tree pocket ringed
     by roads), it's flown the other way round, or the next best run is, of the best `tries`; failing all
     of those there's no line."""
@@ -436,11 +461,12 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
         return None
     style = lines.FREESTYLE if line_key == "line5" else lines.WHOOP
     hint_rc = None if hint is None else (t.y1 - hint[1] - 0.5, hint[0] - t.x0 - 0.5)
+    prefer = ground.public(t.x0, t.y1, t.ohm.shape) if ground is not None else None
     best = None
     for i in inside[np.argsort(-scores[inside], kind="stable")][:tries]:
         for path in (paths[i], paths[i][::-1]):
             tk = lines.takeoff(nodes[path[0], :2], float(nodes[path[0], 4]), runs["solid"], runs["open"], style,
-                               blocked, hint_rc)
+                               blocked, hint_rc, prefer)
             if tk is not None:
                 best = (i, path, tk)
                 break
@@ -452,7 +478,7 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
     moves = []
     for k, j in enumerate(path):
         lon, lat = bng_to_lonlat(px[j], py[j])
-        move = [lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6), round(px[j] - x, 1), round(py[j] - y, 1)]
+        move = [move_kind(t, nodes[j], style), round(lon, 6), round(lat, 6), round(px[j] - x, 1), round(py[j] - y, 1)]
         bend = via.get((min(path[k - 1], j), max(path[k - 1], j))) if k else None
         if bend is not None:  # the way in bends round something: [lon, lat, dx, dy] of the bend
             bx, by = t.x0 + bend[1] + 0.5, t.y1 - bend[0] - 0.5
@@ -463,9 +489,184 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
             "takeoff_xy": (t.x0 + tk[1] + 0.5, t.y1 - tk[0] - 0.5)}
 
 
-def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: int = 40) -> tuple[float, float]:
+def ground_1m(dtm: np.ndarray, region: Region, t) -> np.ndarray:
+    """The ground's height (m above sea level) at each pixel of a 1 m tile, from the 5 m DTM smoothed over
+    about 5 m, as the 3D view's ground is."""
+    from scipy import ndimage
+
+    xmin, _, _, ymax = region.bbox
+    nr, nc = t.ohm.shape
+    cols = np.clip(((t.x0 + np.arange(nc) + 0.5 - xmin) / legal.RES).astype(int), 0, dtm.shape[1] - 1)
+    rows = np.clip(((ymax - (t.y1 - np.arange(nr) - 0.5)) / legal.RES).astype(int), 0, dtm.shape[0] - 1)
+    g = dtm[np.ix_(rows, cols)].astype("float32")
+    if not np.isfinite(g).any():
+        return np.zeros_like(g)
+    g = np.where(np.isfinite(g), g, np.nanmin(g))
+    return ndimage.uniform_filter(g, size=5)
+
+
+def spot_shot(reader: HeightReader, namer: Namer, x: float, y: float, hint: tuple[float, float],
+              ground: Ground | None = None, dtm: np.ndarray | None = None) -> dict | None:
+    """The 5" cine shot (shots.py) for a spot named after something to film, as the card and the 3D view draw
+    it: an orbit {"kind", "subject", "c" (its centre: dx, dy m from the spot), "ll" (lon, lat), "r", "h",
+    "alt", "from", "deg", "subject_h", "top" (its highest point, which the camera's on: dx, dy)} or a pass
+    {"kind", "subject", "a", "b" (its ends: dx, dy), "a_ll", "b_ll", "h", "alt", "off", "side", "len"}, with
+    "takeoff_xy" (BNG) where to stand for it, near `hint`, if there's a clean way in. It's flown level at "alt"
+    (m above sea level, from `dtm`, the 5 m DTM; without it the ground's taken as flat). None when the spot
+    isn't named after something to film or there's no clear way to film it."""
+    from rasterio import features as rfeatures
+    from rasterio.transform import from_origin
+    from scipy import ndimage
+
+    from . import features, lines, shots
+
+    row = namer.subject(x, y)
+    if row is None:
+        return None
+    tags, geom = row["tags"], row.geometry
+    bridge = bool(osm.is_viaduct(tags) or tags.get("man_made") == "bridge" or osm.famous_bridge(tags) or "bridge" in tags)
+    half = 200
+    cx, cy = (x, y) if bridge else (geom.centroid.x, geom.centroid.y)
+    t = reader.tile(int(round(cx - half)), int(round(cy - half)), 2 * half, 20)
+    rc = lambda px, py: (t.y1 - py - 0.5, px - t.x0 - 0.5)  # BNG -> tile row, col
+    xy = lambda r, c: (t.x0 + c + 0.5, t.y1 - r - 0.5)
+    ll = lambda px, py: [round(v, 6) for v in bng_to_lonlat(px, py)]
+    ohm, trees = features.leaf_on(t)
+    air = np.maximum(ohm, t.over_water) if t.over_water is not None else ohm
+    road = t.ways == 1
+    d_bld = ndimage.distance_transform_edt(~t.bld) if t.bld.any() else None
+    d_road = ndimage.distance_transform_edt(~road) if road.any() else None
+    blocked = lines.keep_out(t.land, d_bld, d_road, lines.FREESTYLE)
+    elev = ground_1m(dtm, reader.region, t) if dtm is not None else None
+    title = tags.get("bridge:name") or display_name(tags)
+    if bridge:
+        # along the deck's main axis, up to PASS_MAX_M of it round the spot, level with the top of the deck
+        # where it's off the ground
+        pts = shapely.get_coordinates(geom)
+        m = pts.mean(axis=0)
+        u = np.linalg.svd(pts - m, full_matrices=False)[2][0]
+        s = (pts - m) @ u
+        mid = (np.array([x, y]) - m) @ u
+        s0, s1 = max(s.min(), mid - shots.PASS_MAX_M / 2), min(s.max(), mid + shots.PASS_MAX_M / 2)
+        if s1 - s0 < shots.PASS_MIN_M:
+            return None
+        a, b = m + s0 * u, m + s1 * u
+        deck = a + np.linspace(0.0, 1.0, int((s1 - s0) / 2) + 2)[:, None] * (b - a)
+        dr, dc = rc(deck[:, 0], deck[:, 1])
+        under = shots.sample(elev, dr, dc) if elev is not None else np.zeros(len(dr), "float32")
+        up = shots.sample(air, dr, dc)
+        tops = (under + up)[up > 2.0]
+        p = shots.pass_along(air, blocked, rc(*a), rc(*b), float(np.median(tops)) if len(tops) else float(under.min()) + 10.0,
+                             elev)
+        if p is None:
+            return None
+        (ax, ay), (bx, by) = xy(*p["a"]), xy(*p["b"])
+        shot = {"kind": "pass", "subject": title, "a": [round(float(ax - x), 1), round(float(ay - y), 1)],
+                "b": [round(float(bx - x), 1), round(float(by - y), 1)],
+                "a_ll": ll(ax, ay), "b_ll": ll(bx, by), "h": p["h"], "alt": round(p["alt"], 1), "off": round(p["off"]),
+                "side": round(p["side"]), "len": p["len"]}
+        path = [np.asarray(p["a"]) + k * (np.asarray(p["b"]) - np.asarray(p["a"])) for k in np.linspace(0, 1, 9)]
+    else:
+        # the building at a point, or the area mapped: its middle, how far its edge is from that, its top
+        if geom.geom_type == "Point":
+            r0, c0 = rc(geom.x, geom.y)
+            near = np.zeros_like(t.bld)
+            near[max(int(r0) - 10, 0):int(r0) + 11, max(int(c0) - 10, 0):int(c0) + 11] = True
+            bb = np.argwhere(t.bld & near)
+            if len(bb):
+                lab, _ = ndimage.label(t.bld)
+                k = bb[np.argmin(np.hypot(bb[:, 0] - r0, bb[:, 1] - c0))]
+                mask = lab == lab[k[0], k[1]]
+            else:  # a column, a statue, a light on a pier: not a building, so the tall thing nearest the point
+                tall = np.argwhere((air >= features.TALL_M) & near)
+                if len(tall):
+                    r0, c0 = tall[np.argmin(np.hypot(tall[:, 0] - r0, tall[:, 1] - c0))]
+                mask = np.hypot(*np.mgrid[:t.bld.shape[0], :t.bld.shape[1]] - np.array([r0, c0])[:, None, None]) <= 4
+        else:
+            mask = rfeatures.geometry_mask([geom], out_shape=t.bld.shape, transform=from_origin(t.x0, t.y1, 1, 1), invert=True)
+            if not mask.any():
+                return None
+        pr, pc = np.nonzero(mask)
+        centre = (float(pr.mean()), float(pc.mean()))
+        subject_r = float(np.hypot(pr - centre[0], pc - centre[1]).max()) + 0.5
+        tall = t.bldh if (t.bld & mask).any() else air
+        top = np.unravel_index(np.argmax(np.where(mask, tall, -np.inf)), mask.shape)  # the tower, the spire...
+        subject_h = float(tall[top])
+        o = shots.orbit(air, blocked, centre, subject_r, subject_h, elev)
+        if o is None:
+            return None
+        ox, oy = xy(*centre)
+        tx, ty = xy(*top)
+        # whole degrees, rounded inwards so the arc stays on the part found clear
+        start = 0 if o["deg"] >= 360 else math.ceil(o["from"] - 1e-6)
+        deg = 360 if o["deg"] >= 360 else math.floor(o["from"] + o["deg"] - start + 1e-6)
+        shot = {"kind": "orbit", "subject": title, "c": [round(float(ox - x), 1), round(float(oy - y), 1)], "ll": ll(ox, oy),
+                "r": o["r"], "h": o["h"], "alt": round(o["alt"], 1), "from": start % 360, "deg": deg,
+                "subject_h": round(subject_h), "top": [round(float(tx - x), 1), round(float(ty - y), 1)]}
+        bearings = np.radians(start + np.linspace(0.0, deg, 13))
+        path = [np.array([centre[0] - o["r"] * np.cos(q), centre[1] + o["r"] * np.sin(q)]) for q in bearings]
+    # stand near the path-side place, with a clean way in to where the shot's nearest it
+    hint_rc = np.array(rc(*hint))
+    first = min(path, key=lambda q: float(np.hypot(*(q - hint_rc))))
+    solid = np.where(trees >= lines.CLEAR_H, np.float32(0), ohm)
+    open_ = (ohm < features.OPEN_M) & ~t.water & ~road & (t.ways != 3)
+    prefer = ground.public(t.x0, t.y1, ohm.shape) if ground is not None else None
+    tk = lines.takeoff(first, 0.0, solid, open_, lines.FREESTYLE, blocked, tuple(hint_rc), prefer)
+    shot["takeoff_xy"] = xy(*tk) if tk is not None else None
+    return shot
+
+
+def move_kind(t, node: np.ndarray, style) -> str:
+    """A line node's move as the card and the 3D view name it. A skim says what it's along: a tree line
+    ("skim"), or for a node in the open off a wall (lines.Lane) the edge of a wood ("edge") or the side of a
+    building ("wall"), whichever tall thing is nearest."""
+    from . import features, lines
+
+    kind = lines.KIND_NAME[int(node[2])]
+    if kind != "skim" or style.lane is None or node[4] != style.lane.r:
+        return kind
+    r, c, reach = int(node[0]), int(node[1]), int(style.lane.far) + 2
+    r0, c0 = max(r - reach, 0), max(c - reach, 0)
+    rr, cc = np.nonzero(t.ohm[r0:r + reach + 1, c0:c + reach + 1] >= features.TALL_M)
+    if not len(rr):
+        return "edge"
+    k = int(np.argmin((rr + r0 - r) ** 2 + (cc + c0 - c) ** 2))
+    return "wall" if t.bld[rr[k] + r0, cc[k] + c0] else "edge"
+
+
+class Decks:
+    """Where a bridge or viaduct is, from OSM: its mapped outline, else its railway, road or viaduct 8 m wide.
+    The 3D view draws what LiDAR sees there as a deck in the air with open air under it, over a river too, not
+    as a wall down to the ground. (Not a footbridge without an outline: in a wooded dene what LiDAR sees over
+    one is the trees.)"""
+
+    def __init__(self, region: Region):
+        o = osm.extract(region)
+        a, ln = o["areas"], o["lines"]
+        outlines = a[a["tags"].map(lambda t: t.get("man_made") == "bridge")].geometry
+        ways = ln[ln["tags"].map(lambda t: t.get("bridge") not in (None, "no") and (
+            osm.is_viaduct(t) or t.get("highway") not in FOOT_HIGHWAYS))].geometry
+        self.geoms = np.array([*outlines.values, *ways.buffer(4, cap_style="flat").values], dtype=object)
+        self.tree = STRtree(self.geoms)
+
+    def mask(self, x0: float, y1: float, shape: tuple[int, int]) -> np.ndarray:
+        """The decks on a 1 m grid with (x0, y1) at its top left corner."""
+        from rasterio import features as rfeatures
+        from rasterio.transform import from_origin
+
+        h, w = shape
+        idx = self.tree.query(shapely.box(x0, y1 - h, x0 + w, y1))
+        if not len(idx):
+            return np.zeros(shape, bool)
+        return rfeatures.rasterize(((g, 1) for g in self.geoms[idx]), out_shape=shape,
+                                   transform=from_origin(x0, y1, 1, 1), fill=0, dtype="uint8") > 0
+
+
+def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: int = 40,
+                 ground: Ground | None = None) -> tuple[float, float]:
     """The nearest open ground to (x, y), within `reach` metres, that's off homes and gardens, car parks and
-    roads (and for the 5", clear of buildings): the take-off picked from the 50 m cells can land in a garden."""
+    roads (and for the 5", clear of buildings), and on public `ground` if there's some in reach (lines.PREFER_M):
+    the take-off picked from the 50 m cells can land in a garden."""
     from scipy import ndimage
 
     from . import features, lines
@@ -487,7 +688,10 @@ def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: i
     if not len(rr):
         return x, y
     r0, c0 = t.y1 - y - 0.5, x - t.x0 - 0.5
-    i = int(np.argmin(np.hypot(rr - r0, cc - c0)))
+    cost = np.hypot(rr - r0, cc - c0)
+    if ground is not None:
+        cost -= lines.PREFER_M * ground.public(t.x0, t.y1, ok.shape)[rr, cc]
+    i = int(np.argmin(cost))
     return t.x0 + cc[i] + 0.5, t.y1 - rr[i] - 0.5
 
 
@@ -525,15 +729,25 @@ def spot_model(region: Region, r: int, c: int, profile_key: str, path: Path) -> 
 
 
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path,
-                  size_m: int = PREVIEW_M, res_m: int = PREVIEW_RES) -> dict:
-    """160 x 160 px at 2 m: R = class*40 (0 ground, 1 water, 2 road, 3 path, 4 tree, 5 building, 6 viaduct deck),
-    G = height above ground (0.25 m), B = ground (0.5 m above min)."""
+                  size_m: int = PREVIEW_M, res_m: int = PREVIEW_RES, decks: Decks | None = None) -> dict:
+    """160 x 160 px at 2 m: R = class*40 (0 ground, 1 water, 2 road, 3 path, 4 tree, 5 building, 6 a bridge or
+    viaduct deck), G = height above ground (0.25 m), B = ground (0.5 m above min)."""
     half = size_m // 2
     x0, y0 = int(round(x - half)), int(round(y - half))
     t = reader.tile(x0, y0, size_m, 0)
     n = size_m // res_m
     pool = lambda a, fn: fn(a.reshape(n, res_m, n, res_m), axis=(1, 3))
     h = pool(t.ohm, np.max)
+    deck = np.zeros((n, n), bool)
+    if t.land is not None:  # a viaduct you fly the arches of
+        deck |= pool((t.land == VIADUCT_CODE).astype("uint8"), np.max) > 0
+    on = decks.mask(t.x0, t.y1, t.ohm.shape) if decks is not None else None
+    if on is not None and on.any():  # any other bridge, with its deck over the river too
+        on &= ~t.bld  # (the arches under a railway that are workshops stay buildings)
+        up = np.maximum(t.ohm, t.over_water) if t.over_water is not None else t.ohm
+        bridge = (pool(on.astype("uint8"), np.max) > 0) & ~(pool(t.bld.astype("uint8"), np.max) > 0)
+        h = np.where(bridge, np.maximum(h, pool(np.where(on, up, 0), np.max)), h)
+        deck |= bridge
     bld = pool(t.bld.astype("uint8"), np.max) > 0
     tree = pool((t.trees >= 2).astype("uint8"), np.max) > 0
     water = pool(t.water.astype("uint8"), np.mean) > 0.5
@@ -545,8 +759,7 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
     cls[water] = 1
     cls[tree] = 4
     cls[bld] = 5
-    if t.land is not None:  # a viaduct deck: the 3D view draws it as a slab with open arches below
-        cls[(pool((t.land == VIADUCT_CODE).astype("uint8"), np.max) > 0) & (h >= 4)] = 6
+    cls[deck & (h >= 4)] = 6  # the 3D view draws it as a slab with open air (the arches) below
     xmin, _, _, ymax = region.bbox
     # Ground: sample the 5 m DTM at each pixel centre (nearest, then smoothed over about 5 m).
     cols = ((x0 + (np.arange(n) + 0.5) * res_m - xmin) / legal.RES).astype(int)
@@ -557,6 +770,12 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
     from scipy import ndimage
 
     ground = ndimage.uniform_filter(ground, size=max(3, round(6 / res_m)))
+    # A deck is level across: its edges (a parapet, the side of a truss) come up to the top of the middle,
+    # or the 3D view shows them as blocks hanging under it
+    on = cls == 6
+    if on.any():
+        top = ndimage.maximum_filter(np.where(on, ground + h, -np.inf), size=3)
+        h = np.where(on, np.maximum(h, top - ground), h)
     gmin = float(np.nanmin(ground))
     rgb = np.stack([
         cls * 40,
@@ -605,6 +824,33 @@ def _palette_png(idx: np.ndarray, colours: list[tuple], path: Path) -> None:
     im.save(path, optimize=True, transparency=bytes(int(c[3]) for c in colours))
 
 
+WINDS = ("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")
+
+
+def tell_apart(feats: list[dict], xy: list[tuple[float, float]]) -> None:
+    """Spots that share a name and a place say which part of it they're in, "Riverside Park (south)", so a
+    big park with three spots doesn't read like the same spot three times. Two on the same side: the one
+    further out keeps the side and the other is the middle. `xy` is each spot's BNG position."""
+    groups: dict[tuple, list[int]] = {}
+    for i, f in enumerate(feats):
+        groups.setdefault((f["properties"]["title"], f["properties"]["locality"]), []).append(i)
+    for idx in groups.values():
+        if len(idx) < 2:
+            continue
+        off = np.array([xy[i] for i in idx], dtype=float)
+        off -= off.mean(axis=0)
+        words = [WINDS[round(math.degrees(math.atan2(dx, dy)) / 45) % 8] for dx, dy in off]
+        for w in set(words):
+            same = [k for k, v in enumerate(words) if v == w]
+            for k in same:
+                if k != max(same, key=lambda j: np.hypot(*off[j])):
+                    words[k] = "middle"
+        seen: dict[str, int] = {}
+        for i, w in zip(idx, words):  # best first, so a third on one side is the one numbered
+            seen[w] = seen.get(w, 0) + 1
+            feats[i]["properties"]["title"] += f" ({w})" if seen[w] == 1 else f" ({w} {seen[w]})"
+
+
 def _gpx(feats: list[dict], title: str) -> str:
     """Waypoints for the spots, for OS Maps, Google My Maps, Gaia, a GPS..."""
     from xml.sax.saxutils import escape
@@ -636,7 +882,7 @@ def _line_mix(line: dict | None) -> str:
     from collections import Counter
 
     order = ["arch", "gap", "orbit", "dive", "skim"]
-    n = Counter(m[0] for m in line["moves"])
+    n = Counter("skim" if m[0] in ("edge", "wall") else m[0] for m in line["moves"])
     words = {"gap": ("a gap", "gaps"), "orbit": ("an orbit", "orbits"), "dive": ("a dive", "dives"),
              "skim": ("a skim", "skims"), "arch": ("an arch", "arches")}
     return ", ".join(words[k][0] if n[k] == 1 else f"{n[k]} {words[k][1]}" for k in order if n[k])
@@ -761,16 +1007,17 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
     from .context import load_dtm
 
     dtm, _ = load_dtm(region)
+    decks = Decks(region)
     done_previews: dict[tuple[int, int], dict] = {}
     # every bando, for the map, with a close-up 3D model of each one still standing
     meta["bandos"] = bando_mod.write(region, out, lambda x, y, path: write_preview(
-        reader, dtm, region, x, y, path, BANDO_PREVIEW_M, BANDO_PREVIEW_RES))
+        reader, dtm, region, x, y, path, BANDO_PREVIEW_M, BANDO_PREVIEW_RES, decks))
 
     for key, res in results.items():
         profile = scoring.PROFILES[key]
         heat_corners = _heat_png(region, res["heat"], res["eligible"], out / f"heat_{key}.png")
         heat_lo_corners = _heat_png(region, res["heat"], res["eligible"], out / f"heatlo_{key}.png", block=4)
-        feats = []
+        feats, feats_xy = [], []
         for rank, (r, c) in enumerate(res["spots"], start=1):
             x, y = cell_center(region, r, c)
             lon, lat = bng_to_lonlat(x, y)
@@ -822,19 +1069,20 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             preview = None
             if rank <= previews or park_spot:
                 if (r, c) not in done_previews:
-                    pm = write_preview(reader, dtm, region, x, y, out / "previews" / f"{spot_id}.png")
+                    pm = write_preview(reader, dtm, region, x, y, out / "previews" / f"{spot_id}.png", decks=decks)
                     done_previews[(r, c)] = pm
                 preview = {"file": f"previews/{spot_id}.png", **done_previews[(r, c)],
                            "center": [round(lon, 6), round(lat, 6)], "bng": [x, y]}
             line = None
             line_key = LINE_KEYS.get(key)
             if line_key and rank <= previews:
-                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL, (tx, ty))
-            # Where to stand: with a run, where the leg to its first move is clear too; without one, at least
+                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL, (tx, ty), ground=ground)
+            shot = spot_shot(reader, namer, x, y, (tx, ty), ground, dtm) if key == "cine5" and rank <= previews else None
+            # Where to stand: with a run or a shot, where the leg in to it is clear too; without one, at least
             # out of gardens, car parks and roads.
-            tk = line.pop("takeoff_xy") if line else None
+            tk = line.pop("takeoff_xy") if line else shot.pop("takeoff_xy") if shot else None
             if tk is None:
-                tk = snap_takeoff(reader, tx, ty, whoop=key == "cine85")
+                tk = snap_takeoff(reader, tx, ty, whoop=key == "cine85", ground=ground)
             tx, ty = round(tk[0]), round(tk[1])
             tlon, tlat = bng_to_lonlat(tx, ty)
             on, on_name = ground.at(tx, ty)
@@ -890,7 +1138,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 "takeoff": {"lon": round(tlon, 6), "lat": round(tlat, 6), "dx": tx - x, "dy": ty - y,
                             "path_m": int(cells["dist_path"][best]), "parking_m": int(cells["dist_parking"][best]),
                             "on": on, "on_name": on_name},
-                "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview, "line": line,
+                "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview, "line": line, "shot": shot,
                 "links": {
                     "satellite": f"https://www.google.com/maps/@{lat:.6f},{lon:.6f},250m/data=!3m1!1e3",
                     "streetview": f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat:.6f},{lon:.6f}",
@@ -906,9 +1154,12 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 props["park"] = park
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
+            feats_xy.append((x, y))
+        tell_apart(feats, feats_xy)
         (out / f"spots_{key}.gpx").write_text(_gpx(feats, f"{profile.label} spots, {region.name}"))
-        # The list only needs the summary; the spot card's extras load after the list is up.
-        details = {f["properties"]["id"]: {k: f["properties"].pop(k) for k in DETAIL_KEYS if k in f["properties"]}
+        # The list only needs the summary; the spot card's extras load after the list is up (and the ones a
+        # spot hasn't got, like a cine spot's line, are left out).
+        details = {f["properties"]["id"]: {k: v for k in DETAIL_KEYS if (v := f["properties"].pop(k, None)) is not None}
                    for f in feats}
         (out / f"spots_{key}.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats},
                                                              separators=(",", ":")))
@@ -934,7 +1185,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             entry["score"] = round(100 * float(res["style_final"][br, bc]))
         if (r, c) not in done_previews:
             x, y = cell_center(region, r, c)
-            done_previews[(r, c)] = write_preview(reader, dtm, region, x, y, out / "previews" / f"{r}-{c}.png")
+            done_previews[(r, c)] = write_preview(reader, dtm, region, x, y, out / "previews" / f"{r}-{c}.png", decks=decks)
         x, y = cell_center(region, r, c)
         lon, lat = bng_to_lonlat(x, y)
         entry["preview"] = {"file": f"previews/{r}-{c}.png", **done_previews[(r, c)],

@@ -1,7 +1,7 @@
 """Flyable lines: what makes a spot fun is a run you can chain together, not how many trees it has.
 
 Every gap you can fly through, lone tree to orbit, tall thing to dive and stretch of tree line or
-wood's edge to skim is a node. Two nodes are linked when they're a sensible distance apart and the
+wood's edge (for the whoop, a building's side too) to skim is a node. Two nodes are linked when they're a sensible distance apart and the
 air between them is clear at low height (the 1 m height grid says nothing taller than ~3 m is in the
 way), flying straight or with one bend round whatever's in the way. From each node we walk the links
 greedily, preferring good obstacles, a change of move and a smooth heading, and keep the best run. A
@@ -44,12 +44,26 @@ MAX_ARCHES = 4      # ...for this many, so a long viaduct doesn't swamp every ot
 BENDS = (0.25, -0.25, 0.4, -0.4)  # where a link that can't fly straight may bend: off its midpoint, by this
                                   # share of its length either side (at 0.4 it's 28% longer)
 BEND_COST = 0.85    # a bend in the way there costs a little against flying straight
-LANE_IN, LANE_OUT = 3.5, 6.0  # a wood's edge is skimmed in the open, this many metres off the trees...
-LANE_WALL = 8.0     # ...when they stand this tall...
-LANE_ROOM = 12.0    # ...along a field (open air this far from any tree close by), not a ride through the wood
-LANE_R = 2.0        # metres round a lane node a link may skip: it's in the open, not on the trees
 TAKEOFF_MIN = 8.0   # metres from the take-off to the first move's obstacle: not on top of it...
 TAKEOFF_MAX = 90.0  # ...and close enough to see it
+PREFER_M = 40.0     # ...though one this much further off wins if it's on public ground (a park, a common, a beach)
+                    # rather than a field or land nobody's mapped: off those you need the landowner's OK
+
+
+@dataclass(frozen=True)
+class Lane:
+    """A wall skimmed from the open beside it: `near`..`far` m off it, where it stands `wall` m or taller, with
+    open air `room` m from it close by (along a field or a square, not down a ride through a wood or an alley)."""
+    near: float
+    far: float
+    wall: float
+    room: float
+    r: float                 # metres round a lane node a link may skip: it's in the open, not on the wall
+    buildings: bool = False  # a building's side too, not just the edge of a wood
+
+
+WOOD_EDGE = Lane(near=3.5, far=6.0, wall=8.0, room=12.0, r=2.0)
+WALLS = Lane(near=2.5, far=4.5, wall=6.0, room=8.0, r=1.5, buildings=True)  # a whoop's: closer in, and architecture
 
 
 @dataclass(frozen=True)
@@ -60,12 +74,12 @@ class Style:
     corridor: int      # metres of clear air across the flight path (a quad plus margin)
     bld_clear: float   # metres a line keeps from any building (0: the whoop flies round architecture)
     road_clear: float  # ...and from a road, where the cars are
-    wood_edges: bool = False  # skim along the edge of a wood, not just tree lines
+    lane: Lane | None = None  # walls it skims besides tree lines
 
 
 FREESTYLE = Style(min_link=10.0, max_link=70.0, gap_max_w=12.0, corridor=3, bld_clear=12.0, road_clear=6.0,
-                  wood_edges=True)
-WHOOP = Style(min_link=5.0, max_link=35.0, gap_max_w=5.0, corridor=3, bld_clear=0.0, road_clear=3.0)
+                  lane=WOOD_EDGE)
+WHOOP = Style(min_link=5.0, max_link=35.0, gap_max_w=5.0, corridor=3, bld_clear=0.0, road_clear=3.0, lane=WALLS)
 
 
 def keep_out(land: np.ndarray | None, d_bld: np.ndarray | None, d_road: np.ndarray | None, style: Style) -> np.ndarray | None:
@@ -98,13 +112,13 @@ def arches(deck: np.ndarray, ohm: np.ndarray) -> list[tuple]:
     return out
 
 
-def wood_lane(dt_tall: np.ndarray, wall_h: np.ndarray, open_: np.ndarray) -> np.ndarray:
-    """Where to skim a wood's edge from: open ground LANE_IN..LANE_OUT m off a wall of trees LANE_WALL m or
-    taller, beside a field rather than in a ride through the wood. `dt_tall` is metres to the nearest tall
-    pixel and `wall_h` that pixel's height when it's a tree you'd skim (0 for a building, or a tree line,
-    whose skim nodes sit on the belt itself)."""
-    room = ndimage.maximum_filter(dt_tall, size=int(2 * LANE_ROOM + 1)) >= LANE_ROOM
-    return open_ & (dt_tall >= LANE_IN) & (dt_tall <= LANE_OUT) & (wall_h >= LANE_WALL) & room
+def lane_mask(lane: Lane, dt_tall: np.ndarray, wall_h: np.ndarray, open_: np.ndarray) -> np.ndarray:
+    """Where to skim a wall from: open ground `lane.near`..`lane.far` m off it, beside a field or a square
+    rather than in a ride through a wood. `dt_tall` is metres to the nearest tall pixel and `wall_h` that
+    pixel's height when it's a wall this lane skims (0 otherwise, and for a tree line, whose skim nodes sit
+    on the belt itself)."""
+    room = ndimage.maximum_filter(dt_tall, size=int(2 * lane.room + 1)) >= lane.room
+    return open_ & (dt_tall >= lane.near) & (dt_tall <= lane.far) & (wall_h >= lane.wall) & room
 
 
 def _thin(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -119,8 +133,8 @@ def nodes_from(gaps: list[tuple], lone: list[tuple], treeline: np.ndarray, style
                blocked: np.ndarray | None = None, arch: list[tuple] = (),
                lane: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
     """(N, 5) array of row, col, kind, quality (0..1), radius (m around it that's the obstacle itself),
-    in tile pixels (1 m). Nothing inside `blocked`. `lane` is (wood_lane mask, wall heights) for a style
-    that skims wood edges."""
+    in tile pixels (1 m). Nothing inside `blocked`. `lane` is (lane_mask, wall heights) for a style that
+    skims walls."""
     out = []
     for r, c, w, f, _a, th, _tf in gaps:
         if th and w <= style.gap_max_w:
@@ -129,10 +143,10 @@ def nodes_from(gaps: list[tuple], lone: list[tuple], treeline: np.ndarray, style
         crown = float(np.sqrt(a / np.pi)) + style.corridor / 2 + 1.0
         out.append((r, c, DIVE if h >= DIVE_H else LONE, float(np.clip((h - 4) / 10, 0.2, 1.0)), max(crown, END_SKIP)))
     out.extend((float(r), float(c), SKIM, 1.0, END_SKIP) for r, c in zip(*_thin(treeline)))
-    if lane is not None and style.wood_edges:
+    if lane is not None and style.lane:
         rr, cc = _thin(lane[0])
-        q = np.clip((lane[1][rr, cc] - 4) / 8, 0.2, 1.0)  # a taller wall of trees is a better skim
-        out.extend((float(r), float(c), SKIM, float(v), LANE_R) for r, c, v in zip(rr, cc, q))
+        q = np.clip((lane[1][rr, cc] - 4) / 8, 0.2, 1.0)  # a taller wall is a better skim
+        out.extend((float(r), float(c), SKIM, float(v), style.lane.r) for r, c, v in zip(rr, cc, q))
     out.extend((r, c, ARCH, float(np.clip((h - 4) / 12, 0.3, 1.0)), ARCH_R) for r, c, h in arch)
     nodes = np.array(out, dtype="float64").reshape(-1, 5)
     if blocked is not None and len(nodes):
@@ -176,6 +190,19 @@ def _clear(ohm: np.ndarray, a: np.ndarray, b: np.ndarray, ra: np.ndarray, rb: np
     return ~((ohm[ri, ci] >= CLEAR_H) & inside).any(axis=1)
 
 
+def _off(blocked: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """For each segment a -> b, does it keep off `blocked` ground all the way, sampled every half metre? Unlike
+    the heights nothing is skipped at the ends: a link may leave the tree line it skims, but not over the
+    school field beside it."""
+    if not len(a):
+        return np.ones(0, bool)
+    t = np.linspace(0.0, 1.0, int(2 * np.hypot(*(b - a).T).max()) + 2)
+    h, w = blocked.shape
+    ri = np.clip(np.rint(a[:, :1] + t * (b[:, :1] - a[:, :1])).astype(int), 0, h - 1)
+    ci = np.clip(np.rint(a[:, 1:2] + t * (b[:, 1:2] - a[:, 1:2])).astype(int), 0, w - 1)
+    return ~blocked[ri, ci].any(axis=1)
+
+
 def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray | None = None,
           deck: np.ndarray | None = None, via: dict | None = None) -> list[list[int]]:
     """Neighbour lists: pairs within range with clear air between them, and not over `blocked` ground.
@@ -203,12 +230,16 @@ def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray 
     if not len(pairs):
         return nb
     # Sample every metre along each link, skipping the ends, and check nothing tall is in the way across
-    # the whole corridor: LiDAR speckle inside a wood leaves 1 m holes that aren't a way through.
+    # the whole corridor: LiDAR speckle inside a wood leaves 1 m holes that aren't a way through. Keep-off
+    # ground is checked on the line itself from end to end too.
     if blocked is not None:
         ohm = np.where(blocked, np.float32(99), ohm)
     ohm = ndimage.maximum_filter(ohm, size=style.corridor)
     ra, rb = nodes[pairs[:, 0], 4], nodes[pairs[:, 1], 4]
     ok = _clear(ohm, a, b, ra, rb, style.max_link)
+    if blocked is not None:
+        k = np.flatnonzero(ok)
+        ok[k] = _off(blocked, a[k], b[k])
     if via is not None:
         # The rest may bend once, off the midpoint, where both legs are clear: round a clump of trees
         # rather than through it.
@@ -225,6 +256,9 @@ def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray 
             if not len(k):
                 continue
             bent = _clear(ohm, a[k], w[k], ra[k], zero[k], style.max_link) & _clear(ohm, w[k], b[k], zero[k], rb[k], style.max_link)
+            if blocked is not None:
+                j = np.flatnonzero(bent)
+                bent[j] = _off(blocked, a[k[j]], w[k[j]]) & _off(blocked, w[k[j]], b[k[j]])
             for i, j, wp in zip(pairs[k[bent], 0], pairs[k[bent], 1], w[k[bent]]):
                 via[(int(min(i, j)), int(max(i, j)))] = (float(wp[0]), float(wp[1]))
             ok[k[bent]] = True
@@ -309,12 +343,14 @@ def path_length(nodes: np.ndarray, path: list[int], via: dict | None = None) -> 
 
 
 def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndarray, style: Style,
-            blocked: np.ndarray | None, hint: tuple[float, float] | None = None) -> tuple[int, int] | None:
+            blocked: np.ndarray | None, hint: tuple[float, float] | None = None,
+            prefer: np.ndarray | None = None) -> tuple[int, int] | None:
     """Where to stand for a run starting at `first` (row, col, with `first_r` metres round it that are the
     obstacle itself): open ground off homes, car parks and roads, with a straight leg to the first move that
     stays off them too and doesn't go through anything `solid` (heights of walls, buildings, a viaduct deck:
     trees are left out, as the quad hops over those on the way in), as close to the first move, and to
-    `hint` (the path-side place picked from the cells), as can be."""
+    `hint` (the path-side place picked from the cells), as can be, and on `prefer` ground (public) if there's
+    some up to PREFER_M further off."""
     ok = open_ & ~blocked if blocked is not None else open_
     rr, cc = np.nonzero(ok[::3, ::3])
     rr, cc = rr * 3, cc * 3
@@ -324,6 +360,8 @@ def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndar
     if not len(rr):
         return None
     cost = d if hint is None else d + 0.5 * np.hypot(rr - hint[0], cc - hint[1])
+    if prefer is not None:
+        cost = cost - PREFER_M * prefer[rr, cc]
     clear = ndimage.maximum_filter(np.where(blocked, np.float32(99), solid) if blocked is not None else solid,
                                    size=style.corridor)
     h, w = solid.shape
@@ -331,6 +369,7 @@ def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndar
         t = np.arange(0.0, max(d[i] - first_r, 0.0) + 1.0) / d[i]
         pr = np.clip(np.rint(rr[i] + t * (first[0] - rr[i])).astype(int), 0, h - 1)
         pc = np.clip(np.rint(cc[i] + t * (first[1] - cc[i])).astype(int), 0, w - 1)
-        if not (clear[pr, pc] >= CLEAR_H).any():
+        if not (clear[pr, pc] >= CLEAR_H).any() and (
+                blocked is None or _off(blocked, np.array([[rr[i], cc[i]]], dtype=float), first[None, :2])[0]):
             return int(rr[i]), int(cc[i])
     return None

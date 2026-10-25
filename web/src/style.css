@@ -480,7 +480,7 @@ dialog#about li { margin: 4px 0; }
 .mv-gap { background: #ff3d7f; }
 .mv-orbit { background: #ffc400; }
 .mv-dive { background: #a78bfa; }
-.mv-skim { background: #22d3ee; }
+.mv-skim, .mv-edge, .mv-wall { background: #22d3ee; }
 
 /* short screens (a phone on its side): a tighter list header so more of the list shows */
 @media (max-height: 520px) and (min-width: 821px) {
