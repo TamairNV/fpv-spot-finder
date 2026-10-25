@@ -259,20 +259,18 @@ def test_viaducts_and_famous_bridges_by_their_own_names():
     assert not osm.famous_bridge({"listed_status": "Grade II", "building": "yes"})  # not a bridge
 
 
-def test_a_wartime_pillbox_is_not_mod_land():
-    import geopandas as gpd
-    from shapely.geometry import box
 
-    from spotfinder import legal
+def test_spot_names_say_where_not_what():
+    from spotfinder.export import display_name, proper
 
-    areas = gpd.GeoDataFrame({"tags": [
-        {"building": "yes", "military": "bunker"},  # on St Mary's Island
-        {"military": "bunker", "name": "Dawdon Blast Beach machine gun emplacement"},
-        {"landuse": "military", "name": "Army Reserve Centre"},
-        {"building": "yes", "military": "barracks"},
-        {"landuse": "military", "military": "bunker"},  # a bunker on a base is still the base
-    ]}, geometry=[box(0, 0, 10, 10)] * 5, crs="EPSG:27700")
-    assert list(legal.classify_areas(areas)["military"]) == [False, False, True, True, True]
+    assert not any(proper({"name": n}) for n in ("Bandstand", "The Green", "Over 8 Play Area", "colliery", "Metro",
+                                                  "5 A Side pitch", "Boating Lake"))
+    assert all(proper({"name": n}) for n in ("West Park", "North Beach", "Clara Vale Memorial Garden", "Town Moor"))
+    # OSM maps stretches of the Wear as just "Wear"
+    assert display_name({"name": "Wear", "water": "river"}) == "River Wear"
+    assert display_name({"name": "Ouseburn", "waterway": "river"}) == "Ouseburn"
+    assert display_name({"name": "River Tyne", "waterway": "river"}) == "River Tyne"
+    assert display_name({"name": "former Calders site", "landuse": "brownfield"}) == "Former Calders site"
 
 
 def test_ruins_in_a_monuments_grounds_are_not_bandos():

@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -202,17 +203,50 @@ def write_legal_layers(region: Region) -> list:
 # "By Premier Inn" says little about the place.
 NOT_A_PLACE = {"hotel", "hostel", "guest_house", "motel", "apartment", "chalet", "fitness_centre", "sports_hall",
                "bowling_alley", "amusement_arcade", "dance", "escape_game", "adult_gaming_centre", "sauna",
-               "tanning_salon", "trampoline_park", "indoor_play", "information", "artwork", "gallery"}
+               "tanning_salon", "trampoline_park", "indoor_play", "information", "artwork", "gallery", "schoolyard",
+               "caravan_site", "camp_site"}
+# Names that only say what a thing is ("Bandstand", "The Green", "Over 8 Play Area", a mine called "colliery"):
+# a spot on one is named after the park round it instead.
+GENERIC_WORDS = {
+    "the", "a", "and", "&", "of", "over", "under", "side", "small", "big", "little", "main", "old", "new", "upper",
+    "lower", "play", "area", "picnic", "recreation", "recreational", "ground", "grounds", "playing", "field",
+    "fields", "green", "paddock", "bandstand", "bmx", "track", "skate", "park", "boating", "lake", "pond", "ponds",
+    "pitch", "pitches", "memorial", "garden", "gardens", "courtyard", "amphitheatre", "ampitheatre", "shingle",
+    "shingles", "car", "allotment", "allotments", "wood", "woods", "woodland", "plantation", "grass", "lawn",
+    "open", "space", "multi-use", "games", "muga", "court", "courts", "tennis", "football", "nature", "wildlife",
+    "dog", "trail", "community", "village", "public", "colliery", "mine", "shaft", "quarry", "ruin", "ruins",
+    "monument", "cross", "well", "spring", "tumulus", "cairn", "metro", "railway", "line", "disused"}
+# a river mapped as just "Wear" or "Don" is the River Wear to anyone standing by it
+# (or the Ouseburn: a burn's name often ends in one)
+WATER_WORD = re.compile(r"\b(river|canal|stream|drain|watercourse)\b|(burn|beck|brook|water|gill|dene|cut|gut|sike|syke|"
+                        r"letch|race|leat)\b", re.I)
+
+
+def proper(t: dict) -> bool:
+    """A name that names the place, not just what it is."""
+    words = re.findall(r"[\w'-]+|&", (t.get("name") or "").lower())
+    return bool(words) and not all(w in GENERIC_WORDS or w.isdigit() for w in words)
+
+
+def display_name(t: dict) -> str:
+    """What to call a feature on a spot's card: "River Wear" for a stretch mapped as "Wear", with a capital."""
+    name = t.get("name") or ""
+    if (t.get("waterway") == "river" or t.get("water") == "river") and not WATER_WORD.search(name):
+        name = f"River {name}"
+    return name[:1].upper() + name[1:]
 
 
 SIGHT_M = 90  # a spot this close to a named viaduct, bridge or landmark is named after it
+BY_M = 250  # ...else after a named place it's in, or one this close
+FAMOUS_PULL_M = 20
+FAMOUS_HISTORIC = {"abbey", "monastery", "ruins", "fort", "tower", "city_gate", "manor"}  # ...if it's listed
 
 
 class Namer:
     def __init__(self, region: Region):
         o = osm.extract(region)
         a, n, ln = o["areas"], o["nodes"], o["lines"]
-        named = lambda g: g[g["tags"].map(lambda t: bool(t.get("name")))]
+        named = lambda g: g[g["tags"].map(proper)]
         good_area = named(a)[named(a)["tags"].map(lambda t: (any(k in t for k in (
             "leisure", "natural", "historic", "water", "place", "military", "tourism"))
             or t.get("landuse") in {"forest", "meadow", "recreation_ground", "quarry", "brownfield", "reservoir"})
@@ -221,13 +255,15 @@ class Namer:
         self.areas = good_area.reset_index(drop=True)
         self.area_tree = STRtree(self.areas.geometry.values)
         pts = named(n)
-        self.places = pts[pts["tags"].map(lambda t: t.get("place") in {
+        self.places = n[n["tags"].map(lambda t: bool(t.get("name")) and t.get("place") in {  # (Spring Gardens is a place)
             "city", "town", "village", "hamlet", "suburb", "neighbourhood", "quarter", "locality"})].reset_index(drop=True)
         self.place_tree = STRtree(self.places.geometry.values)
         # (memorial points are mostly plaques)
         feats = pts[pts["tags"].map(lambda t: any(k in t for k in ("natural", "historic", "tourism", "man_made"))
                                     and t.get("tourism") not in NOT_A_PLACE and t.get("historic") != "memorial")]
-        rivers = named(ln)[named(ln)["tags"].map(lambda t: t.get("waterway") in {"river", "canal"} or "bridge" in t)]
+        # (a railway or road over a bridge carries the line's or road's name: "Near Metro" says nothing)
+        rivers = named(ln)[named(ln)["tags"].map(lambda t: t.get("waterway") in {"river", "canal"} or (
+            "bridge" in t and bool(osm.BRIDGE_NAME.search(osm.bridge_name(t)))))]
         self.feats = pd.concat([feats, rivers]).reset_index(drop=True)
         self.feat_tree = STRtree(self.feats.geometry.values)
         # A named viaduct, bridge, lighthouse or monument right at the spot is what you'd call it: the Nine
@@ -236,11 +272,18 @@ class Namer:
         sight = lambda t: bool(((osm.is_viaduct(t) or t.get("man_made") == "bridge" or osm.famous_bridge(t))
                                 and (t.get("bridge:name") or not (t.get("railway") or t.get("highway"))
                                      or osm.BRIDGE_NAME.search(t.get("name") or "")))
-                               or t.get("man_made") == "lighthouse" or t.get("historic") in {"monument", "castle"})
+                               or t.get("man_made") in {"lighthouse", "windmill"} or t.get("historic") in {"monument", "castle"})
         self.sights = pd.concat([g[g["tags"].map(sight)] for g in (named(ln), named(a), pts)]).reset_index(drop=True)
         bridge_lines = ln[ln["tags"].map(lambda t: bool(t.get("bridge:name")) and sight(t))]
         self.sights = pd.concat([self.sights, bridge_lines]).reset_index(drop=True)
         self.sight_tree = STRtree(self.sights.geometry.values)
+        # A listed ruin or priory, or a famous artwork, names a spot that isn't in a named place already: Finchale
+        # Priory and the Angel of the North, but Gibside rather than its Orangery.
+        famous = lambda t: bool(t.get("wikidata") or t.get("heritage") or t.get("listed_status"))
+        minor = lambda t: (t.get("historic") in FAMOUS_HISTORIC and famous(t)) or (
+            t.get("tourism") == "artwork" and bool(t.get("wikidata")))
+        self.minor_sights = pd.concat([g[g["tags"].map(minor)] for g in (named(a), pts)]).reset_index(drop=True)
+        self.minor_tree = STRtree(self.minor_sights.geometry.values)
 
     def _nearest(self, tree, frame, p, max_d):
         if len(frame) == 0:
@@ -251,24 +294,37 @@ class Namer:
         d = frame.geometry.iloc[i].distance(p)
         return (frame.iloc[i], d) if d <= max_d else (None, None)
 
+    def _by(self, p: Point):
+        """The named place a spot is by: the nearest within BY_M, though a famous one wins over one up to
+        FAMOUS_PULL_M nearer (by the BALTIC, not by the building firm's yard next door)."""
+        idx = self.area_tree.query(p, predicate="dwithin", distance=BY_M)
+        if not len(idx):
+            return None
+        famous = lambda t: bool(t.get("wikidata") or t.get("heritage") or t.get("listed_status"))
+        return self.areas.iloc[min(idx, key=lambda i: self.areas.geometry.iloc[i].distance(p)
+                                   - FAMOUS_PULL_M * famous(self.areas["tags"].iloc[i]))]
+
     def name(self, x: float, y: float) -> tuple[str, str]:
         p = Point(x, y)
         title = None
         sight, _ = self._nearest(self.sight_tree, self.sights, p, SIGHT_M)
         cont = [i for i in self.area_tree.query(p, predicate="intersects")]
+        minor = None if sight is not None or cont else self._nearest(self.minor_tree, self.minor_sights, p, SIGHT_M)[0]
         if sight is not None:
-            title = sight["tags"].get("bridge:name") or sight["tags"]["name"]
+            title = sight["tags"].get("bridge:name") or display_name(sight["tags"])
+        elif minor is not None:
+            title = display_name(minor["tags"])
         elif cont:
             best = min(cont, key=lambda i: self.areas.geometry.iloc[i].area)
-            title = self.areas["tags"].iloc[best]["name"]
+            title = display_name(self.areas["tags"].iloc[best])
         else:
-            row, d = self._nearest(self.area_tree, self.areas, p, 250)
+            row = self._by(p)
             if row is not None:
-                title = f"By {row['tags']['name']}"
+                title = f"By {display_name(row['tags'])}"
             else:
                 row, d = self._nearest(self.feat_tree, self.feats, p, 300)
                 if row is not None:
-                    title = f"Near {row['tags']['name']}"
+                    title = f"Near {osm.bridge_name(row['tags']) if 'bridge' in row['tags'] else display_name(row['tags'])}"
         loc_row, _ = self._nearest(self.place_tree, self.places, p, 6000)
         locality = loc_row["tags"]["name"] if loc_row is not None else ""
         if not title:
