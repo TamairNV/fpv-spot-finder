@@ -49,6 +49,7 @@ HOMES_CODE = 1    # houses and their gardens (residential land that isn't a park
 PARKING_CODE = 2  # car parks: cars and people getting in and out
 VIADUCT_CODE = 3  # the deck of a railway or footpath viaduct or aqueduct (not a road one)
 INSTITUTION_CODE = 4  # school, college, university, hospital or prison grounds, playing fields and all
+LAND_VERSION = "2"  # bump when the codes change, so an older cached land_1m.tif is rebuilt (2: institutions)
 GREEN_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "village_green", "golf_course", "pitch"}
 GREEN_LANDUSE = {"recreation_ground", "village_green", "forest", "meadow", "grass"}
 GREEN_NATURAL = {"wood", "scrub", "grassland", "heath", "wetland"}
@@ -161,7 +162,10 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
 
     out = region.cache_dir / "land_1m.tif"
     if out.exists() and not refresh:
-        return out
+        with rasterio.open(out) as ds:
+            if ds.tags().get("land_version") == LAND_VERSION:
+                return out
+        log.info("land_1m.tif predates land codes v%s: rebuilding", LAND_VERSION)
     o = osm.extract(region)
     a = o["areas"]
     polys = a[a.geom_type.isin(["Polygon", "MultiPolygon"])]
@@ -217,6 +221,7 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
         with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
             for win, land in tqdm(pool.map(lambda j: tile(*j), jobs), total=len(jobs), desc="rasterize land"):
                 dst.write(land, 1, window=win)
+        dst.update_tags(land_version=LAND_VERSION)
     finally:
         dst.close()
     tmp.rename(out)

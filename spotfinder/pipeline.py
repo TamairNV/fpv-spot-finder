@@ -33,6 +33,7 @@ def prepare(region: Region) -> None:
 def compute_cells(region: Region, use_lidar: bool = True, workers: int = 4) -> dict[str, np.ndarray]:
     """All per-cell features for the region, cached in data/out/<region>/cells.npz."""
     g = legal.build_legal(region)  # first: it's quick, and fails fast on a missing NATS file
+    rasterize.build_land_raster(region)  # a cached one from before the current land codes is rebuilt
     t0 = time.time()
     height_cells, gaps, lone = features.run(region, workers=workers, use_lidar=use_lidar)
     log.info("height features in %.0fs", time.time() - t0)
@@ -187,6 +188,7 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
     """Score every cell and export the spots. By default legality is a label on each spot, not a filter:
     the app lists potential places and says which rules they meet. No-fly zones, MOD land and danger areas
     stay out either way. strict=True only lists spots each drone may fly under its Open subcategory."""
+    rasterize.build_land_raster(region)  # the lines keep off its homes, car parks and school grounds
     cells = derived.add_derived(load_cells(region), region)
     meta = json.loads((region.out_dir / "cells_meta.json").read_text())
     seeds = load_seeds()
