@@ -572,6 +572,33 @@ def _palette_png(idx: np.ndarray, colours: list[tuple], path: Path) -> None:
     im.save(path, optimize=True, transparency=bytes(int(c[3]) for c in colours))
 
 
+WINDS = ("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")
+
+
+def tell_apart(feats: list[dict], xy: list[tuple[float, float]]) -> None:
+    """Spots that share a name and a place say which part of it they're in, "Riverside Park (south)", so a
+    big park with three spots doesn't read like the same spot three times. Two on the same side: the one
+    further out keeps the side and the other is the middle. `xy` is each spot's BNG position."""
+    groups: dict[tuple, list[int]] = {}
+    for i, f in enumerate(feats):
+        groups.setdefault((f["properties"]["title"], f["properties"]["locality"]), []).append(i)
+    for idx in groups.values():
+        if len(idx) < 2:
+            continue
+        off = np.array([xy[i] for i in idx], dtype=float)
+        off -= off.mean(axis=0)
+        words = [WINDS[round(math.degrees(math.atan2(dx, dy)) / 45) % 8] for dx, dy in off]
+        for w in set(words):
+            same = [k for k, v in enumerate(words) if v == w]
+            for k in same:
+                if k != max(same, key=lambda j: np.hypot(*off[j])):
+                    words[k] = "middle"
+        seen: dict[str, int] = {}
+        for i, w in zip(idx, words):  # best first, so a third on one side is the one numbered
+            seen[w] = seen.get(w, 0) + 1
+            feats[i]["properties"]["title"] += f" ({w})" if seen[w] == 1 else f" ({w} {seen[w]})"
+
+
 def _gpx(feats: list[dict], title: str) -> str:
     """Waypoints for the spots, for OS Maps, Google My Maps, Gaia, a GPS..."""
     from xml.sax.saxutils import escape
@@ -737,7 +764,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
         profile = scoring.PROFILES[key]
         heat_corners = _heat_png(region, res["heat"], res["eligible"], out / f"heat_{key}.png")
         heat_lo_corners = _heat_png(region, res["heat"], res["eligible"], out / f"heatlo_{key}.png", block=4)
-        feats = []
+        feats, feats_xy = [], []
         for rank, (r, c) in enumerate(res["spots"], start=1):
             x, y = cell_center(region, r, c)
             lon, lat = bng_to_lonlat(x, y)
@@ -873,6 +900,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 props["park"] = park
             feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                           "properties": props})
+            feats_xy.append((x, y))
+        tell_apart(feats, feats_xy)
         (out / f"spots_{key}.gpx").write_text(_gpx(feats, f"{profile.label} spots, {region.name}"))
         # The list only needs the summary; the spot card's extras load after the list is up.
         details = {f["properties"]["id"]: {k: f["properties"].pop(k) for k in DETAIL_KEYS if k in f["properties"]}

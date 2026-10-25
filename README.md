@@ -280,6 +280,8 @@ change.
    harder (for 5" cine: an icon, then a bridge, a bando, a beach).
    Each spot carries a "why" list: points out of 100 per reason, with the numbers behind it (e.g.
    "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
+   Spots that share a name and a place say which part of it they're in, from where they lie against
+   each other: "Riverside Park (south)", "(middle)", "(north)".
 6. **Parks**: the ranking alone favours woods and riversides out of town, so every named park,
    common or recreation ground of 4 ha or more that has no spot yet gets one at its best place
    (listed after the top 250), and every spot inside a park is labelled with it.

@@ -3,7 +3,7 @@
 import numpy as np
 
 from spotfinder import bandos, features, legal, parks, scoring
-from spotfinder.export import os_grid_ref
+from spotfinder.export import os_grid_ref, tell_apart
 from spotfinder.heights import Tile
 from spotfinder.sources import lidar_wcs
 
@@ -19,6 +19,16 @@ def make_tile(ohm, trees=None, bld=None):
 def test_grid_ref_newcastle():
     assert os_grid_ref(424000, 564000) == "NZ240640"
     assert os_grid_ref(424567, 564321, digits=8) == "NZ24566432"
+
+
+def test_spots_sharing_a_name_say_which_part():
+    spot = lambda title, place="Hebburn": {"properties": {"title": title, "locality": place}}
+    feats = [spot("Riverside Park"), spot("Riverside Park"), spot("Riverside Park"), spot("Town Moor", "Spital Tongues"),
+             spot("By River Wear", "Brasside"), spot("By River Wear", "Durham")]
+    tell_apart(feats, [(0, -400), (60, -250), (0, 600), (5000, 0), (9000, 0), (9000, 4000)])
+    assert [f["properties"]["title"] for f in feats] == [
+        "Riverside Park (south)", "Riverside Park (middle)", "Riverside Park (north)", "Town Moor",
+        "By River Wear", "By River Wear"]  # a different place under the name tells those two apart already
 
 
 def test_parse_lower_limits():
