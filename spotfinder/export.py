@@ -250,7 +250,8 @@ class Namer:
         good_area = named(a)[named(a)["tags"].map(lambda t: (any(k in t for k in (
             "leisure", "natural", "historic", "water", "place", "military", "tourism"))
             or t.get("landuse") in {"forest", "meadow", "recreation_ground", "quarry", "brownfield", "reservoir"})
-            and t.get("tourism") not in NOT_A_PLACE and t.get("leisure") not in NOT_A_PLACE)]
+            and t.get("tourism") not in NOT_A_PLACE and t.get("leisure") not in NOT_A_PLACE
+            and t.get("location") != "indoor")]  # (a club's hot tub was naming a whoop spot)
         good_area = good_area[good_area.geometry.area < 5e6]
         self.areas = good_area.reset_index(drop=True)
         self.area_tree = STRtree(self.areas.geometry.values)
@@ -569,6 +570,7 @@ def _why_text(k: str, key: str, s: dict) -> str:
         "trees": f"{s['tree_pct']}% trees to weave through",
         "under": "Tall trees with see-through crowns: maybe room underneath (LiDAR can't see where branches start)",
         "landmark": f"Landmark {away(s['landmark_m'])}",
+        "hero": f"Big landmark {away(s['hero_m'])} to fly round" if "hero_m" in s else "A big landmark to fly round",
         "plaza": "Open plaza between buildings",
         "sunset": f"{s['west_edge_m']} m of trees and walls facing the sunset, open ground in front"
         if min(s["sunset_deg"], s["sunrise_deg"]) > -1
@@ -774,6 +776,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "access_m": int(wmin("dist_access")), "road_busy_m": int(wmin("dist_road_busy")),
                     "beach_m": int(min(wmin("dist_beach"), 99999)), "sea_m": int(min(wmin("dist_sea"), 99999)),
                     "landmark_m": int(wmin("dist_landmark")),
+                    "hero_m": int(wmin("dist_hero" if "dist_hero" in cells else "dist_icon")),
                     "lone_h_max": round(wmax("lone_h_max"), 1), "bld_h_max": round(wmax("bld_h_max"), 1),
                     "gap_q": round(ws("gq5" if key != "cine85" else "gqw"), 1),
                     "line_moves": len(line["moves"]) if line else int(wmax("line5_n" if key != "cine85" else "linew_n")),
