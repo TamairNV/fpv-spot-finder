@@ -780,11 +780,11 @@ def test_a_shot_passes_along_the_bridge_on_its_open_side():
     air[198:203, 50:350] = 25  # a viaduct's deck, 25 m up, running east
     blocked = np.zeros((400, 400), bool)
     blocked[:175, :] = True  # houses all along its north side
-    p = shots.pass_along(air, blocked, (200, 50), (200, 349), 25.0)
+    p = shots.pass_along(air, blocked, [(200, 50), (200, 349)], 25.0)
     assert p["off"] == 25 and p["side"] == 180.0 and p["h"] == 25 and p["len"] >= 290  # south side, deck height
     assert abs(p["a"][0] - 225) < 1 and abs(p["b"][0] - 225) < 1
     blocked[:] = True
-    assert shots.pass_along(air, blocked, (200, 50), (200, 349), 25.0) is None
+    assert shots.pass_along(air, blocked, [(200, 50), (200, 349)], 25.0) is None
 
 
 def test_a_shot_flies_level_so_rising_ground_stays_under_it():
@@ -801,11 +801,26 @@ def test_a_shot_flies_level_so_rising_ground_stays_under_it():
     ground = np.broadcast_to(np.clip((np.abs(np.arange(400) - 200.0) - 80) * 0.5, 0, None), (400, 400)).astype("float32")
     air = np.zeros((400, 400), "float32")
     air[198:203, 50:350] = np.clip(30 - ground[198:203, 50:350], 0, None)
-    p = shots.pass_along(air, None, (200, 50), (200, 349), 30.0, ground)
+    p = shots.pass_along(air, None, [(200, 50), (200, 349)], 30.0, ground)
     assert p["h"] == 30 and p["alt"] == 30.0 and 230 <= p["len"] <= 262
     assert 68 <= min(p["a"][1], p["b"][1]) and max(p["a"][1], p["b"][1]) <= 332
-    flat = shots.pass_along(air, None, (200, 50), (200, 349), 30.0)
+    flat = shots.pass_along(air, None, [(200, 50), (200, 349)], 30.0)
     assert flat["len"] > p["len"] + 30
+
+
+def test_a_shot_flies_along_the_cliffs_out_over_the_bay():
+    from spotfinder import shots
+
+    # a bay 120 m across, with cliffs 30 m high round it: the pass follows them, level with the top, over the sea
+    rr, cc = np.mgrid[:400, :400]
+    sea = np.hypot(rr - 200, cc - 200) < 120
+    ground = np.where(sea, 0.0, 30.0).astype("float32")
+    q = np.radians(np.linspace(200, 340, 60))
+    cliff = np.c_[200 - 120 * np.cos(q), 200 + 120 * np.sin(q)]  # round the west and north of the bay
+    p = shots.pass_along(np.zeros((400, 400), "float32"), None, cliff, 30.0, ground)
+    assert p["off"] == 25 and p["h"] == 30 and p["alt"] == 30.0 and p["len"] >= 200
+    assert (np.hypot(p["path"][:, 0] - 200, p["path"][:, 1] - 200) < 100).all()  # out over the water
+    assert len(p["look"]) == len(p["path"]) and (np.abs(np.hypot(p["look"][:, 0] - 200, p["look"][:, 1] - 200) - 120) < 1).all()
 
 
 def test_lines_dont_fly_through_trees_hanging_over_a_river(monkeypatch):

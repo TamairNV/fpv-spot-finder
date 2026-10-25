@@ -312,7 +312,9 @@ function shotBox(p, lon, lat) {
   };
   const what = s.kind === 'orbit'
     ? `Orbit ${s.subject}: ${s.r} m out and ${s.h} m up, ${s.deg >= 360 ? 'all the way round' : `round its ${towards(s.from + s.deg / 2)} side (${s.deg}°)`}.`
-    : `Fly along ${s.subject} at its deck height, ${s.h} m up and ${s.off} m off its ${towards(s.side)} side, for ${s.len} m.`;
+    : s.along === 'top'
+      ? `Fly along ${s.subject} level with the top, ${s.h} m up and ${s.off} m out from the edge on the ${towards(s.side)} side, for ${s.len} m.`
+      : `Fly along ${s.subject} at its deck height, ${s.h} m up and ${s.off} m off its ${towards(s.side)} side, for ${s.len} m.`;
   return el('div', { class: 'box line-box shot-box' },
     el('h4', {}, 'A shot to film'),
     el('p', {}, what),

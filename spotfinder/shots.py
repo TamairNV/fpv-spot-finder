@@ -1,5 +1,6 @@
-"""Shots for the 5" cine: a way to film what a spot is named after. A lighthouse, castle, monument or ruin
-gets an orbit, a bridge or viaduct a pass along its side at deck height. A shot keeps off the ground a line
+"""Shots for the 5" cine: a way to film what a spot is named after. A lighthouse, castle, monument, ruin or
+sea stack gets an orbit, a bridge or viaduct a pass along its side at deck height, and cliffs a pass along
+them level with the top. A shot keeps off the ground a line
 keeps off (lines.keep_out: homes, car parks, roads, school grounds...) and clear of anything that sticks up
 into it, so round a lighthouse with its keepers' cottages beside it the orbit comes out as an arc round the
 sea side. A shot is flown level, so where the ground rises (a bridge's valley sides, the hill a monument stands
@@ -10,6 +11,7 @@ from the DTM, or none for flat ground at 0)."""
 from __future__ import annotations
 
 import numpy as np
+import shapely
 from scipy import ndimage
 
 ORBIT_OUT = (25.0, 35.0, 50.0, 70.0)  # metres out from the subject's edge to try, closest first
@@ -104,34 +106,44 @@ def sample(a: np.ndarray, r: np.ndarray, c: np.ndarray) -> np.ndarray:
     return a[np.clip(np.rint(r).astype(int), 0, a.shape[0] - 1), np.clip(np.rint(c).astype(int), 0, a.shape[1] - 1)]
 
 
-def pass_along(air: np.ndarray, blocked: np.ndarray | None, a: tuple[float, float], b: tuple[float, float],
-               deck: float, ground: np.ndarray | None = None) -> dict | None:
-    """A pass beside a bridge or viaduct whose deck runs from `a` to `b` (row, col) with its top at `deck`:
-    the longest clear stretch, PASS_MIN_M or more, of the lines PASS_OUT m off either side of it, flown level
-    at the deck's height (PASS_H over the lowest ground under it), as {"a", "b" (its own ends, row/col), "off",
-    "side" (the bearing from the deck to it), "h" (over the lowest ground along it: the river or the valley
-    floor), "alt", "len"}; None if none is."""
-    a, b = np.asarray(a, float), np.asarray(b, float)
-    length = float(np.hypot(*(b - a)))
-    if length < PASS_MIN_M:
+def _resample(line: shapely.LineString, step: float) -> np.ndarray:
+    """Points `step` apart along a line, both ends included, as (row, col) rows."""
+    d = np.append(np.arange(0.0, line.length, step), line.length)
+    return shapely.get_coordinates(shapely.line_interpolate_point(line, d))
+
+
+def pass_along(air: np.ndarray, blocked: np.ndarray | None, line, deck: float,
+               ground: np.ndarray | None = None) -> dict | None:
+    """A pass beside something long, a bridge's deck or a line of cliffs, running along `line` ((row, col)
+    points) with its top at `deck`: the longest clear stretch, PASS_MIN_M or more, of the lines PASS_OUT m off
+    either side of it, flown level with the top (PASS_H over the lowest ground under it). As {"path" (its
+    points, row/col, STEP_M apart), "look" (the nearest point of `line` to each, to film), "a", "b" (its ends),
+    "off", "side" (the bearing from the line to its middle), "h" (over the lowest ground along it: the river,
+    the valley floor, the beach), "alt", "len"}; None if none is."""
+    line = shapely.LineString(np.asarray(line, float))
+    if line.length < PASS_MIN_M:
         return None
     g = _ground(air, ground)
-    u = (b - a) / length
-    s = np.arange(0.0, length + 1e-6, STEP_M)
-    axis = a + s[:, None] * u
+    axis = _resample(line, STEP_M)
     low = float(sample(g, axis[:, 0], axis[:, 1]).min())
     alt = low + float(np.clip(deck - low, *PASS_H))
     ok = flyable(air + g, blocked, alt)
     best = None
     for off in PASS_OUT:
         for side in (1.0, -1.0):
-            n = side * np.array([-u[1], u[0]])  # left of a -> b, then right
-            pts = axis + off * n
+            curve = line.offset_curve(side * off)
+            if curve.is_empty:
+                continue
+            pts = _resample(max(shapely.get_parts(curve), key=lambda q: q.length), STEP_M)
             start, k = longest_run(_at(ok, pts[:, 0], pts[:, 1]))
             run = max(k - 1, 0) * STEP_M
             if run >= PASS_MIN_M and (best is None or run > best["len"]):
-                bearing = float(np.degrees(np.arctan2(n[1], -n[0])) % 360)
-                under = sample(g, pts[start:start + k, 0], pts[start:start + k, 1]).min()
-                best = {"a": tuple(pts[start]), "b": tuple(pts[start + k - 1]), "off": off, "side": bearing,
-                        "h": round(alt - float(under)), "alt": alt, "len": round(run)}
+                path = pts[start:start + k]
+                look = shapely.get_coordinates(shapely.line_interpolate_point(
+                    line, shapely.line_locate_point(line, shapely.points(path))))
+                v = path[len(path) // 2] - look[len(path) // 2]
+                under = sample(g, path[:, 0], path[:, 1]).min()
+                best = {"path": path, "look": look, "a": tuple(path[0]), "b": tuple(path[-1]), "off": off,
+                        "side": float(np.degrees(np.arctan2(v[1], -v[0])) % 360), "h": round(alt - float(under)),
+                        "alt": alt, "len": round(run)}
     return best
