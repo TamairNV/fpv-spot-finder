@@ -87,7 +87,7 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-25T04:27:46+00:00",
+  "generated_at": "2026-10-25T05:01:29+00:00",
   "sources": {
     "computed_at": "2026-10-25T04:18:40+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
@@ -172,6 +172,7 @@
         "relief": 0.16,
         "bridge": 0.14,
         "landmark": 0.16,
+        "hero": 0.16,
         "sunset": 0.1,
         "space": 0.1,
         "edges": 0.08,
@@ -190,6 +191,7 @@
         "relief": "slopes, banks or cliffs to dive",
         "bridge": "a bridge or viaduct nearby",
         "landmark": "a landmark in shot",
+        "hero": "a castle, lighthouse or monument to fly round",
         "sunset": "a clear view of the sunset or sunrise for golden hour",
         "space": "open ground to carry speed",
         "edges": "tree lines and edges to skim along",
