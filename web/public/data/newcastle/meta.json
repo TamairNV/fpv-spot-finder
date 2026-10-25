@@ -87,7 +87,7 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-25T09:14:46+00:00",
+  "generated_at": "2026-10-25T09:28:59+00:00",
   "sources": {
     "computed_at": "2026-10-25T06:44:05+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
