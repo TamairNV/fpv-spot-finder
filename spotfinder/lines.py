@@ -8,7 +8,7 @@ greedily, preferring good obstacles, a change of move and a smooth heading, and 
 spot's line score is the best run that starts in it.
 
 Lines stay off people's homes and gardens, car parks, school and hospital grounds, playgrounds, roads,
-working railways and pylon lines, and the 5 inch keeps clear of buildings altogether. A viaduct's
+working railways and power lines, and the 5 inch keeps clear of buildings altogether. A viaduct's
 arches are obstacles too: LiDAR only sees the deck, so where the deck stands high above the ground
 there's an arch every few metres to fly through, and a run can weave from one arch to the next under
 the deck.
@@ -70,7 +70,7 @@ WHOOP = Style(min_link=5.0, max_link=35.0, gap_max_w=5.0, corridor=3, bld_clear=
 
 def keep_out(land: np.ndarray | None, d_bld: np.ndarray | None, d_road: np.ndarray | None, style: Style) -> np.ndarray | None:
     """Pixels a line can't use: homes and gardens, car parks, school and hospital grounds, working railways,
-    playgrounds and pylon lines (rasterize.KEEP_OFF), near a road, and for the 5 inch near any building.
+    playgrounds and power lines (rasterize.KEEP_OFF), near a road, and for the 5 inch near any building.
     d_bld / d_road are metres to the nearest building / road pixel (None: there's none)."""
     out = None
     for m in (np.isin(land, KEEP_OFF) if land is not None else None,

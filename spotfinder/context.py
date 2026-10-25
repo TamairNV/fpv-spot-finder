@@ -212,7 +212,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     ])
     log.info("icons: %d, %d of them heroes", len(icons), len(heroes))
     hazards = pd.concat([
-        lines[lines["tags"].map(lambda t: t.get("power") in {"line", "minor_line"})].geometry,
+        lines[lines["tags"].map(osm.is_power_line)].geometry,
         nodes[nodes["tags"].map(lambda t: t.get("man_made") in HAZARD_MAN_MADE
                                 or (t.get("power") == "generator" and t.get("generator:source") == "wind"))].geometry,
     ])

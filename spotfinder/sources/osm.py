@@ -250,6 +250,11 @@ def is_institution(t: dict) -> bool:
     return t.get("amenity") in INSTITUTION_AMENITY or t.get("landuse") == "education"
 
 
+def is_power_line(t: dict) -> bool:
+    """An overhead power line, on pylons (power=line) or wooden poles (minor_line); not one that's buried."""
+    return t.get("power") in {"line", "minor_line"} and t.get("location") not in {"underground", "underwater"}
+
+
 ACTIVE_RAILWAY = {"rail", "light_rail", "tram", "subway", "narrow_gauge", "preserved"}
 
 

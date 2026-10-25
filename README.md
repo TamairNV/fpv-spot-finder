@@ -199,8 +199,9 @@ seeds; places like your thumbs-down spots get pulled down.
    Lines keep off people's homes and gardens (residential land that isn't a park or a big green), car
    parks, school, college, university, hospital and prison grounds (playing fields included),
    children's playgrounds (10 m round), working railways and the Metro in the open air (8 m either
-   side: trains, and often overhead wires), pylon lines (15 m either side: the wires hang well out from
-   the pylons) and roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building;
+   side: trains, and often overhead wires), power lines (15 m either side of a pylon line: the wires hang
+   well out from the pylons; 5 m of a wooden-pole one, whose wires are low) and roads (6 m for the 5",
+   3 m for the whoop), and the 5" keeps 12 m from any building;
    gaps and lone trees in any of those places don't count at all. A footpath or disused railway viaduct
    (tagged as one, or a bridge called one) whose deck is 8 m+ above the ground has an arch every 15 m:
    a fly-through gap and a move of its own. One still carrying trains (Plessey, Ouseburn, Willington
@@ -208,7 +209,7 @@ seeds; places like your thumbs-down spots get pulled down.
    Neighbouring arches link under the deck, so a run can weave through up to four of them (out through
    one, round the pier, back through the next), where there's 4 m of open air beside the deck on both
    sides to turn in. `land_1m.tif` holds those homes, car parks, school and hospital grounds,
-   playgrounds, railways, pylon lines and viaduct decks. No spot is ever pinned on school, hospital or
+   playgrounds, railways, power lines and viaduct decks. No spot is ever pinned on school, hospital or
    prison grounds, and a school's playing field isn't public land.
 3. **Context** from OSM and Overture: distance to water, the sea and beaches, bridges and viaducts,
    bandos, cliffs and quarries, landmarks, masts and cranes, paths, car parks, fast main roads,

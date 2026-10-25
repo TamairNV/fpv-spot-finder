@@ -247,7 +247,7 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     grid_n = size // n
     for key in ("gaps", "gaps_all", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max"):
         cells[key] = np.zeros((grid_n, grid_n), dtype="float32")
-    # Nothing in people's gardens, on car parks, in school grounds, playgrounds or by the tracks or a pylon line
+    # Nothing in people's gardens, on car parks, in school grounds, playgrounds or by the tracks or a power line
     # counts, and a viaduct's arches are gaps too.
     home = np.isin(t.land, KEEP_OFF) if t.land is not None else None
     at_home = lambda r, c: home is not None and bool(home[min(int(round(r)), home.shape[0] - 1),

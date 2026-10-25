@@ -52,13 +52,16 @@ VIADUCT_CODE = 3  # the deck of a footpath or disused railway viaduct or aqueduc
 INSTITUTION_CODE = 4  # school, college, university, hospital or prison grounds, playing fields and all
 RAILWAY_CODE = 5  # a working railway and RAIL_CLEAR_M either side of it: trains, and often overhead wires
 PLAYGROUND_CODE = 6  # a children's playground and PLAY_CLEAR_M round it
-PYLON_CODE = 7  # a pylon line and PYLON_CLEAR_M either side: the wires hang well out from the pylons
+PYLON_CODE = 7  # a power line and PYLON_CLEAR_M either side (POLE_CLEAR_M on wooden poles): the wires hang
+                # well out from the pylons, and a pole line's are low
 KEEP_OFF = (HOMES_CODE, PARKING_CODE, INSTITUTION_CODE, RAILWAY_CODE, PLAYGROUND_CODE, PYLON_CODE)
 RAIL_CLEAR_M = 8.0
 PLAY_CLEAR_M = 10.0
 PLAY_NODE_M = 20.0  # a playground mapped as a point: assume one 20 m across, plus the clearance
 PYLON_CLEAR_M = 15.0
-LAND_VERSION = "4"  # bump when the codes change, so an older cached land_1m.tif is rebuilt (4: playgrounds, pylons)
+POLE_CLEAR_M = 5.0
+LAND_VERSION = "5"  # bump when the codes change, so an older cached land_1m.tif is rebuilt (4: playgrounds, pylons;
+                    # 5: wooden-pole lines)
 GREEN_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "village_green", "golf_course", "pitch"}
 GREEN_LANDUSE = {"recreation_ground", "village_green", "forest", "meadow", "grass"}
 GREEN_NATURAL = {"wood", "scrub", "grassland", "heath", "wetland"}
@@ -166,7 +169,7 @@ def build_vector_rasters(region: Region, tile_m: int = 2000, refresh: bool = Fal
 
 
 def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False) -> Path:
-    """land_1m.tif: homes and gardens, car parks, viaduct decks, institutions, railways, playgrounds and pylon
+    """land_1m.tif: homes and gardens, car parks, viaduct decks, institutions, railways, playgrounds and power
     lines (codes above), from OpenStreetMap."""
     from .sources import osm
 
@@ -193,7 +196,9 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
     via = l[vt.map(lambda t: osm.is_viaduct(t) and t.get("highway") not in ROAD_HIGHWAYS
                    and t.get("railway") not in osm.ACTIVE_RAILWAY)]
     railways = l[vt.map(osm.is_active_railway)].geometry.buffer(RAIL_CLEAR_M, cap_style="flat")
-    pylons = l[vt.map(lambda t: t.get("power") == "line")].geometry.buffer(PYLON_CLEAR_M, cap_style="flat")
+    power = l[vt.map(osm.is_power_line)]
+    pole = power["tags"].map(lambda t: t["power"] == "minor_line").to_numpy(bool)
+    pylons = power.geometry.buffer(np.where(pole, POLE_CLEAR_M, PYLON_CLEAR_M), cap_style="flat")
     nodes = o["nodes"]
     play = pd.concat([polys[tag("leisure") == "playground"].geometry.buffer(PLAY_CLEAR_M),
                       nodes[nodes["tags"].map(lambda t: t.get("leisure") == "playground")].geometry.buffer(PLAY_NODE_M)])

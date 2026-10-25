@@ -449,6 +449,14 @@ def test_lines_keep_out_of_playgrounds_and_from_under_pylon_lines():
     assert blocked.sum() == 100 + 400
 
 
+def test_power_lines_overhead_not_buried():
+    from spotfinder.sources import osm
+
+    assert osm.is_power_line({"power": "line"}) and osm.is_power_line({"power": "minor_line"})
+    assert not osm.is_power_line({"power": "line", "location": "underground"})
+    assert not osm.is_power_line({"power": "cable"}) and not osm.is_power_line({"power": "tower"})
+
+
 def test_a_bridge_carrying_trains_is_not_one_to_fly_round():
     import geopandas as gpd
     from shapely.geometry import LineString
