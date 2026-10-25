@@ -58,6 +58,8 @@ RECREATION_LANDUSE = {"recreation_ground", "village_green"}
 RECREATION_TOURISM = {"camp_site", "caravan_site", "picnic_site", "theme_park", "zoo", "attraction"}
 NATURE_DESIGNATIONS = {"site_of_special_scientific_interest", "local_nature_reserve", "national_nature_reserve",
                        "special_protection_area", "special_area_of_conservation", "ramsar"}
+# Pillboxes and gun emplacements from the war, all along the coast (one's on St Mary's Island): not MOD land.
+MILITARY_RELICS = {"bunker", "trench"}
 
 # Bits in the land-flag raster: things that usually need permission before take-off.
 FLAG_NATIONAL_TRUST = 1
@@ -208,7 +210,7 @@ def classify_areas(areas: gpd.GeoDataFrame) -> pd.DataFrame:
         "recreational": leisure.isin(RECREATION_LEISURE) | landuse.isin(RECREATION_LANDUSE)
         | tourism.isin(RECREATION_TOURISM) | (natural == "beach") | (designation == "common"),
         "common": (leisure == "common") | (designation == "common"),
-        "military": (landuse == "military") | t.map(lambda d: "military" in d),
+        "military": (landuse == "military") | t.map(lambda d: "military" in d and d["military"] not in MILITARY_RELICS),
         "nature": (leisure == "nature_reserve") | designation.isin(NATURE_DESIGNATIONS)
         | (t.map(lambda d: d.get("boundary") == "protected_area")),
         "national_trust": owner("national trust"),

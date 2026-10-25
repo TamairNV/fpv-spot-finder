@@ -243,6 +243,22 @@ def test_only_real_derelict_buildings_are_bandos():
     assert not bandos.heritage({"building": "yes", "disused": "yes", "listed_status": "Grade II"})
 
 
+def test_a_wartime_pillbox_is_not_mod_land():
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from spotfinder import legal
+
+    areas = gpd.GeoDataFrame({"tags": [
+        {"building": "yes", "military": "bunker"},  # on St Mary's Island
+        {"military": "bunker", "name": "Dawdon Blast Beach machine gun emplacement"},
+        {"landuse": "military", "name": "Army Reserve Centre"},
+        {"building": "yes", "military": "barracks"},
+        {"landuse": "military", "military": "bunker"},  # a bunker on a base is still the base
+    ]}, geometry=[box(0, 0, 10, 10)] * 5, crs="EPSG:27700")
+    assert list(legal.classify_areas(areas)["military"]) == [False, False, True, True, True]
+
+
 def test_ruins_in_a_monuments_grounds_are_not_bandos():
     import geopandas as gpd
     from shapely.geometry import box

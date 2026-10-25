@@ -221,7 +221,8 @@ seeds; places like your thumbs-down spots get pulled down.
 4. **Legal grid at 5 m**: A3 needs 150 m from residential, commercial, industrial and recreational
    land and 50 m from buildings and busy roads; flight restriction zones and restricted areas block
    both drones. MOD land and danger areas are never suggested, and nor is anywhere a spot would
-   reach onto them. National Trust, Forestry England, Woodland Trust, nature reserves, golf courses,
+   reach onto them (wartime pillboxes and gun emplacements, mapped as military bunkers all along
+   the coast, aren't MOD land). National Trust, Forestry England, Woodland Trust, nature reserves, golf courses,
    cemeteries, railways (not ones in tunnels) and power lines are flagged.
 5. **Score**: a weighted rule score blended 60/40 with similarity to your seed spots. For the 5",
    public land (parks, commons, country parks, beaches), bridges and viaducts, and bandos most of all
