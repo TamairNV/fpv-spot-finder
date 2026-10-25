@@ -431,7 +431,20 @@ export class Preview3D {
       const [tx, ty] = s.top || s.c; // the camera's on its highest point: the lighthouse, not its cottages
       const target = new THREE.Vector3(tx, this.groundAt(tx, -ty) + Math.max(2, s.subject_h * 0.7), -ty);
       this.shotLook = () => target;
-    } else {
+    } else if (s.path?.length > 1) { // along the deck or the cliffs, filming the nearest part of them
+      const inside = s.path.map((q, i) => i).filter((i) => Math.abs(s.path[i][0]) <= this.half && Math.abs(s.path[i][1]) <= this.half);
+      if (inside.length < 2) return; // (a long pass runs off the model)
+      const way = inside.map((i) => [s.path[i][0], -s.path[i][1]]);
+      const low = Math.min(...way.map(([x, z]) => this.groundAt(x, z)));
+      way.forEach(([x, z]) => pts.push(new THREE.Vector3(x, level ?? low + s.h, z)));
+      const look = inside.map((i) => [s.look[i][0], -s.look[i][1]]);
+      const drop = s.along === 'top' ? s.h * 0.5 : 0.15 * s.off; // the cliff's face, or across at the deck
+      this.shotLook = (p) => {
+        let k = 0;
+        way.forEach(([x, z], i) => { if (Math.hypot(x - p.x, z - p.z) < Math.hypot(way[k][0] - p.x, way[k][1] - p.z)) k = i; });
+        return new THREE.Vector3(look[k][0], p.y - drop, look[k][1]);
+      };
+    } else { // (older data: a straight pass between its ends)
       const [ax, ay] = s.a, [bx, by] = s.b;
       const along = (k) => [ax + (bx - ax) * k, -(ay + (by - ay) * k)];
       let low = Infinity;

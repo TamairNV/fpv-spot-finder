@@ -239,6 +239,8 @@ def display_name(t: dict) -> str:
 
 SIGHT_M = 90  # a spot this close to a named viaduct, bridge or landmark is named after it
 BY_M = 250  # ...else after a named place it's in, or one this close
+CLIFF_M = 100  # a 5" cine spot this close to cliffs gets a pass along them if it has nothing else to film
+CLIFF_JOIN_M = 300  # (the cliffs round it, joined up where OSM has them in pieces)
 FAMOUS_PULL_M = 20
 FAMOUS_HISTORIC = {"abbey", "monastery", "ruins", "fort", "tower", "city_gate", "manor"}  # ...if it's listed
 # Where a spot is: a village a bit further off says it better than a farm or a headland (place=locality is
@@ -305,6 +307,28 @@ class Namer:
             t.get("tourism") == "artwork" and bool(t.get("wikidata")))
         self.minor_sights = pd.concat([g[g["tags"].map(minor)] for g in (named(a), pts)]).reset_index(drop=True)
         self.minor_tree = STRtree(self.minor_sights.geometry.values)
+        # More to film on the coast that doesn't name a spot: a sea stack to orbit (Marsden Rock), cliffs to fly along
+        rock = lambda t: t.get("natural") in {"stack", "arch", "bare_rock"}
+        self.rocks = pd.concat([named(a)[named(a)["tags"].map(rock)],
+                                pts[pts["tags"].map(lambda t: t.get("natural") in {"stack", "arch"})]]).reset_index(drop=True)
+        self.rock_tree = STRtree(self.rocks.geometry.values)
+        self.cliffs = ln[ln["tags"].map(lambda t: t.get("natural") == "cliff")].reset_index(drop=True)
+        self.cliff_tree = STRtree(self.cliffs.geometry.values)
+
+    def rock(self, x: float, y: float):
+        """A named sea stack or rock within BY_M of a spot, to orbit: its OSM row, or None."""
+        return self._nearest(self.rock_tree, self.rocks, Point(x, y), BY_M)[0]
+
+    def cliff(self, x: float, y: float):
+        """The cliffs within CLIFF_M of a spot (the coast's, or a quarry's face), joined up with the pieces round
+        them: (the line, its name or None), or None."""
+        p = Point(x, y)
+        row, _ = self._nearest(self.cliff_tree, self.cliffs, p, CLIFF_M)
+        if row is None:
+            return None
+        near = self.cliffs.geometry.iloc[self.cliff_tree.query(p, predicate="dwithin", distance=CLIFF_JOIN_M)]
+        parts = shapely.get_parts(shapely.line_merge(shapely.union_all(near.values)))
+        return min(parts, key=lambda g: g.distance(p)), row["tags"].get("name")
 
     def _nearest(self, tree, frame, p, max_d):
         if len(frame) == 0:
@@ -507,26 +531,47 @@ def ground_1m(dtm: np.ndarray, region: Region, t) -> np.ndarray:
 
 def spot_shot(reader: HeightReader, namer: Namer, x: float, y: float, hint: tuple[float, float],
               ground: Ground | None = None, dtm: np.ndarray | None = None) -> dict | None:
-    """The 5" cine shot (shots.py) for a spot named after something to film, as the card and the 3D view draw
-    it: an orbit {"kind", "subject", "c" (its centre: dx, dy m from the spot), "ll" (lon, lat), "r", "h",
-    "alt", "from", "deg", "subject_h", "top" (its highest point, which the camera's on: dx, dy)} or a pass
-    {"kind", "subject", "a", "b" (its ends: dx, dy), "a_ll", "b_ll", "h", "alt", "off", "side", "len"}, with
-    "takeoff_xy" (BNG) where to stand for it, near `hint`, if there's a clean way in. It's flown level at "alt"
-    (m above sea level, from `dtm`, the 5 m DTM; without it the ground's taken as flat). None when the spot
-    isn't named after something to film or there's no clear way to film it."""
+    """The 5" cine shot (shots.py) for a spot with something to film, as the card and the 3D view draw it: an
+    orbit {"kind", "subject", "c" (its centre: dx, dy m from the spot), "ll" (lon, lat), "r", "h", "alt",
+    "from", "deg", "subject_h", "top" (its highest point, which the camera's on: dx, dy)} or a pass {"kind",
+    "along" ("deck" of a bridge or "top" of cliffs), "subject", "path" (dx, dy every 10 m or so), "path_ll",
+    "look" (the point of the subject to film from each), "a", "b" (its ends), "a_ll", "b_ll", "h", "alt",
+    "off", "side", "len"}, with "takeoff_xy" (BNG) where to stand for it, near `hint`, if there's a clean way
+    in. It's flown level at "alt" (m above sea level, from `dtm`, the 5 m DTM; without it the ground's taken
+    as flat). The subject is what the spot's named after, else a sea stack near it, else cliffs at it; None
+    when there's none or no clear way to film one."""
+    subjects = []
+    row = namer.subject(x, y)
+    if row is not None:
+        tags = row["tags"]
+        bridge = osm.is_viaduct(tags) or tags.get("man_made") == "bridge" or osm.famous_bridge(tags) or "bridge" in tags
+        subjects.append(("deck" if bridge else "orbit", tags.get("bridge:name") or display_name(tags), row.geometry))
+    rock = namer.rock(x, y)
+    if rock is not None:
+        subjects.append(("orbit", display_name(rock["tags"]), rock.geometry))
+    cliff = namer.cliff(x, y)
+    if cliff is not None:
+        subjects.append(("top", cliff[1] or "the cliffs", cliff[0]))
+    for kind, title, geom in subjects:
+        shot = _shot(reader, x, y, hint, ground, dtm, kind, title, geom)
+        if shot is not None:
+            return shot
+    return None
+
+
+def _shot(reader: HeightReader, x: float, y: float, hint: tuple[float, float], ground: Ground | None,
+          dtm: np.ndarray | None, kind: str, title: str, geom) -> dict | None:
+    """spot_shot's shot of one subject: an "orbit", or a pass along a bridge's "deck" or the "top" of cliffs."""
     from rasterio import features as rfeatures
     from rasterio.transform import from_origin
     from scipy import ndimage
+    from shapely.ops import substring
 
     from . import features, lines, shots
 
-    row = namer.subject(x, y)
-    if row is None:
-        return None
-    tags, geom = row["tags"], row.geometry
-    bridge = bool(osm.is_viaduct(tags) or tags.get("man_made") == "bridge" or osm.famous_bridge(tags) or "bridge" in tags)
-    half = 200
-    cx, cy = (x, y) if bridge else (geom.centroid.x, geom.centroid.y)
+    orbit = kind == "orbit"
+    half = 200 if orbit else 250
+    cx, cy = (geom.centroid.x, geom.centroid.y) if orbit else (x, y)
     t = reader.tile(int(round(cx - half)), int(round(cy - half)), 2 * half, 20)
     rc = lambda px, py: (t.y1 - py - 0.5, px - t.x0 - 0.5)  # BNG -> tile row, col
     xy = lambda r, c: (t.x0 + c + 0.5, t.y1 - r - 0.5)
@@ -538,34 +583,47 @@ def spot_shot(reader: HeightReader, namer: Namer, x: float, y: float, hint: tupl
     d_road = ndimage.distance_transform_edt(~road) if road.any() else None
     blocked = lines.keep_out(t.land, d_bld, d_road, lines.FREESTYLE)
     elev = ground_1m(dtm, reader.region, t) if dtm is not None else None
-    title = tags.get("bridge:name") or display_name(tags)
-    if bridge:
-        # along the deck's main axis, up to PASS_MAX_M of it round the spot, level with the top of the deck
-        # where it's off the ground
-        pts = shapely.get_coordinates(geom)
-        m = pts.mean(axis=0)
-        u = np.linalg.svd(pts - m, full_matrices=False)[2][0]
-        s = (pts - m) @ u
-        mid = (np.array([x, y]) - m) @ u
-        s0, s1 = max(s.min(), mid - shots.PASS_MAX_M / 2), min(s.max(), mid + shots.PASS_MAX_M / 2)
-        if s1 - s0 < shots.PASS_MIN_M:
-            return None
-        a, b = m + s0 * u, m + s1 * u
-        deck = a + np.linspace(0.0, 1.0, int((s1 - s0) / 2) + 2)[:, None] * (b - a)
-        dr, dc = rc(deck[:, 0], deck[:, 1])
-        under = shots.sample(elev, dr, dc) if elev is not None else np.zeros(len(dr), "float32")
-        up = shots.sample(air, dr, dc)
-        tops = (under + up)[up > 2.0]
-        p = shots.pass_along(air, blocked, rc(*a), rc(*b), float(np.median(tops)) if len(tops) else float(under.min()) + 10.0,
-                             elev)
+    under_at = lambda r, c: shots.sample(elev, r, c) if elev is not None else np.zeros(len(r), "float32")
+    if not orbit:
+        if kind == "deck":
+            # along the deck's main axis, up to PASS_MAX_M of it round the spot, level with the top of the deck
+            # where it's off the ground
+            pts = shapely.get_coordinates(geom)
+            m = pts.mean(axis=0)
+            u = np.linalg.svd(pts - m, full_matrices=False)[2][0]
+            s = (pts - m) @ u
+            mid = (np.array([x, y]) - m) @ u
+            s0, s1 = max(s.min(), mid - shots.PASS_MAX_M / 2), min(s.max(), mid + shots.PASS_MAX_M / 2)
+            if s1 - s0 < shots.PASS_MIN_M:
+                return None
+            ends = [m + s0 * u, m + s1 * u]
+            axis = ends[0] + np.linspace(0.0, 1.0, int((s1 - s0) / 2) + 2)[:, None] * (ends[1] - ends[0])
+            dr, dc = rc(axis[:, 0], axis[:, 1])
+            under, up = under_at(dr, dc), shots.sample(air, dr, dc)
+            tops = (under + up)[up > 2.0]
+            top = float(np.median(tops)) if len(tops) else float(under.min()) + 10.0
+            along = np.array([rc(*e) for e in ends])
+        else:
+            # along the cliffs, up to PASS_MAX_M of them round the spot, level with the top of the cliff (the
+            # highest ground just by its edge: the DTM's 5 m smooths it off)
+            d = geom.project(Point(x, y))
+            geom = substring(geom, max(0.0, d - shots.PASS_MAX_M / 2), min(geom.length, d + shots.PASS_MAX_M / 2))
+            if geom.length < shots.PASS_MIN_M or elev is None:
+                return None
+            pts = shapely.get_coordinates(geom.segmentize(2.0))
+            along = np.array(rc(pts[:, 0], pts[:, 1])).T
+            top = float(np.median(shots.sample(ndimage.maximum_filter(elev, size=9), along[:, 0], along[:, 1])))
+        p = shots.pass_along(air, blocked, along, top, elev)
         if p is None:
             return None
-        (ax, ay), (bx, by) = xy(*p["a"]), xy(*p["b"])
-        shot = {"kind": "pass", "subject": title, "a": [round(float(ax - x), 1), round(float(ay - y), 1)],
-                "b": [round(float(bx - x), 1), round(float(by - y), 1)],
-                "a_ll": ll(ax, ay), "b_ll": ll(bx, by), "h": p["h"], "alt": round(p["alt"], 1), "off": round(p["off"]),
-                "side": round(p["side"]), "len": p["len"]}
-        path = [np.asarray(p["a"]) + k * (np.asarray(p["b"]) - np.asarray(p["a"])) for k in np.linspace(0, 1, 9)]
+        k = np.unique(np.r_[np.arange(0, len(p["path"]), 5), len(p["path"]) - 1])
+        way, look = [xy(*q) for q in p["path"][k]], [xy(*q) for q in p["look"][k]]
+        rel = lambda q: [round(float(q[0] - x), 1), round(float(q[1] - y), 1)]
+        shot = {"kind": "pass", "along": kind, "subject": title, "path": [rel(q) for q in way],
+                "path_ll": [ll(*q) for q in way], "look": [rel(q) for q in look],
+                "a": rel(way[0]), "b": rel(way[-1]), "a_ll": ll(*way[0]), "b_ll": ll(*way[-1]),
+                "h": p["h"], "alt": round(p["alt"], 1), "off": round(p["off"]), "side": round(p["side"]), "len": p["len"]}
+        path = list(p["path"][k])
     else:
         # the building at a point, or the area mapped: its middle, how far its edge is from that, its top
         if geom.geom_type == "Point":
