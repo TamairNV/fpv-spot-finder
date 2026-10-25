@@ -213,7 +213,8 @@ def classify_areas(areas: gpd.GeoDataFrame) -> pd.DataFrame:
         "commercial": (landuse.isin(COMMERCIAL_LANDUSE) & ~abandoned) | amenity.isin(COMMERCIAL_AMENITY)
         | t.map(lambda d: d.get("power") in {"plant", "substation"} or d.get("man_made") == "wastewater_plant"),
         "recreational": leisure.isin(RECREATION_LEISURE) | landuse.isin(RECREATION_LANDUSE)
-        | tourism.isin(RECREATION_TOURISM) | (natural == "beach") | (designation == "common"),
+        | tourism.isin(RECREATION_TOURISM) | (natural == "beach") | (designation == "common")
+        | t.map(osm.is_country_park),
         "common": (leisure == "common") | (designation == "common"),
         "military": (landuse == "military") | t.map(lambda d: "military" in d and d["military"] not in MILITARY_RELICS),
         "nature": (leisure == "nature_reserve") | designation.isin(NATURE_DESIGNATIONS)

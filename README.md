@@ -227,7 +227,8 @@ seeds; places like your thumbs-down spots get pulled down.
    and how high the skyline is towards the sunset (west-south-west to west-north-west, out to 2 km,
    hills, woods and buildings included).
 4. **Legal grid at 5 m**: A3 needs 150 m from residential, commercial, industrial and recreational
-   land and 50 m from buildings and busy roads; flight restriction zones and restricted areas block
+   land (anything named a country park counts, however OSM tags it: Bolam Lake is mapped as a nature
+   reserve) and 50 m from buildings and busy roads; flight restriction zones and restricted areas block
    both drones. MOD land and danger areas are never suggested, and nor is anywhere a spot would
    reach onto them (wartime pillboxes and gun emplacements, mapped as military bunkers all along
    the coast, aren't MOD land). National Trust, English Heritage (no recreational take-off or landing

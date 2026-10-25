@@ -216,7 +216,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     pa = polys(areas)
     public = pa[pa["tags"].map(lambda t: t.get("leisure") in PUBLIC_LEISURE or t.get("landuse") in PUBLIC_LANDUSE
                                or t.get("designation") == "common"
-                               or t.get("access") in {"yes", "permissive"})].geometry
+                               or t.get("access") in {"yes", "permissive"} or osm.is_country_park(t))].geometry
     farm = pa[pa["tags"].map(lambda t: t.get("landuse") in FARM_LANDUSE)].geometry
 
     golf = polys(areas[areas["tags"].map(lambda t: t.get("leisure") == "golf_course")]).geometry

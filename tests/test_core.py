@@ -327,6 +327,24 @@ def test_heritage_owners_need_permission():
     assert list(cls["national_trust"]) == [False, False, True, False]
 
 
+def test_a_country_park_is_recreation_whatever_its_tag():
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from spotfinder.sources.osm import is_country_park
+
+    tags = [
+        {"leisure": "nature_reserve", "name": "Bolam Lake Country Park"},
+        {"boundary": "protected_area", "name": "Waldridge Fell Country Park"},
+        {"amenity": "parking", "name": "Plessey Woods Country Park"},
+        {"landuse": "residential", "name": "Low Carrs Country Park"},  # static caravans
+        {"leisure": "nature_reserve", "name": "Gosforth Park Nature Reserve"},
+    ]
+    assert [is_country_park(t) for t in tags] == [True, True, False, False, False]
+    areas = gpd.GeoDataFrame({"tags": tags}, geometry=[box(0, 0, 10, 10)] * 5, crs="EPSG:27700")
+    assert list(legal.classify_areas(areas)["recreational"]) == [True, True, False, False, False]
+
+
 def test_permission_by_share_of_the_spot():
     flags = np.zeros((9, 9), "float32")
     flags[4, 4] = legal.FLAG_NATIONAL_TRUST  # one monument cell in the middle

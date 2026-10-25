@@ -228,3 +228,14 @@ def famous_bridge(t: dict) -> bool:
         return False
     return bool(t.get("heritage") or t.get("listed_status")) or (
         bool(t.get("wikidata")) and bool(BRIDGE_NAME.search(bridge_name(t))))
+
+
+COUNTRY_PARK = re.compile(r"\bcountry park\b", re.I)
+
+
+def is_country_park(t: dict) -> bool:
+    """Named a country park, whatever it's tagged as (Bolam Lake is a nature reserve, Waldridge Fell a
+    protected area): public open space for recreation by definition. Not its car park or café, nor a
+    caravan site that calls itself one."""
+    return bool(COUNTRY_PARK.search(t.get("name") or "")) and not any(
+        k in t for k in ("amenity", "building", "shop", "tourism")) and t.get("landuse") != "residential"
