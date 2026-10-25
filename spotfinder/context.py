@@ -56,6 +56,17 @@ FARM_LANDUSE = {"farmland", "farmyard", "orchard", "greenhouse_horticulture", "p
 HAZARD_MAN_MADE = {"mast", "communications_tower", "crane"}
 
 
+def is_public(t: dict) -> bool:
+    """Public open space (PUBLIC_*), a common, open access land or a country park. A school's playing field is
+    often mapped as a recreation ground: it's still the school's (osm.is_institution)."""
+    return (t.get("leisure") in PUBLIC_LEISURE or t.get("landuse") in PUBLIC_LANDUSE or t.get("designation") == "common"
+            or t.get("access") in {"yes", "permissive"} or osm.is_country_park(t))
+
+
+def is_farm(t: dict) -> bool:
+    return t.get("landuse") in FARM_LANDUSE
+
+
 def stands_up(t: dict, up_m: float = 0.0, area_m2: float = 0.0) -> bool:
     """Whether an icon is a hero (see HERO_*); one mapped as a point can only say so by its kind or name."""
     return (t.get("man_made") in HERO_KIND_MAN_MADE or t.get("historic") in HERO_KIND_HISTORIC
@@ -216,15 +227,12 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
 
     roads_busy = seg[(seg["subtype"] == "road") & seg["class"].isin(["motorway", "trunk", "primary"])]
     pa = polys(areas)
-    public = pa[pa["tags"].map(lambda t: t.get("leisure") in PUBLIC_LEISURE or t.get("landuse") in PUBLIC_LANDUSE
-                               or t.get("designation") == "common"
-                               or t.get("access") in {"yes", "permissive"} or osm.is_country_park(t))].geometry
-    # A school's playing field is often mapped as a recreation ground: it's still the school's.
+    public = pa[pa["tags"].map(is_public)].geometry
     institutions = pa[pa["tags"].map(osm.is_institution)].geometry
     if len(institutions):
         public = public.difference(shapely.union_all(institutions.values))
         public = public[~public.is_empty]
-    farm = pa[pa["tags"].map(lambda t: t.get("landuse") in FARM_LANDUSE)].geometry
+    farm = pa[pa["tags"].map(is_farm)].geometry
 
     golf = polys(areas[areas["tags"].map(lambda t: t.get("leisure") == "golf_course")]).geometry
     beaches = pd.concat([

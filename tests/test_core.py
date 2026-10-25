@@ -466,6 +466,28 @@ def test_a_bridge_carrying_trains_is_not_one_to_fly_round():
     assert len(off_the_tracks(bridges, gpd.GeoSeries([], dtype="geometry"))) == 3
 
 
+def test_what_the_take_off_stands_on(monkeypatch):
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from spotfinder import export
+    from spotfinder.sources import osm
+
+    areas = gpd.GeoDataFrame({"tags": [
+        {"leisure": "park", "name": "Derwent Walk Country Park"},
+        {"landuse": "farmland"},                       # a grazed field inside the park
+        {"natural": "beach", "name": "Longsands"},
+        {"leisure": "park", "name": "Over 8 Play Area"},
+    ]}, geometry=[box(0, 0, 1000, 1000), box(100, 100, 300, 300), box(2000, 0, 2200, 100), box(5000, 0, 5050, 50)])
+    monkeypatch.setattr(osm, "extract", lambda region: {"areas": areas})
+    g = export.Ground(None)
+    assert g.at(500, 500) == ("public", "Derwent Walk Country Park")
+    assert g.at(200, 200) == ("farm", None)
+    assert g.at(2100, 50) == ("beach", "Longsands")
+    assert g.at(5025, 25) == ("public", None)  # a name that only says what it is
+    assert g.at(9000, 9000) == (None, None)
+
+
 def test_viaduct_deck_gives_arches():
     from spotfinder import lines
 

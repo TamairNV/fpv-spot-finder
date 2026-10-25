@@ -118,9 +118,16 @@ function takeoffBox(p) {
   if (!t) return null;
   const d = Math.hypot(t.dx, t.dy);
   const where = d < 30 ? 'right by the pin' : `${metres(d)} ${compass(t.dx, t.dy)} of the pin`;
+  // what it's on, from the map: public open space, a beach, or a farmer's field
+  const named = t.on_name ? ` (${t.on_name})` : '';
+  const on = {
+    public: `It's on public open space${named}.`,
+    beach: `It's on the beach${named}.`,
+    farm: "It's farmland: ask the farmer before you take off.",
+  }[t.on] || '';
   return el('div', { class: 'box' },
     el('h4', {}, 'Getting there'),
-    el('p', {}, `Suggested take-off ${where} (the green dot).`),
+    el('p', {}, `Suggested take-off ${where} (the green dot).${on ? ` ${on}` : ''}`),
     el('p', { class: 'muted small' }, `Nearest path ${metres(t.path_m)} · nearest car park ${metres(t.parking_m)}.`),
     el('div', { class: 'links' },
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));

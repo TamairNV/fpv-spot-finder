@@ -363,6 +363,35 @@ class Namer:
         return title, locality
 
 
+class Ground:
+    """What a take-off stands on: a beach, public open space (and its name) or farmland, from OpenStreetMap. The
+    smallest area round it says: a grazed field inside a country park is farmland."""
+
+    def __init__(self, region: Region):
+        from . import context
+
+        a = osm.extract(region)["areas"]
+        a = a[a.geom_type.isin(["Polygon", "MultiPolygon"])]
+        t = a["tags"]
+        a = a.assign(kind=np.select(
+            [t.map(lambda d: d.get("natural") in context.BEACH_NATURAL) & (a.geometry.area >= context.BEACH_MIN_M2),
+             t.map(lambda d: context.is_public(d) and not osm.is_institution(d)), t.map(context.is_farm)],
+            ["beach", "public", "farm"], ""))
+        self.areas = a[a["kind"] != ""].reset_index(drop=True)
+        self.tree = STRtree(self.areas.geometry.values)
+
+    def at(self, x: float, y: float) -> tuple[str | None, str | None]:
+        """("beach" | "public" | "farm" | None, the place's name if it has a proper one)."""
+        idx = self.tree.query(Point(x, y), predicate="within")
+        if not len(idx):
+            return None, None
+        rows = self.areas.iloc[idx]
+        beach = rows[rows["kind"] == "beach"]
+        row = (beach if len(beach) else rows).geometry.area.idxmin()
+        kind, tags = self.areas.at[row, "kind"], self.areas.at[row, "tags"]
+        return kind, display_name(tags) if proper(tags) else None
+
+
 # ---------------------------------------------------------------- previews
 
 # zlib releases the GIL, so the ~250 preview PNGs encode on a few threads while the next spot is built.
@@ -684,6 +713,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
         old.unlink()
     legal_corners = write_legal_layers(region)
     namer = Namer(region)
+    ground = Ground(region)
     gaps = pd.read_parquet(region.out_dir / "gaps.parquet")
     lone = pd.read_parquet(region.out_dir / "lone.parquet")
     gap_tree = STRtree(shapely.points(gaps.x.values, gaps.y.values)) if len(gaps) else None
@@ -768,6 +798,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 tk = snap_takeoff(reader, tx, ty, whoop=key == "cine85")
             tx, ty = round(tk[0]), round(tk[1])
             tlon, tlat = bng_to_lonlat(tx, ty)
+            on, on_name = ground.at(tx, ty)
             br, bc = cell_of(region, (tx, ty))
             best = (min(max(br, 0), H - 1), min(max(bc, 0), W - 1))
             gr = os_grid_ref(x, y)
@@ -818,7 +849,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 "legal": {"summary": a_txt, "flags": _flags_text(flag_bits), "a3_clear_pct": round(100 * a3_clear),
                           "a3_edge_m": int(wmin("dist_a3_edge"))},
                 "takeoff": {"lon": round(tlon, 6), "lat": round(tlat, 6), "dx": tx - x, "dy": ty - y,
-                            "path_m": int(cells["dist_path"][best]), "parking_m": int(cells["dist_parking"][best])},
+                            "path_m": int(cells["dist_path"][best]), "parking_m": int(cells["dist_parking"][best]),
+                            "on": on, "on_name": on_name},
                 "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview, "line": line,
                 "links": {
                     "satellite": f"https://www.google.com/maps/@{lat:.6f},{lon:.6f},250m/data=!3m1!1e3",
