@@ -87,7 +87,7 @@
     "legal_res_m": 20,
     "cell_m": 50
   },
-  "generated_at": "2026-10-25T01:05:28+00:00",
+  "generated_at": "2026-10-25T01:34:16+00:00",
   "sources": {
     "computed_at": "2026-10-25T00:28:18+00:00",
     "heights": "EA LiDAR 1 m (first-return DSM minus DTM), Meta canopy model where LiDAR is missing",
@@ -104,7 +104,7 @@
     "ratings_other_regions": {},
     "legal_mode": "label",
     "bandos": {
-      "standing": 15,
+      "standing": 14,
       "unknown": 0
     }
   },
@@ -123,7 +123,7 @@
         "mix": 0.06,
         "vertical": 0.08,
         "relief": 0.1,
-        "bando": 0.1,
+        "bando": 0.16,
         "water": 0.04,
         "bridge": 0.12,
         "beach": 0.08,
@@ -340,29 +340,29 @@
         "Power lines within 30 m"
       ],
       "components": {
-        "permission": 0.0,
-        "sunset": 0.418,
+        "permission": 1.0,
+        "sunset": 0.197,
         "remote": 0.0,
-        "hazard": 0.514,
+        "hazard": 0.198,
         "flow": 0.0,
-        "gaps": 0.273,
-        "lone": 0.012,
-        "edges": 0.32,
-        "space": 0.0,
+        "gaps": 0.466,
+        "lone": 0.0,
+        "edges": 0.296,
+        "space": 0.018,
         "mix": 0.0,
-        "vertical": 0.933,
+        "vertical": 0.633,
         "relief": 1.0,
         "bando": 0.0,
         "water": 1.0,
-        "bridge": 0.826,
+        "bridge": 1.0,
         "beach": 0.0,
         "public": 1.0,
-        "busy": 0.125,
+        "busy": 0.261,
         "wet": 0.0,
         "farm": 0.0,
         "road": 0.0
       },
-      "score": 69,
+      "score": 67,
       "preview": {
         "file": "previews/502-260.png",
         "size": 160,
