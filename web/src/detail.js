@@ -2,6 +2,7 @@
 // the wind and the light, and the score breakdown.
 import { el, metres, compass, scoreColour, SANDBOXED } from './util.js';
 import { goldenSun, sunBox, weatherBox } from './conditions.js';
+import { flightBox, fetchModel } from './server.js';
 
 const NICE = {
   gaps: 'Gaps', lone: 'Lone trees', edges: 'Tree lines / edges', space: 'Open space', mix: 'Obstacle mix',
@@ -201,11 +202,12 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
         el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
       SANDBOXED ? null : share));
-    kids.push(notesBox(p, ratings, onNote));
+    kids.push(notesBox(p, ratings, onNote), flightBox(spot, profile, onNote));
   }
 
   const p3dHost = el('div');
-  kids.push(p3dHost, lineBox(p), shotBox(p, lon, lat));
+  let lineHost = lineBox(p) || el('div');
+  kids.push(p3dHost, lineHost, shotBox(p, lon, lat));
 
   const why = whyList(p);
   if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
@@ -235,26 +237,40 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
 
   body.replaceChildren(...kids.filter(Boolean));
 
-  // The 3D view (and three.js with it) loads only when a spot is opened.
+  // The 3D view (and three.js with it) loads only when a spot is opened. The best spots come with
+  // their model; for the rest the server (when there is one) builds it on request.
   let preview = null;
   let gone = false;
-  if (p.preview) {
-    p3dHost.append(el('div', { class: 'p3d-wrap' }, el('div', { class: 'p3d' }), el('div', { class: 'p3d-tag' }, 'Loading 3D…')));
-    import('./preview3d.js').then(({ Preview3D }) => {
-      if (gone) return;
-      p3dHost.replaceChildren();
-      preview = new Preview3D(p3dHost, {
-        spot: p, preview: p.preview, center: p.preview.center, profile,
-        radiusM: meta.profiles[profile].radius_m,
-      });
-      return preview.load(`${base}/${p.preview.file}`);
-    }).catch((e) => {
-      p3dHost.replaceChildren(el('div', { class: 'muted small', style: 'margin:0 0 12px' }, `3D view unavailable (${e.message || e}).`));
+  const note = (text) => p3dHost.replaceChildren(el('div', { class: 'muted small', style: 'margin:0 0 12px' }, text));
+  p3dHost.append(el('div', { class: 'p3d-wrap' }, el('div', { class: 'p3d' }), el('div', { class: 'p3d-tag' }, 'Loading 3D…')));
+  const model = p.preview
+    ? Promise.resolve({ preview: p.preview, url: `${base}/${p.preview.file}` })
+    : fetchModel(meta.region?.key, profile, p.id).then((m) => {
+      if (!m) return null;
+      p.preview = m.preview;
+      if (!p.line && m.line) {
+        p.line = m.line;
+        const box = lineBox(p);
+        if (box && !gone) lineHost.replaceWith(box);
+        if (box) lineHost = box;
+      }
+      return { preview: m.preview, url: m.url };
     });
-  } else {
-    p3dHost.append(el('div', { class: 'muted small', style: 'margin:0 0 12px' },
-      'No 3D model for this spot yet: re-run the scorer to make one.'));
-  }
+  Promise.all([model, import('./preview3d.js')]).then(([m, { Preview3D }]) => {
+    if (gone) return;
+    if (!m) {
+      note('No 3D model for this spot: only the best spots have one offline.');
+      return;
+    }
+    p3dHost.replaceChildren();
+    preview = new Preview3D(p3dHost, {
+      spot: p, preview: m.preview, center: m.preview.center, profile,
+      radiusM: meta.profiles[profile].radius_m,
+    });
+    return preview.load(m.url);
+  }).catch((e) => {
+    if (!gone) note(`3D view unavailable (${e.message || e}).`);
+  });
   return { dispose: () => { gone = true; preview?.dispose(); } };
 }
 

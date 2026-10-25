@@ -51,6 +51,8 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
+  // the server's API is always live, except flight photos, which never change and should work offline
+  if (url.pathname.includes('/api/') && !url.pathname.includes('/api/photos/')) return;
   const immutable = /\/assets\/[^/]+-[\w-]{8,}\.\w+$/.test(url.pathname);
   if (req.mode === 'navigate' || /\.(geo)?json$/.test(url.pathname)) {
     e.respondWith(caches.open(CACHE).then((cache) => networkFirst(cache, req)));
@@ -78,3 +80,24 @@ async function networkFirst(cache, req) {
   const hit = await cache.match(req, { ignoreSearch: req.mode === 'navigate' });
   return hit || net.catch(() => Response.error());
 }
+
+// "Good flying tomorrow" from the server (see server/spotter_api/main.py).
+self.addEventListener('push', (e) => {
+  let msg = {};
+  try {
+    msg = e.data?.json() || {};
+  } catch { /* plain text */ }
+  e.waitUntil(self.registration.showNotification(msg.title || 'FPV Spot Finder', {
+    body: msg.body || '', icon: './icon-192.png', badge: './icon-192.png', tag: 'forecast', data: { url: msg.url || './' },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.url || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+    const win = wins.find((w) => w.url.startsWith(self.registration.scope));
+    if (win) return win.navigate(url).then((w) => (w || win).focus());
+    return self.clients.openWindow(url);
+  }));
+});

@@ -82,6 +82,29 @@ phone on the same Wi-Fi with `npm run preview -- --host`).
 serves at https://tamairnv.github.io/fpv-spot-finder/ (it takes a minute or two to go live). The
 branch only ever holds the latest build.
 
+### On a server (spotter.tamairnv.co.uk)
+
+`deploy/docker-compose.yml` runs the app behind nginx plus a small API (`server/`, FastAPI + SQLite).
+When the app finds `/api` it switches on what a static host can't do:
+
+- **Sync**: your 👍 / 👎, notes and flight log follow you between devices. No account: the first device
+  gets a random key, and others join with a code or QR from "Link a device".
+- **Flight log**: log a flight on any spot with a note and photos (EXIF and GPS stripped on upload).
+  Logged offline, it sends when there's signal.
+- **Flying forecast**: the week's calm, dry daylight windows at your 👍 and flown spots, and a push
+  notification the evening before a good day (on iPhone, from the home-screen app).
+- **Re-rank with my ratings**: the server runs the scorer over the whole region with your ratings and
+  serves you your own copy of the ranking, instead of downloading ratings and running it yourself.
+  It needs the region's features on the server first (a full `spotfinder run` into the data folder).
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build   # app on 127.0.0.1:8098
+deploy/update.sh                                            # pull main and rebuild
+```
+
+Data (profiles, photos, the pipeline's caches) lives in `../fpv-spot-finder-data`, outside the repo.
+`deploy/autodeploy.sh` rebuilds when main moves, for cron. API tests: `pytest server/tests` in the API image.
+
 ### The pipeline (to re-score, change rules, or add a region)
 
 Python 3.12+.
