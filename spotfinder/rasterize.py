@@ -13,6 +13,7 @@ import pandas as pd
 import rasterio
 from rasterio.features import rasterize
 from rasterio.transform import from_origin
+import shapely
 from shapely.geometry import box
 from tqdm import tqdm
 
@@ -47,9 +48,17 @@ RAIL_CODE = 3
 # land_1m.tif: ground a suggested line keeps off, and viaducts whose arches you can fly through
 HOMES_CODE = 1    # houses and their gardens (residential land that isn't a park or a big green)
 PARKING_CODE = 2  # car parks: cars and people getting in and out
-VIADUCT_CODE = 3  # the deck of a railway or footpath viaduct or aqueduct (not a road one)
+VIADUCT_CODE = 3  # the deck of a footpath or disused railway viaduct or aqueduct (not a road one)
 INSTITUTION_CODE = 4  # school, college, university, hospital or prison grounds, playing fields and all
-LAND_VERSION = "2"  # bump when the codes change, so an older cached land_1m.tif is rebuilt (2: institutions)
+RAILWAY_CODE = 5  # a working railway and RAIL_CLEAR_M either side of it: trains, and often overhead wires
+PLAYGROUND_CODE = 6  # a children's playground and PLAY_CLEAR_M round it
+PYLON_CODE = 7  # a pylon line and PYLON_CLEAR_M either side: the wires hang well out from the pylons
+KEEP_OFF = (HOMES_CODE, PARKING_CODE, INSTITUTION_CODE, RAILWAY_CODE, PLAYGROUND_CODE, PYLON_CODE)
+RAIL_CLEAR_M = 8.0
+PLAY_CLEAR_M = 10.0
+PLAY_NODE_M = 20.0  # a playground mapped as a point: assume one 20 m across, plus the clearance
+PYLON_CLEAR_M = 15.0
+LAND_VERSION = "4"  # bump when the codes change, so an older cached land_1m.tif is rebuilt (4: playgrounds, pylons)
 GREEN_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "village_green", "golf_course", "pitch"}
 GREEN_LANDUSE = {"recreation_ground", "village_green", "forest", "meadow", "grass"}
 GREEN_NATURAL = {"wood", "scrub", "grassland", "heath", "wetland"}
@@ -157,7 +166,8 @@ def build_vector_rasters(region: Region, tile_m: int = 2000, refresh: bool = Fal
 
 
 def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False) -> Path:
-    """land_1m.tif: homes and gardens, car parks, viaduct decks and institutions (codes above), from OpenStreetMap."""
+    """land_1m.tif: homes and gardens, car parks, viaduct decks, institutions, railways, playgrounds and pylon
+    lines (codes above), from OpenStreetMap."""
     from .sources import osm
 
     out = region.cache_dir / "land_1m.tif"
@@ -181,14 +191,27 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
     l = o["lines"]
     vt = l["tags"]
     via = l[vt.map(lambda t: osm.is_viaduct(t) and t.get("highway") not in ROAD_HIGHWAYS
-                   and t.get("railway") not in {"light_rail", "subway", "tram"})]
+                   and t.get("railway") not in osm.ACTIVE_RAILWAY)]
+    railways = l[vt.map(osm.is_active_railway)].geometry.buffer(RAIL_CLEAR_M, cap_style="flat")
+    pylons = l[vt.map(lambda t: t.get("power") == "line")].geometry.buffer(PYLON_CLEAR_M, cap_style="flat")
+    nodes = o["nodes"]
+    play = pd.concat([polys[tag("leisure") == "playground"].geometry.buffer(PLAY_CLEAR_M),
+                      nodes[nodes["tags"].map(lambda t: t.get("leisure") == "playground")].geometry.buffer(PLAY_NODE_M)])
     decks = polys[tag("bridge").isin(["viaduct", "aqueduct"]) & (tag("man_made") == "bridge")]
+    # ...nor do the arches of one still carrying trains (Plessey Viaduct is the East Coast Main Line). One that
+    # only crosses a railway keeps its other arches; the railway is burned over the spans above the tracks.
+    if len(railways):
+        band = shapely.union_all(railways.values)
+        decks = decks[decks.geometry.intersection(band).area < 0.5 * decks.geometry.area]
     viaducts = pd.concat([decks.geometry, via[via.geom_type != "Polygon"].geometry.buffer(4, cap_style="flat")])
     layers = [(gpd.GeoDataFrame(geometry=list(g), crs=BNG), code) for g, code in
               ((homes.geometry, HOMES_CODE), (parking.geometry, PARKING_CODE), (viaducts, VIADUCT_CODE))]
     green = gpd.GeoDataFrame(geometry=list(green.geometry), crs=BNG)
     institutions = gpd.GeoDataFrame(geometry=list(institutions.geometry), crs=BNG)
-    for g, _ in layers:
+    # burned last, over anything: no line goes near these whatever the land under them is
+    over = [(gpd.GeoDataFrame(geometry=list(g), crs=BNG), code) for g, code in
+            ((railways, RAILWAY_CODE), (play, PLAYGROUND_CODE), (pylons, PYLON_CODE))]
+    for g, _ in layers + over:
         g.sindex
     green.sindex
     institutions.sindex
@@ -214,6 +237,8 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
             land[burn(gdf, tb, tr, shape) > 0] = code
         land[(land == HOMES_CODE) & (burn(green, tb, tr, shape) > 0)] = 0  # a park inside an estate is a park
         land[(burn(institutions, tb, tr, shape) > 0) & (land != VIADUCT_CODE)] = INSTITUTION_CODE  # a school field isn't
+        for gdf, code in over:
+            land[burn(gdf, tb, tr, shape) > 0] = code
         return win, land
 
     jobs = [(x0, y0) for y0 in range(ymin, ymax, tile_m) for x0 in range(xmin, xmax, tile_m)]

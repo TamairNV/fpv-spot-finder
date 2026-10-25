@@ -290,9 +290,7 @@ def build_legal(region: Region) -> LegalGrids:
 
     lines = o["lines"]
     # Lines in tunnels don't count: the Metro runs under half of central Newcastle.
-    rail = lines[lines["tags"].map(lambda d: d.get("railway") in {"rail", "light_rail", "tram", "subway",
-                                                                    "narrow_gauge", "preserved"}
-                                   and d.get("tunnel", "no") == "no" and d.get("location") != "underground")]
+    rail = lines[lines["tags"].map(osm.is_active_railway)]
     flags[dist(burn(rail.geometry, shape_, transform).astype(bool)) <= 30] |= FLAG_RAILWAY
     power = lines[lines["tags"].map(lambda d: d.get("power") in {"line", "minor_line"})]
     flags[dist(burn(power.geometry, shape_, transform).astype(bool)) <= 30] |= FLAG_POWER_LINE

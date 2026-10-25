@@ -248,3 +248,11 @@ def is_institution(t: dict) -> bool:
     """School, college, university, hospital or prison grounds: private, full of people, and a hospital
     may have the air ambulance landing. Their playing fields are part of them, not a park."""
     return t.get("amenity") in INSTITUTION_AMENITY or t.get("landuse") == "education"
+
+
+ACTIVE_RAILWAY = {"rail", "light_rail", "tram", "subway", "narrow_gauge", "preserved"}
+
+
+def is_active_railway(t: dict) -> bool:
+    """A working railway in the open air (the Metro runs under half of central Newcastle)."""
+    return t.get("railway") in ACTIVE_RAILWAY and t.get("tunnel", "no") == "no" and t.get("location") != "underground"

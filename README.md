@@ -186,20 +186,23 @@ seeds; places like your thumbs-down spots get pulled down.
    up to 12 moves, and scores the run with a bonus for variety. Each spot's "flow" is the best run
    that starts in it, and the spot card gets that run as a suggested line, with a take-off on open
    ground 8 m+ clear of the first obstacle and a straight leg to it that keeps off the same homes, car
-   parks and roads and doesn't go through a wall, building or viaduct deck (trees it hops over). If
-   the best run has no such way in, it's flown backwards, or the next best one is; no line at all if
-   none of the best ten has one.
-   Lines keep off people's homes and gardens (residential land that isn't a park or a big green),
-   car parks, school, college, university, hospital and prison grounds (playing fields included) and
-   roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building; gaps and lone
-   trees in gardens, on car parks or in school grounds don't count at all. A railway or footpath viaduct
+   parks, playgrounds, railways and roads and doesn't go through a wall, building or viaduct deck
+   (trees it hops over). If the best run has no such way in, it's flown backwards, or the next best one
+   is; no line at all if none of the best ten has one.
+   Lines keep off people's homes and gardens (residential land that isn't a park or a big green), car
+   parks, school, college, university, hospital and prison grounds (playing fields included),
+   children's playgrounds (10 m round), working railways and the Metro in the open air (8 m either
+   side: trains, and often overhead wires), pylon lines (15 m either side: the wires hang well out from
+   the pylons) and roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building;
+   gaps and lone trees in any of those places don't count at all. A footpath or disused railway viaduct
    (tagged as one, or a bridge called one) whose deck is 8 m+ above the ground has an arch every 15 m:
-   a fly-through gap and a move of its own.
-   Neighbouring arches link under the deck, so a run can weave through up to four of them (out
-   through one, round the pier, back through the next), where there's 4 m of open air beside the
-   deck on both sides to turn in. `land_1m.tif` holds those homes,
-   car parks, school and hospital grounds and viaduct decks. No spot is ever pinned on school,
-   hospital or prison grounds, and a school's playing field isn't public land.
+   a fly-through gap and a move of its own. One still carrying trains (Plessey, Ouseburn, Willington
+   Dene) has none: you'd be under a train line.
+   Neighbouring arches link under the deck, so a run can weave through up to four of them (out through
+   one, round the pier, back through the next), where there's 4 m of open air beside the deck on both
+   sides to turn in. `land_1m.tif` holds those homes, car parks, school and hospital grounds,
+   playgrounds, railways, pylon lines and viaduct decks. No spot is ever pinned on school, hospital or
+   prison grounds, and a school's playing field isn't public land.
 3. **Context** from OSM and Overture: distance to water, the sea and beaches, bridges and viaducts,
    bandos, cliffs and quarries, landmarks, masts and cranes, paths, car parks, fast main roads,
    farmland and public open space; and how busy a place is. A bando is a mapped building or works

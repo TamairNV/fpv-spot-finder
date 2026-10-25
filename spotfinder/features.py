@@ -20,7 +20,7 @@ from tqdm import tqdm
 from .config import Region
 from . import lines
 from .heights import HeightReader, Tile
-from .rasterize import HOMES_CODE, INSTITUTION_CODE, PARKING_CODE, VIADUCT_CODE
+from .rasterize import KEEP_OFF, VIADUCT_CODE
 
 try:
     import edt as _edt_mod
@@ -240,8 +240,9 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     grid_n = size // n
     for key in ("gaps", "gaps_all", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max"):
         cells[key] = np.zeros((grid_n, grid_n), dtype="float32")
-    # Nothing in people's gardens, on car parks or in school grounds counts, and a viaduct's arches are gaps too.
-    home = np.isin(t.land, (HOMES_CODE, PARKING_CODE, INSTITUTION_CODE)) if t.land is not None else None
+    # Nothing in people's gardens, on car parks, in school grounds, playgrounds or by the tracks or a pylon line
+    # counts, and a viaduct's arches are gaps too.
+    home = np.isin(t.land, KEEP_OFF) if t.land is not None else None
     at_home = lambda r, c: home is not None and bool(home[min(int(round(r)), home.shape[0] - 1),
                                                          min(int(round(c)), home.shape[1] - 1)])
     gaps = [g for g in gaps if not at_home(g[0], g[1])]

@@ -420,6 +420,35 @@ def test_lines_keep_out_of_school_grounds():
     assert not is_institution({"landuse": "recreation_ground"})
 
 
+def test_lines_keep_off_working_railways():
+    from spotfinder import lines
+    from spotfinder.rasterize import RAILWAY_CODE
+    from spotfinder.sources.osm import is_active_railway
+
+    land = np.zeros((50, 50), "uint8")
+    land[20:37, :] = RAILWAY_CODE  # the East Coast Main Line and 8 m either side
+    blocked = lines.keep_out(land, None, None, lines.WHOOP)
+    assert blocked[20:37].all() and not blocked[:20].any() and not blocked[37:].any()
+    assert is_active_railway({"railway": "rail", "name": "East Coast Main Line"})
+    assert is_active_railway({"railway": "light_rail", "name": "Metro"})
+    assert not is_active_railway({"railway": "subway", "tunnel": "yes"})  # under the city centre
+    assert not is_active_railway({"railway": "disused", "name": "Derwent Valley Railway"})
+    assert not is_active_railway({"railway": "abandoned"})
+
+
+def test_lines_keep_out_of_playgrounds_and_from_under_pylon_lines():
+    from spotfinder import lines
+    from spotfinder.rasterize import KEEP_OFF, PLAYGROUND_CODE, PYLON_CODE, VIADUCT_CODE
+
+    assert VIADUCT_CODE not in KEEP_OFF  # you fly the arches
+    land = np.zeros((40, 40), "uint8")
+    land[5:15, 5:15] = PLAYGROUND_CODE
+    land[:, 30:] = PYLON_CODE
+    blocked = lines.keep_out(land, None, None, lines.FREESTYLE)
+    assert blocked[5:15, 5:15].all() and blocked[:, 30:].all()
+    assert blocked.sum() == 100 + 400
+
+
 def test_viaduct_deck_gives_arches():
     from spotfinder import lines
 
