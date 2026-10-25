@@ -243,6 +243,22 @@ def test_only_real_derelict_buildings_are_bandos():
     assert not bandos.heritage({"building": "yes", "disused": "yes", "listed_status": "Grade II"})
 
 
+def test_viaducts_and_famous_bridges_by_their_own_names():
+    from spotfinder.sources import osm
+
+    plessey = {"bridge": "yes", "railway": "rail", "name": "East Coast Main Line", "bridge:name": "Plessey Viaduct",
+               "wikidata": "Q26647008"}
+    causey = {"bridge": "yes", "highway": "footway", "name": "Causey Arch", "listed_status": "Grade I"}
+    line_only = {"bridge": "yes", "railway": "rail", "name": "Tanfield Railway", "wikidata": "Q7682581"}
+    assert osm.is_viaduct(plessey) and osm.is_viaduct({"bridge": "viaduct"})
+    assert not osm.is_viaduct(causey) and not osm.is_viaduct({"name": "Viaduct Road", "highway": "primary"})
+    assert osm.famous_bridge(causey) and osm.famous_bridge(plessey)
+    assert not osm.famous_bridge(line_only)  # the railway's Wikidata entry, not the bridge's
+    assert not osm.famous_bridge({"bridge": "yes", "highway": "footway", "bridge:name": "Borough Road Footbridge",
+                                  "wikidata": "Q118218739"})
+    assert not osm.famous_bridge({"listed_status": "Grade II", "building": "yes"})  # not a bridge
+
+
 def test_a_wartime_pillbox_is_not_mod_land():
     import geopandas as gpd
     from shapely.geometry import box

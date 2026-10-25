@@ -192,7 +192,8 @@ seeds; places like your thumbs-down spots get pulled down.
    Lines keep off people's homes and gardens (residential land that isn't a park or a big green),
    car parks and roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building;
    gaps and lone trees in gardens or on car parks don't count at all. A railway or footpath viaduct
-   whose deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and a move of its own.
+   (tagged as one, or a bridge called one) whose deck is 8 m+ above the ground has an arch every 15 m:
+   a fly-through gap and a move of its own.
    Neighbouring arches link under the deck, so a run can weave through up to four of them (out
    through one, round the pier, back through the next), where there's 4 m of open air beside the
    deck on both sides to turn in. `land_1m.tif` holds those homes,
@@ -205,10 +206,14 @@ seeds; places like your thumbs-down spots get pulled down.
    (a priory's outbuildings are often mapped on their own, untagged), and with LiDAR still
    seeing walls 4 m+ tall on its footprint. A bridge counts where LiDAR sees its deck 4 m+ in the air
    for 30 m over water or 80 m anywhere (Overture flags whole road segments, culverts and all);
-   railway and footpath viaducts always count. Lighthouses, famous artworks, listed bridges and named
+   railway and footpath viaducts always count (so does a bridge called one: Plessey Viaduct is mapped
+   as a plain bridge), and so does a bridge 20 m+ long that's listed or has a Wikidata entry of its own
+   (Causey Arch, 24 m up a gorge). Lighthouses, famous artworks, those famous bridges and named
    viaducts are landmarks; the named ones you'd build a shot round (a lighthouse, castle, abbey,
-   monument, pier or viaduct) are icons, and count in full for 5" cine where a viewpoint, water tower
-   or chimney only counts in part. A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
+   monument, pier, viaduct or famous bridge) are icons, and count in full for 5" cine where a viewpoint, water tower
+   or chimney only counts in part. A ruin or
+   monument needs a Wikidata entry or a listing to be an icon: OSM has every war memorial and
+   drinking fountain as a monument. A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
    golf course (so no bunkers or long-jump pits); for 5" cine only a beach by the sea is "the coast".
    Power lines (within 50 m) and fast roads cost a spot in full only when its middle is on one, and
    otherwise up to half, by how much of it is near one; for 5" cine a road only costs by how much of

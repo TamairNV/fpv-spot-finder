@@ -233,9 +233,10 @@ class Namer:
         # A named viaduct, bridge, lighthouse or monument right at the spot is what you'd call it: the Nine
         # Arches Viaduct, not the country park it stands in.
         # (a railway or road on a viaduct carries the line's or road's name: the viaduct's is bridge:name)
-        sight = lambda t: (((t.get("bridge") in {"viaduct", "aqueduct"} or t.get("man_made") == "bridge")
-                            and (t.get("bridge:name") or not (t.get("railway") or t.get("highway"))))
-                           or t.get("man_made") == "lighthouse" or t.get("historic") in {"monument", "castle"})
+        sight = lambda t: bool(((osm.is_viaduct(t) or t.get("man_made") == "bridge" or osm.famous_bridge(t))
+                                and (t.get("bridge:name") or not (t.get("railway") or t.get("highway"))
+                                     or osm.BRIDGE_NAME.search(t.get("name") or "")))
+                               or t.get("man_made") == "lighthouse" or t.get("historic") in {"monument", "castle"})
         self.sights = pd.concat([g[g["tags"].map(sight)] for g in (named(ln), named(a), pts)]).reset_index(drop=True)
         bridge_lines = ln[ln["tags"].map(lambda t: bool(t.get("bridge:name")) and sight(t))]
         self.sights = pd.concat([self.sights, bridge_lines]).reset_index(drop=True)

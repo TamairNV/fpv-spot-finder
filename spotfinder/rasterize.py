@@ -174,7 +174,7 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
     # the Metro (traffic, overhead wires) don't count.
     l = o["lines"]
     vt = l["tags"]
-    via = l[vt.map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"} and t.get("highway") not in ROAD_HIGHWAYS
+    via = l[vt.map(lambda t: osm.is_viaduct(t) and t.get("highway") not in ROAD_HIGHWAYS
                    and t.get("railway") not in {"light_rail", "subway", "tram"})]
     decks = polys[tag("bridge").isin(["viaduct", "aqueduct"]) & (tag("man_made") == "bridge")]
     viaducts = pd.concat([decks.geometry, via[via.geom_type != "Polygon"].geometry.buffer(4, cap_style="flat")])

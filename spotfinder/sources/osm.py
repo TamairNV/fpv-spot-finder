@@ -204,3 +204,27 @@ def pbf_paths(region: Region) -> list[Path]:
 
 def tag(gdf: gpd.GeoDataFrame, key: str) -> pd.Series:
     return gdf["tags"].map(lambda t: t.get(key))
+
+
+VIADUCT_NAME = re.compile(r"\b(viaduct|aqueduct)\b", re.I)
+BRIDGE_NAME = re.compile(r"\b(bridge|viaduct|aqueduct|arch)\b", re.I)  # not "footbridge": a listed one still counts
+
+
+def bridge_name(t: dict) -> str:
+    """What a bridge is called: a railway over one carries the line's name, the bridge's is bridge:name."""
+    return t.get("bridge:name") or t.get("name") or ""
+
+
+def is_viaduct(t: dict) -> bool:
+    """Tagged a viaduct or aqueduct, or a bridge called one (Plessey Viaduct is mapped as bridge=yes)."""
+    return t.get("bridge") in {"viaduct", "aqueduct"} or (
+        t.get("bridge") not in (None, "no") and bool(VIADUCT_NAME.search(bridge_name(t))))
+
+
+def famous_bridge(t: dict) -> bool:
+    """A listed or heritage bridge, or one with a Wikidata entry of its own (Causey Arch): a railway bridge
+    often carries the line's Wikidata, so that only counts when the name is the bridge's."""
+    if t.get("bridge") in (None, "no"):
+        return False
+    return bool(t.get("heritage") or t.get("listed_status")) or (
+        bool(t.get("wikidata")) and bool(BRIDGE_NAME.search(bridge_name(t))))

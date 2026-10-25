@@ -29,11 +29,15 @@ BEACH_MIN_M2 = 1500  # smaller sand is a sandpit or a long-jump pit; golf bunker
 BRIDGE_UP_M = 4.0    # a bridge deck this high above the ground (LiDAR) is really in the air...
 BRIDGE_SPAN_M = 30   # ...and a run of it this long is a bridge worth flying, if it crosses water
 BRIDGE_BIG_M = 80    # ...or this long anywhere (a valley, a railway cutting)
+FAMOUS_BRIDGE_M = 20  # a listed bridge, or one with its own Wikidata entry, this long counts whatever it crosses
 LANDMARK_HISTORIC = {"castle", "monument", "fort", "ruins", "city_gate", "tower", "monastery", "abbey", "citywalls"}
 # Icons: landmarks you'd build a cinematic shot round, with a name to them (a lighthouse, a castle, an abbey,
-# a monument, a named pier or viaduct), rather than a viewpoint bench, a water tower or a chimney.
+# a monument, a named pier or viaduct), rather than a viewpoint bench, a water tower or a chimney. A ruin or
+# monument needs a Wikidata entry or a listing too: OSM has every war memorial, drinking fountain and old
+# ferry landing as historic=monument or ruins.
 ICON_MAN_MADE = {"lighthouse", "windmill", "obelisk"}
 ICON_PIER = {"pier", "breakwater", "groyne"}
+ICON_MAX_M2 = 10e4  # a sculpture or a priory, not a whole estate or park tagged as an attraction
 # Land you can usually walk onto and fly from, if the rules allow: parks, commons, open access grass.
 PUBLIC_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "dog_park", "village_green"}
 PUBLIC_LANDUSE = {"recreation_ground", "village_green"}
@@ -115,11 +119,13 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     # lane over a culvert isn't. Measured on the span LiDAR sees in the air, not the flagged segment.
     water_union = pd.concat([big_water.geometry, rivers.geometry]).union_all()
     spans = _bridge_spans(region, bridges_seg)
-    viaducts = bridge_lines[bridge_lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"})]
+    viaducts = bridge_lines[bridge_lines["tags"].map(osm.is_viaduct)]
+    famous_spans = bridge_lines[bridge_lines["tags"].map(osm.famous_bridge)]
     big_bridges = pd.concat([
         spans[(spans.length >= BRIDGE_SPAN_M) & (spans.distance(water_union) <= 30)],
         spans[spans.length >= BRIDGE_BIG_M],
         viaducts.geometry,
+        famous_spans[famous_spans.length >= FAMOUS_BRIDGE_M].geometry,  # Causey Arch: 30 m, but 24 m up a gorge
     ])
     log.info("bridges: %d flagged segments, %d spans in the air, %d worth flying", len(bridges_seg), len(spans),
              len(big_bridges))
@@ -136,8 +142,14 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     quarry = areas[areas["tags"].map(lambda t: t.get("landuse") == "quarry" or "quarry" in str(t.get("abandoned:landuse", "")))]
 
     famous = lambda t: bool(t.get("wikidata") or t.get("heritage") or t.get("listed_status"))
-    # A viaduct with a name (Nine Arches, Hownsgill) is a landmark whether or not it's listed.
-    named_viaduct = lambda t: t.get("bridge") in {"viaduct", "aqueduct"} and bool(t.get("name"))
+    # A viaduct with a name (Nine Arches, Hownsgill) is a landmark whether or not it's listed, and so is a
+    # bridge famous in its own right (Causey Arch); a little listed footbridge over a burn isn't.
+    named_viaduct = lambda t: osm.is_viaduct(t) and bool(osm.bridge_name(t))
+    deck = lambda t: t.get("man_made") == "bridge" and (famous(t) or named_viaduct(t)
+                                                         or bool(osm.VIADUCT_NAME.search(osm.bridge_name(t))))
+    viaduct_lines = lines[lines["tags"].map(lambda t: osm.is_viaduct(t) and (famous(t) or named_viaduct(t)))]
+    famous_bridges = lines[lines["tags"].map(osm.famous_bridge)]
+    famous_bridges = famous_bridges[famous_bridges.length >= FAMOUS_BRIDGE_M]
     landmarks = pd.concat([
         nodes[nodes["tags"].map(lambda t: t.get("tourism") in {"viewpoint", "attraction"}
                                 or t.get("man_made") in LANDMARK_MAN_MADE
@@ -145,18 +157,21 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
                                 or (t.get("tourism") == "artwork" and bool(t.get("wikidata"))))].geometry,
         polys(areas[areas["tags"].map(lambda t: t.get("historic") in LANDMARK_HISTORIC
                                       or t.get("tourism") == "attraction" or t.get("man_made") in LANDMARK_MAN_MADE
-                                      or (t.get("tourism") == "artwork" and bool(t.get("wikidata")))
-                                      or (t.get("man_made") == "bridge" and (famous(t) or named_viaduct(t))))]).geometry,
-        lines[lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"} and (famous(t) or named_viaduct(t)))].geometry,
+                                      or (t.get("tourism") == "artwork" and bool(t.get("wikidata"))) or deck(t))]).geometry,
+        viaduct_lines.geometry,
+        famous_bridges.geometry,
     ])
     named = lambda t: bool(t.get("name") or t.get("wikidata"))
-    icon = lambda t: named(t) and (t.get("man_made") in ICON_MAN_MADE or t.get("historic") in LANDMARK_HISTORIC
+    icon = lambda t: named(t) and (t.get("man_made") in ICON_MAN_MADE
+                                   or (t.get("historic") in LANDMARK_HISTORIC and famous(t))
                                    or (t.get("tourism") in {"artwork", "attraction"} and bool(t.get("wikidata"))))
+    icon_areas = polys(areas[areas["tags"].map(lambda t: icon(t) or deck(t))])
     icons = pd.concat([
         nodes[nodes["tags"].map(icon)].geometry,
-        polys(areas[areas["tags"].map(lambda t: icon(t) or (t.get("man_made") == "bridge" and (famous(t) or named_viaduct(t))))]).geometry,
-        lines[lines["tags"].map(lambda t: (t.get("bridge") in {"viaduct", "aqueduct"} and (famous(t) or named_viaduct(t)))
-                                or (t.get("man_made") in ICON_PIER and named(t)))].geometry,
+        icon_areas[icon_areas.geometry.area <= ICON_MAX_M2].geometry,
+        viaduct_lines.geometry,
+        famous_bridges[famous_bridges["tags"].map(lambda t: bool(osm.bridge_name(t)))].geometry,
+        lines[lines["tags"].map(lambda t: t.get("man_made") in ICON_PIER and named(t))].geometry,
     ])
     hazards = pd.concat([
         lines[lines["tags"].map(lambda t: t.get("power") in {"line", "minor_line"})].geometry,
