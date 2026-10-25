@@ -321,10 +321,12 @@ def test_heritage_owners_need_permission():
         {"historic": "monument", "name": "West Backworth Medieval Settlement (English Heritage Scheduled Monument)"},
         {"historic": "monument", "name": "Penshaw Monument", "wikidata": "Q7164734"},  # NT, not tagged in OSM
         {"historic": "monument", "name": "Grey's Monument"},
-    ]}, geometry=[box(0, 0, 10, 10)] * 4, crs="EPSG:27700")
+        {"landuse": "forest", "name": "Chopwell Wood"},  # Forestry England, by its OSM id
+    ], "osm_id": ["w1", "n2", "w3", "w4", "r11351599"]}, geometry=[box(0, 0, 10, 10)] * 5, crs="EPSG:27700")
     cls = legal.classify_areas(areas)
-    assert list(cls["english_heritage"]) == [True, False, False, False]
-    assert list(cls["national_trust"]) == [False, False, True, False]
+    assert list(cls["english_heritage"]) == [True, False, False, False, False]
+    assert list(cls["national_trust"]) == [False, False, True, False, False]
+    assert list(cls["forestry"]) == [False, False, False, False, True]
 
 
 def test_a_country_park_is_recreation_whatever_its_tag():

@@ -272,9 +272,9 @@ seeds; places like your thumbs-down spots get pulled down.
 - It knows what the data knows. Fences, "no drones" signs, livestock, nesting birds, crowds on the
   day and private land aren't in it. Go and look first, and take a spotter when you fly in goggles.
 - Land use and land owners come from OpenStreetMap. If a park or a National Trust boundary isn't
-  mapped, it isn't known here. Chopwell Wood, for example, has no operator tag in OSM, so it isn't
-  flagged as Forestry England land. Penshaw Monument has none either, so it's listed by hand in
-  `legal.KNOWN_OWNERS` (adding `operator=National Trust` on the map is the better fix).
+  mapped, it isn't known here. Chopwell Wood (Forestry England) and Penshaw Monument (National Trust)
+  have no operator tag in OSM, so they're listed by hand in `legal.KNOWN_OWNERS`; adding `operator=*`
+  on the map is the better fix, and other untagged land isn't flagged.
 - Without LiDAR, trees under ~4 m and narrow gaps get missed and building heights are estimates.
 - The A3 check is distance-based and a bit conservative around edges (20 m pixels). The "can I fly
   here" verdict is a planning aid, not legal advice: check the CAA Drone Code and a drone safety map
