@@ -28,7 +28,7 @@ function liteStyle() {
     version: 8,
     sources: {
       lite: {
-        type: 'vector', tiles: [`${abs(`${BASE}/tiles/`)}{z}/{x}/{y}.pbf`], minzoom: 8, maxzoom: 12, bounds: regionBounds(),
+        type: 'vector', tiles: [liteTiles()], minzoom: 8, maxzoom: 12, bounds: regionBounds(),
         attribution: '© OpenStreetMap contributors, Overture Maps',
       },
     },
@@ -54,6 +54,18 @@ function liteStyle() {
     ],
   };
 }
+// A sandboxed host serves no .pbf, so there the tiles come in one file (base64 by z/x/y, from scripts/artifact.mjs).
+let liteTileSet = null;
+function liteTiles() {
+  if (!SANDBOXED) return `${abs(`${BASE}/tiles/`)}{z}/{x}/{y}.pbf`;
+  maplibregl.addProtocol('lite', async ({ url }) => {
+    liteTileSet ||= fetch(`${BASE}/tiles.json`).then((r) => r.json());
+    const b64 = (await liteTileSet)[url.slice('lite://'.length)];
+    return { data: b64 ? Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer : new ArrayBuffer(0) };
+  });
+  return 'lite://{z}/{x}/{y}';
+}
+
 const SATELLITE = {
   type: 'raster', tileSize: 256, maxzoom: 19,
   tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
