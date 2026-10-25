@@ -181,10 +181,11 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     west_open[:, 3:] = open_[:, :-3]
     edge_w = tall & west_open
 
-    # --- Tree lines: long, narrow belts of trees (hedgerow trees, avenues, wood edges along a field).
+    # --- Tree lines: long, narrow belts of trees (hedgerow trees, avenues).
     tree_tall = is_tree & ~t.bld
     blab, bn = ndimage.label(tree_tall, structure=np.ones((3, 3)))
     treeline = np.zeros_like(tree_tall)
+    belt = np.zeros_like(tree_tall)
     if bn:
         objs = ndimage.find_objects(blab)
         b_area = np.bincount(blab.ravel(), minlength=bn + 1)[1:]
@@ -195,7 +196,13 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
             length = float(np.hypot(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start))
             if length >= TREELINE_MIN_LEN and b_area[i] / length <= TREELINE_MAX_W:
                 line_ids[i + 1] = True
-        treeline = edge_tree & line_ids[blab]
+        belt = line_ids[blab]
+        treeline = edge_tree & belt
+    # --- Wood edges: a wall of trees along a field, skimmed from the open a few metres off it. (A tree line's
+    # skim nodes sit on the belt itself.)
+    near_r, near_c = inds
+    wall_h = np.where(tree_tall[near_r, near_c] & ~belt[near_r, near_c], trees[near_r, near_c], np.float32(0))
+    lane = (lines.wood_lane(dt_tall, wall_h, open_), wall_h)
 
     # --- Under-canopy room (LiDAR only): last returns reach well below the canopy top.
     if t.porosity is not None:
@@ -277,7 +284,7 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     d_road = ndimage.distance_transform_edt(~road) if road.any() else None
     for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
         blocked = lines.keep_out(t.land, d_bld, d_road, style)
-        nodes = lines.nodes_from(gaps, lone, treeline, style, blocked, arch)
+        nodes = lines.nodes_from(gaps, lone, treeline, style, blocked, arch, lane)
         via: dict = {}
         nb = lines.links(nodes, air, style, blocked, t.land == VIADUCT_CODE if t.land is not None else None, via)
         scores, paths = lines.all_runs(nodes, nb, via)

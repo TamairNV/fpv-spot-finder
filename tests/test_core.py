@@ -594,6 +594,26 @@ def test_analyse_reports_line_cells():
     assert cells["line5"].max() > 4 and cells["line5_n"].max() >= 5
 
 
+def test_a_woods_edge_is_skimmed_from_the_field():
+    from spotfinder import lines
+
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    ohm[300:700, 200:500] = 12  # a wood in the middle of a field...
+    ohm[490:500, 200:500] = 0  # ...with a 10 m ride through it
+    _, _, _, runs = features.analyse(make_tile(ohm), margin=m, size=1000, want_lines=True)
+    nodes = runs["line5"][0]
+    lane = nodes[(nodes[:, 2] == lines.SKIM) & (nodes[:, 4] == lines.LANE_R)]
+    assert len(lane) >= 20  # all round the wood, one every SKIM_STEP or so
+    r, c = lane[:, 0], lane[:, 1]
+    ride = (r >= 490) & (r < 500)
+    off = np.maximum.reduce([300 - r, r - 699, 200 - c, c - 499])[~ride]  # metres out from the wood
+    assert (off >= lines.LANE_IN - 1).all() and (off <= lines.LANE_OUT + 1).all() and (lane[:, 3] == 1.0).all()
+    assert not (ride & (c >= 210) & (c < 490)).any()  # not along the ride, past its mouths: no room there
+    assert not (runs["linew"][0][:, 4] == lines.LANE_R).any()  # the whoop sticks to tree lines
+    assert runs["line5"][1].max() > 2  # and they chain into a run along the edge
+
+
 def test_lines_dont_fly_through_trees_hanging_over_a_river(monkeypatch):
     from spotfinder import lines
 

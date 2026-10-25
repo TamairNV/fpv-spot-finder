@@ -207,7 +207,7 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
     c["remote"] = ramp(win_min(f["dist_access"], r), 250, 600)
     c["hazard"] = share(f["dist_hazard"], 15, 50)
     if p.key == "freestyle5":
-        c["flow"] = ramp(win_max(f["line5"], r), 4, 12)  # (runs got longer when links could bend)
+        c["flow"] = ramp(win_max(f["line5"], r), 5, 13)  # (runs got longer when links could bend, and skim wood edges)
         c["gaps"] = sat(win_sum(f["gq5"], r), 20)
         c["lone"] = sat(win_sum(f["lone"] * ramp(f["lone_h_max"], 5, 12), r), 12)
         c["edges"] = 0.6 * sat(win_sum(f["treeline_m"], r), 250) + 0.4 * sat(win_sum(f["edge_tree_m"] + f["edge_bld_m"], r), 700)
