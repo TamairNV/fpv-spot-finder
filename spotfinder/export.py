@@ -452,7 +452,7 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
     moves = []
     for k, j in enumerate(path):
         lon, lat = bng_to_lonlat(px[j], py[j])
-        move = [lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6), round(px[j] - x, 1), round(py[j] - y, 1)]
+        move = [move_kind(t, nodes[j], style), round(lon, 6), round(lat, 6), round(px[j] - x, 1), round(py[j] - y, 1)]
         bend = via.get((min(path[k - 1], j), max(path[k - 1], j))) if k else None
         if bend is not None:  # the way in bends round something: [lon, lat, dx, dy] of the bend
             bx, by = t.x0 + bend[1] + 0.5, t.y1 - bend[0] - 0.5
@@ -461,6 +461,24 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
         moves.append(move)
     return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path, via)), "moves": moves,
             "takeoff_xy": (t.x0 + tk[1] + 0.5, t.y1 - tk[0] - 0.5)}
+
+
+def move_kind(t, node: np.ndarray, style) -> str:
+    """A line node's move as the card and the 3D view name it. A skim says what it's along: a tree line
+    ("skim"), or for a node in the open off a wall (lines.Lane) the edge of a wood ("edge") or the side of a
+    building ("wall"), whichever tall thing is nearest."""
+    from . import features, lines
+
+    kind = lines.KIND_NAME[int(node[2])]
+    if kind != "skim" or style.lane is None or node[4] != style.lane.r:
+        return kind
+    r, c, reach = int(node[0]), int(node[1]), int(style.lane.far) + 2
+    r0, c0 = max(r - reach, 0), max(c - reach, 0)
+    rr, cc = np.nonzero(t.ohm[r0:r + reach + 1, c0:c + reach + 1] >= features.TALL_M)
+    if not len(rr):
+        return "edge"
+    k = int(np.argmin((rr + r0 - r) ** 2 + (cc + c0 - c) ** 2))
+    return "wall" if t.bld[rr[k] + r0, cc[k] + c0] else "edge"
 
 
 def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: int = 40) -> tuple[float, float]:
@@ -630,7 +648,7 @@ def _line_mix(line: dict | None) -> str:
     from collections import Counter
 
     order = ["arch", "gap", "orbit", "dive", "skim"]
-    n = Counter(m[0] for m in line["moves"])
+    n = Counter("skim" if m[0] in ("edge", "wall") else m[0] for m in line["moves"])
     words = {"gap": ("a gap", "gaps"), "orbit": ("an orbit", "orbits"), "dive": ("a dive", "dives"),
              "skim": ("a skim", "skims"), "arch": ("an arch", "arches")}
     return ", ".join(words[k][0] if n[k] == 1 else f"{n[k]} {words[k][1]}" for k in order if n[k])

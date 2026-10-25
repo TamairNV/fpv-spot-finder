@@ -672,6 +672,24 @@ def test_the_whoop_skims_a_buildings_side_and_the_5_inch_keeps_off():
     assert not (runs["line5"][0][:, 2] == lines.SKIM).any()  # 800 g keeps 12 m off buildings
 
 
+def test_a_skim_says_what_its_along():
+    from types import SimpleNamespace
+
+    from spotfinder import export, lines
+
+    ohm = np.zeros((100, 100), "float32")
+    bld = np.zeros((100, 100), bool)
+    ohm[20:40, 20:40], bld[20:40, 20:40] = 15, True  # an office block
+    ohm[60:90, 20:40] = 12  # a wood
+    t = SimpleNamespace(ohm=ohm, bld=bld)
+    node = lambda r, c, kind, radius: np.array([r, c, kind, 1.0, radius], dtype=float)
+    assert export.move_kind(t, node(30, 43, lines.SKIM, lines.WALLS.r), lines.WHOOP) == "wall"
+    assert export.move_kind(t, node(75, 43, lines.SKIM, lines.WALLS.r), lines.WHOOP) == "edge"
+    assert export.move_kind(t, node(75, 43, lines.SKIM, lines.END_SKIP), lines.WHOOP) == "skim"  # on a tree line
+    assert export.move_kind(t, node(50, 50, lines.GAP, lines.END_SKIP), lines.WHOOP) == "gap"
+    assert export._line_mix({"moves": [["gap"], ["wall"], ["edge"], ["skim"]]}) == "a gap, 3 skims"
+
+
 def test_lines_dont_fly_through_trees_hanging_over_a_river(monkeypatch):
     from spotfinder import lines
 

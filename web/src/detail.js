@@ -277,7 +277,8 @@ function notesBox(p, ratings, onNote) {
 }
 
 // The pipeline's suggested run through the spot, numbered like the markers in the 3D view.
-const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the edge', arch: 'Through the viaduct arch' };
+const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the tree line',
+  edge: 'Skim along the edge of the trees', wall: 'Skim along the side of the building', arch: 'Through the viaduct arch' };
 function lineBox(p) {
   const moves = p.line?.moves;
   if (!moves?.length) return null;

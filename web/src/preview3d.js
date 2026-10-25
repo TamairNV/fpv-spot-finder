@@ -25,7 +25,7 @@ const DRONES = {
 };
 const G = 9.81;
 // the suggested line's moves, numbered in the order to fly them
-const MOVE_COLOUR = { gap: '#ff3d7f', orbit: '#ffc400', dive: '#a78bfa', skim: '#22d3ee', arch: '#fb923c' };
+const MOVE_COLOUR = { gap: '#ff3d7f', orbit: '#ffc400', dive: '#a78bfa', skim: '#22d3ee', edge: '#22d3ee', wall: '#22d3ee', arch: '#fb923c' };
 const DECK = 6; // preview class: a viaduct deck, drawn as a slab in the air so its arches show
 const DECK_T = 2.5; // m, how thick the deck slab is
 const WEAVE_OUT = 9; // m either side of a viaduct that a weave swings out to between arches
@@ -395,7 +395,7 @@ export class Preview3D {
         const p = gate ? gate.g.centre.clone() : new THREE.Vector3(x, ground + 2.5, z);
         pts.push(p);
         mark = p.clone().add(new THREE.Vector3(0, (gate?.g.r ?? 2) + 3, 0));
-      } else { // skim: low along the edge
+      } else { // skim: low along the tree line, wood's edge or wall
         pts.push(new THREE.Vector3(x, ground + 2, z));
         mark = new THREE.Vector3(x, ground + 6, z);
       }
