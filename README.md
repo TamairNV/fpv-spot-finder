@@ -207,8 +207,11 @@ change.
    straight leg to it that keeps off the same homes, car parks, playgrounds, railways and roads and
    doesn't go through a wall, building or viaduct deck (trees it hops over). If the best run has no such
    way in, it's flown backwards, or the next best one is; no line at all if none of the best ten has
-   one. The card lists the moves in order, and a skim says what it's along: a tree line, the edge of a
-   wood or a clump of trees, or the side of a building.
+   one. The take-off stands on public ground (a park, a common, a beach) if there's some up to 40 m
+   further off than the nearest open ground: off that you'd need the landowner's OK. Spots without a
+   line get the same: the nearest open ground off gardens, car parks and roads, public if there's some
+   within 40 m. The card lists the moves in order, and a skim says what it's along: a tree line, the
+   edge of a wood or a clump of trees, or the side of a building.
    Lines keep off people's homes and gardens (residential land that isn't a park or a big green), car
    parks, school, college, university, hospital and prison grounds (playing fields included), children's
    playgrounds (10 m round), working railways and the Metro in the open air (8 m either side: trains,

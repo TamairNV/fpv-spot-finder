@@ -46,6 +46,8 @@ BENDS = (0.25, -0.25, 0.4, -0.4)  # where a link that can't fly straight may ben
 BEND_COST = 0.85    # a bend in the way there costs a little against flying straight
 TAKEOFF_MIN = 8.0   # metres from the take-off to the first move's obstacle: not on top of it...
 TAKEOFF_MAX = 90.0  # ...and close enough to see it
+PREFER_M = 40.0     # ...though one this much further off wins if it's on public ground (a park, a common, a beach)
+                    # rather than a field or land nobody's mapped: off those you need the landowner's OK
 
 
 @dataclass(frozen=True)
@@ -341,12 +343,14 @@ def path_length(nodes: np.ndarray, path: list[int], via: dict | None = None) -> 
 
 
 def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndarray, style: Style,
-            blocked: np.ndarray | None, hint: tuple[float, float] | None = None) -> tuple[int, int] | None:
+            blocked: np.ndarray | None, hint: tuple[float, float] | None = None,
+            prefer: np.ndarray | None = None) -> tuple[int, int] | None:
     """Where to stand for a run starting at `first` (row, col, with `first_r` metres round it that are the
     obstacle itself): open ground off homes, car parks and roads, with a straight leg to the first move that
     stays off them too and doesn't go through anything `solid` (heights of walls, buildings, a viaduct deck:
     trees are left out, as the quad hops over those on the way in), as close to the first move, and to
-    `hint` (the path-side place picked from the cells), as can be."""
+    `hint` (the path-side place picked from the cells), as can be, and on `prefer` ground (public) if there's
+    some up to PREFER_M further off."""
     ok = open_ & ~blocked if blocked is not None else open_
     rr, cc = np.nonzero(ok[::3, ::3])
     rr, cc = rr * 3, cc * 3
@@ -356,6 +360,8 @@ def takeoff(first: np.ndarray, first_r: float, solid: np.ndarray, open_: np.ndar
     if not len(rr):
         return None
     cost = d if hint is None else d + 0.5 * np.hypot(rr - hint[0], cc - hint[1])
+    if prefer is not None:
+        cost = cost - PREFER_M * prefer[rr, cc]
     clear = ndimage.maximum_filter(np.where(blocked, np.float32(99), solid) if blocked is not None else solid,
                                    size=style.corridor)
     h, w = solid.shape

@@ -504,6 +504,9 @@ def test_what_the_take_off_stands_on(monkeypatch):
     assert g.at(2100, 50) == ("beach", "Longsands")
     assert g.at(5025, 25) == ("public", None)  # a name that only says what it is
     assert g.at(9000, 9000) == (None, None)
+    pub = g.public(0, 1000, (1000, 1000))  # the same, on a 1 m grid for picking take-offs
+    assert pub[500, 500] and not pub[800, 200] and pub.sum() == 1000 * 1000 - 200 * 200
+    assert g.public(2000, 100, (100, 200)).all() and not g.public(9000, 9100, (50, 50)).any()
 
 
 def test_viaduct_deck_gives_arches():
@@ -551,6 +554,21 @@ def test_takeoff_leg_stays_off_homes():
     ohm[107:200, 95:106] = 10  # ...and a wall behind it: the leg has to come in from the side
     tk = lines.takeoff(np.array([100.0, 100.0]), 6.0, ohm, open_, lines.FREESTYLE, blocked, hint=(40.0, 100.0))
     assert tk is not None and tk[0] >= 94 and not (tk[0] >= 105 and 93 <= tk[1] <= 107)
+
+
+def test_take_off_on_public_ground_if_its_close():
+    from spotfinder import lines
+
+    flat, open_ = np.zeros((200, 200), "float32"), np.ones((200, 200), bool)
+    first = np.array([100.0, 100.0])
+    park = np.zeros((200, 200), bool)
+    park[130:, :] = True  # a park starts 30 m south of the first move, with a farmer's field all round it
+    tk = lines.takeoff(first, 6.0, flat, open_, lines.FREESTYLE, None)
+    assert not park[tk]  # the nearest open ground is in the field
+    tk = lines.takeoff(first, 6.0, flat, open_, lines.FREESTYLE, None, prefer=park)
+    assert park[tk] and np.hypot(tk[0] - 100, tk[1] - 100) < 40
+    park[:160] = False  # 60 m off: not worth the walk
+    assert not park[lines.takeoff(first, 6.0, flat, open_, lines.FREESTYLE, None, prefer=park)]
 
 
 def test_line_links_need_clear_air():

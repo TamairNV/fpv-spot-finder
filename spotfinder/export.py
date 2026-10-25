@@ -391,6 +391,22 @@ class Ground:
         kind, tags = self.areas.at[row, "kind"], self.areas.at[row, "tags"]
         return kind, display_name(tags) if proper(tags) else None
 
+    def public(self, x0: float, y1: float, shape: tuple[int, int]) -> np.ndarray:
+        """Where it's public ground or a beach on a 1 m grid with (x0, y1) at its top left corner, by the same
+        rule as `at`: the smallest area round a pixel says, and a beach wins."""
+        from rasterio import features as rfeatures
+        from rasterio.transform import from_origin
+
+        h, w = shape
+        rows = self.areas.iloc[self.tree.query(shapely.box(x0, y1 - h, x0 + w, y1))]
+        # biggest first, so the smallest area round a pixel is burnt last, and beaches after the rest
+        rows = rows.iloc[np.lexsort((-rows.geometry.area.values, (rows["kind"] == "beach").values))]
+        if not len(rows):
+            return np.zeros(shape, bool)
+        burnt = rfeatures.rasterize(zip(rows.geometry.values, np.where(rows["kind"] == "farm", 1, 2)), out_shape=shape,
+                                    transform=from_origin(x0, y1, 1, 1), fill=0, dtype="uint8")
+        return burnt == 2
+
 
 # ---------------------------------------------------------------- previews
 
@@ -412,11 +428,11 @@ def _flush_pngs() -> None:
 
 
 def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float,
-              hint: tuple[float, float] | None = None, tries: int = 10) -> dict | None:
+              hint: tuple[float, float] | None = None, tries: int = 10, ground: Ground | None = None) -> dict | None:
     """The best flyable run starting within `radius` of the spot, as moves the 3D view can draw:
     each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre, and [lon, lat, dx, dy] of a
     bend on the way in after those when the link to it bends round something. "takeoff_xy" is where to
-    stand for it (BNG), near `hint` if it can be: the leg from there to the first move stays off homes,
+    stand for it (BNG), near `hint` and on public `ground` if it can be: the leg from there to the first move stays off homes,
     car parks and roads too, not just the run. When the best run has no such take-off (a tree pocket ringed
     by roads), it's flown the other way round, or the next best run is, of the best `tries`; failing all
     of those there's no line."""
@@ -436,11 +452,12 @@ def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: f
         return None
     style = lines.FREESTYLE if line_key == "line5" else lines.WHOOP
     hint_rc = None if hint is None else (t.y1 - hint[1] - 0.5, hint[0] - t.x0 - 0.5)
+    prefer = ground.public(t.x0, t.y1, t.ohm.shape) if ground is not None else None
     best = None
     for i in inside[np.argsort(-scores[inside], kind="stable")][:tries]:
         for path in (paths[i], paths[i][::-1]):
             tk = lines.takeoff(nodes[path[0], :2], float(nodes[path[0], 4]), runs["solid"], runs["open"], style,
-                               blocked, hint_rc)
+                               blocked, hint_rc, prefer)
             if tk is not None:
                 best = (i, path, tk)
                 break
@@ -481,9 +498,11 @@ def move_kind(t, node: np.ndarray, style) -> str:
     return "wall" if t.bld[rr[k] + r0, cc[k] + c0] else "edge"
 
 
-def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: int = 40) -> tuple[float, float]:
+def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: int = 40,
+                 ground: Ground | None = None) -> tuple[float, float]:
     """The nearest open ground to (x, y), within `reach` metres, that's off homes and gardens, car parks and
-    roads (and for the 5", clear of buildings): the take-off picked from the 50 m cells can land in a garden."""
+    roads (and for the 5", clear of buildings), and on public `ground` if there's some in reach (lines.PREFER_M):
+    the take-off picked from the 50 m cells can land in a garden."""
     from scipy import ndimage
 
     from . import features, lines
@@ -505,7 +524,10 @@ def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: i
     if not len(rr):
         return x, y
     r0, c0 = t.y1 - y - 0.5, x - t.x0 - 0.5
-    i = int(np.argmin(np.hypot(rr - r0, cc - c0)))
+    cost = np.hypot(rr - r0, cc - c0)
+    if ground is not None:
+        cost -= lines.PREFER_M * ground.public(t.x0, t.y1, ok.shape)[rr, cc]
+    i = int(np.argmin(cost))
     return t.x0 + cc[i] + 0.5, t.y1 - rr[i] - 0.5
 
 
@@ -841,12 +863,12 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             line = None
             line_key = {"freestyle5": "line5", "cine85": "linew"}.get(key)
             if line_key and rank <= previews:
-                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL, (tx, ty))
+                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL, (tx, ty), ground=ground)
             # Where to stand: with a run, where the leg to its first move is clear too; without one, at least
             # out of gardens, car parks and roads.
             tk = line.pop("takeoff_xy") if line else None
             if tk is None:
-                tk = snap_takeoff(reader, tx, ty, whoop=key == "cine85")
+                tk = snap_takeoff(reader, tx, ty, whoop=key == "cine85", ground=ground)
             tx, ty = round(tk[0]), round(tk[1])
             tlon, tlat = bng_to_lonlat(tx, ty)
             on, on_name = ground.at(tx, ty)
