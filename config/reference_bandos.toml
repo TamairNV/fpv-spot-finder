@@ -1,0 +1,86 @@
+# Known big bandos in Germany (NRW, from Tamair, 24 Oct 2026), kept as a yardstick for what a real
+# bando looks like in OSM. No German LiDAR, so these aren't scored; they only inform the bando rules.
+# lat/lon are where the OSM feature actually is (`given` is the coordinate in Tamair's list when it
+# was off). `osm` is what OSM says there (Geofabrik 2026-10-23), so you can see how little of it
+# says "abandoned".
+
+[[bando]]
+name = "Kraftwerk Shamrock, Herne"
+lat = 51.5269
+lon = 7.1810
+osm = "landuse=industrial + disused:power=plant; two cooling towers abandoned:building=yes + abandoned:man_made=tower; brownfield next door"
+why = "Coal power plant shell and cooling towers"
+
+[[bando]]
+name = "HSP Hoesch Spundwand / Dortmunder Union, Dortmund-Dorstfeld"
+lat = 51.5139
+lon = 7.4403
+osm = "landuse=industrial (45 ha), brick building=industrial halls 2-15k m2, several demolished:building nearby; no lifecycle tags"
+why = "Gutted steel mill halls, pillars, tunnels"
+
+[[bando]]
+name = "Phoenix West, Dortmund-Hoerde"
+lat = 51.4869
+lon = 7.4844
+given = [51.4905, 7.4725]
+osm = "historic=technical_monument (Stahlwerk Phoenix-West, heritage 8); 'Ehemaliger Hochofen' building=yes historic=yes"
+why = "Ore bunkers, blast furnace, high steel bridges (heritage site)"
+
+[[bando]]
+name = "Kokerei Hansa, Dortmund-Huckarde"
+lat = 51.5410
+lon = 7.4110
+given = [51.5292, 7.4128]
+osm = "tourism=museum, note=Industrieruine, fee=yes; Zeche Hansa landuse=industrial"
+why = "Coal-washing tower and conveyor bridges (a museum now: ask)"
+
+[[bando]]
+name = "Zeche Westerholt, Gelsenkirchen/Herten"
+lat = 51.6014
+lon = 7.0764
+given = [51.5997, 7.0653]
+osm = "man_made=mineshaft x3, 'Westerholt Schacht 1' building=yes, landuse=industrial; no lifecycle tags"
+why = "Sprawling brick/concrete colliery, 'biggest bando in Germany' on FPV YouTube"
+
+[[bando]]
+name = "Zementwerk Mersmann, Beckum"
+lat = 51.7520
+lon = 8.0708
+osm = "landuse=industrial industrial=factory (8 ha), building=yes 10k + 3.4k m2, chimney, storage_tank; no lifecycle tags"
+why = "Open concrete skeleton, silos, steel bridges, drop shafts"
+
+[[bando]]
+name = "Zementwerk Elsa, Ennigerloh"
+lat = 51.8192
+lon = 8.0153
+given = [51.8182, 8.0189]
+osm = "landuse=industrial name='ehem. Zementwerk Elsa' (7 ha), many building=yes"
+why = "Former cement works: only the name says it's derelict"
+
+[[bando]]
+name = "SILAG / Niepmann, Solingen-Graefrath"
+lat = 51.2161
+lon = 7.0716
+osm = "landuse=industrial, building=industrial 8k and 18k m2; no lifecycle tags"
+why = "Gutted multi-storey concrete industrial ruin"
+
+[[bando]]
+name = "Knopffabrik Prym, Wuppertal-Barmen"
+lat = 51.2798
+lon = 7.1841
+osm = "landuse=industrial, landuse=greenfield, natural=scrub, building=yes 1.9-2.4k m2"
+why = "Multi-storey factory ruin with open floors and shafts"
+
+[[bando]]
+name = "P. D. Rasspe Soehne, Solingen-Stoecken"
+lat = 51.1869
+lon = 7.1058
+osm = "landuse=industrial, building=yes 8.4k m2; no lifecycle tags"
+why = "60,000 m2 abandoned works with concrete skeletons and a chimney"
+
+[[bando]]
+name = "Kalksteinbruch Schlupkothen, Wuelfrath"
+lat = 51.2758
+lon = 7.0544
+osm = "nature reserve (Naturschutzgebiet, entry banned), forest, viewpoints; the crusher buildings aren't mapped"
+why = "Old limestone quarry with a lake and open crusher buildings (nature reserve: no entry)"

@@ -58,6 +58,11 @@ RECREATION_LANDUSE = {"recreation_ground", "village_green"}
 RECREATION_TOURISM = {"camp_site", "caravan_site", "picnic_site", "theme_park", "zoo", "attraction"}
 NATURE_DESIGNATIONS = {"site_of_special_scientific_interest", "local_nature_reserve", "national_nature_reserve",
                        "special_protection_area", "special_area_of_conservation", "ramsar"}
+# Pillboxes and gun emplacements from the war, all along the coast (one's on St Mary's Island): not MOD land.
+MILITARY_RELICS = {"bunker", "trench"}
+# Owners the map doesn't record yet, by Wikidata or OSM id (adding operator=* in OSM is the real fix).
+KNOWN_OWNERS = {"Q7164734": "National Trust",  # Penshaw Monument
+                "r11351599": "Forestry England"}  # Chopwell Wood
 
 # Bits in the land-flag raster: things that usually need permission before take-off.
 FLAG_NATIONAL_TRUST = 1
@@ -73,6 +78,7 @@ FLAG_DANGER_AREA = 512
 FLAG_CROWDS = 1024
 FLAG_QUARRY = 2048
 FLAG_COMMON = 4096
+FLAG_ENGLISH_HERITAGE = 8192
 
 FLAG_TEXT = {
     FLAG_NATIONAL_TRUST: "National Trust land: they ban drone take-off without a permit",
@@ -88,6 +94,7 @@ FLAG_TEXT = {
     FLAG_CROWDS: "Busy pedestrian area: never fly over crowds",
     FLAG_QUARRY: "Quarry: private site with workers and vehicles; needs the operator's OK",
     FLAG_COMMON: "Common land / town moor: public open space, so it counts as a recreational area for A3",
+    FLAG_ENGLISH_HERITAGE: "English Heritage site: no taking off or landing there, and they ask you not to fly over it",
 }
 
 NOFLY_FRZ = 1
@@ -200,20 +207,27 @@ def classify_areas(areas: gpd.GeoDataFrame) -> pd.DataFrame:
     tourism, natural, designation = get("tourism"), get("natural"), get("designation")
     abandoned = t.map(lambda d: any(k in d for k in ("disused", "abandoned")) and
                       (d.get("disused") == "yes" or d.get("abandoned") == "yes"))
-    owner = lambda needle: t.map(lambda d: _has(d, ("operator", "owner", "name"), needle))
+    ids = areas["osm_id"] if "osm_id" in areas else pd.Series("", index=areas.index)
+    known = pd.Series([(KNOWN_OWNERS.get(d.get("wikidata")) or KNOWN_OWNERS.get(i) or "").lower()
+                       for d, i in zip(t, ids)], index=areas.index)
+    owner = lambda needle, keys=("operator", "owner", "name"): t.map(lambda d: _has(d, keys, needle)) | known.str.contains(
+        needle, regex=False)
     return pd.DataFrame({
         "residential": landuse.isin(RESIDENTIAL_LANDUSE),
         "commercial": (landuse.isin(COMMERCIAL_LANDUSE) & ~abandoned) | amenity.isin(COMMERCIAL_AMENITY)
         | t.map(lambda d: d.get("power") in {"plant", "substation"} or d.get("man_made") == "wastewater_plant"),
         "recreational": leisure.isin(RECREATION_LEISURE) | landuse.isin(RECREATION_LANDUSE)
-        | tourism.isin(RECREATION_TOURISM) | (natural == "beach") | (designation == "common"),
+        | tourism.isin(RECREATION_TOURISM) | (natural == "beach") | (designation == "common")
+        | t.map(osm.is_country_park),
         "common": (leisure == "common") | (designation == "common"),
-        "military": (landuse == "military") | t.map(lambda d: "military" in d),
+        "military": (landuse == "military") | t.map(lambda d: "military" in d and d["military"] not in MILITARY_RELICS),
         "nature": (leisure == "nature_reserve") | designation.isin(NATURE_DESIGNATIONS)
         | (t.map(lambda d: d.get("boundary") == "protected_area")),
         "national_trust": owner("national trust"),
         "forestry": owner("forestry england") | owner("forestry commission"),
         "woodland_trust": owner("woodland trust"),
+        # Not by name: "(English Heritage Scheduled Monument)" is a listing, not who runs it.
+        "english_heritage": owner("english heritage", ("operator", "owner")),
         "cemetery": (landuse == "cemetery") | (amenity == "grave_yard"),
         "golf": leisure == "golf_course",
         "crowds": (amenity == "marketplace") | (leisure == "stadium") | (tourism == "theme_park"),
@@ -268,6 +282,7 @@ def build_legal(region: Region) -> LegalGrids:
         (FLAG_NATIONAL_TRUST, "national_trust"), (FLAG_MILITARY, "military"), (FLAG_NATURE_RESERVE, "nature"),
         (FLAG_FORESTRY, "forestry"), (FLAG_WOODLAND_TRUST, "woodland_trust"), (FLAG_CEMETERY, "cemetery"),
         (FLAG_GOLF, "golf"), (FLAG_CROWDS, "crowds"), (FLAG_QUARRY, "quarry"), (FLAG_COMMON, "common"),
+        (FLAG_ENGLISH_HERITAGE, "english_heritage"),
     ]:
         flags[burn(areas[cls[col]].geometry, shape_, transform).astype(bool)] |= bit
     pedestrian = lu[lu["subtype"] == "pedestrian"]
@@ -275,11 +290,9 @@ def build_legal(region: Region) -> LegalGrids:
 
     lines = o["lines"]
     # Lines in tunnels don't count: the Metro runs under half of central Newcastle.
-    rail = lines[lines["tags"].map(lambda d: d.get("railway") in {"rail", "light_rail", "tram", "subway",
-                                                                    "narrow_gauge", "preserved"}
-                                   and d.get("tunnel", "no") == "no" and d.get("location") != "underground")]
+    rail = lines[lines["tags"].map(osm.is_active_railway)]
     flags[dist(burn(rail.geometry, shape_, transform).astype(bool)) <= 30] |= FLAG_RAILWAY
-    power = lines[lines["tags"].map(lambda d: d.get("power") in {"line", "minor_line"})]
+    power = lines[lines["tags"].map(osm.is_power_line)]
     flags[dist(burn(power.geometry, shape_, transform).astype(bool)) <= 30] |= FLAG_POWER_LINE
 
     log.info("legal grids: computing distances")

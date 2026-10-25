@@ -25,7 +25,8 @@ def load(region: Region) -> list[tuple[str, shapely.Geometry]]:
     that touch (OSM often splits a park) count as one park; same-named parks apart stay separate."""
     areas = osm.extract(region)["areas"]
     is_park = areas["tags"].map(lambda t: bool(t.get("name"))
-                                and (t.get("leisure") in PARK_LEISURE or t.get("landuse") == "recreation_ground")
+                                and (t.get("leisure") in PARK_LEISURE or t.get("landuse") == "recreation_ground"
+                                     or osm.is_country_park(t))
                                 and t.get("access") not in {"private", "no"})
     p = areas[is_park]
     out = []

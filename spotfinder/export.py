@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -16,10 +17,11 @@ import pandas as pd
 import shapely
 from PIL import Image
 from shapely import STRtree
-from shapely.geometry import Point, mapping
+from shapely.geometry import LineString, Point, mapping
 
 from . import legal, scoring
 from . import bandos as bando_mod
+from .rasterize import VIADUCT_CODE
 from . import parks as park_mod
 from .config import WEB_DATA_DIR, Region, Seed, bng_to_lonlat
 from .heights import HeightReader
@@ -201,31 +203,107 @@ def write_legal_layers(region: Region) -> list:
 # "By Premier Inn" says little about the place.
 NOT_A_PLACE = {"hotel", "hostel", "guest_house", "motel", "apartment", "chalet", "fitness_centre", "sports_hall",
                "bowling_alley", "amusement_arcade", "dance", "escape_game", "adult_gaming_centre", "sauna",
-               "tanning_salon", "trampoline_park", "indoor_play", "information", "artwork", "gallery"}
+               "tanning_salon", "trampoline_park", "indoor_play", "information", "artwork", "gallery", "schoolyard",
+               "caravan_site", "camp_site"}
+# Names that only say what a thing is ("Bandstand", "The Green", "Over 8 Play Area", a mine called "colliery"):
+# a spot on one is named after the park round it instead.
+GENERIC_WORDS = {
+    "the", "a", "and", "&", "of", "over", "under", "side", "small", "big", "little", "main", "old", "new", "upper",
+    "lower", "play", "area", "picnic", "recreation", "recreational", "ground", "grounds", "playing", "field",
+    "fields", "green", "paddock", "bandstand", "bmx", "track", "skate", "park", "boating", "lake", "pond", "ponds",
+    "pitch", "pitches", "memorial", "garden", "gardens", "courtyard", "amphitheatre", "ampitheatre", "shingle",
+    "shingles", "car", "allotment", "allotments", "wood", "woods", "woodland", "plantation", "grass", "lawn",
+    "open", "space", "multi-use", "games", "muga", "court", "courts", "tennis", "football", "nature", "wildlife",
+    "dog", "trail", "community", "village", "public", "colliery", "mine", "shaft", "quarry", "ruin", "ruins",
+    "monument", "cross", "well", "spring", "tumulus", "cairn", "metro", "railway", "line", "disused"}
+# a river mapped as just "Wear" or "Don" is the River Wear to anyone standing by it
+# (or the Ouseburn: a burn's name often ends in one)
+WATER_WORD = re.compile(r"\b(river|canal|stream|drain|watercourse)\b|(burn|beck|brook|water|gill|dene|cut|gut|sike|syke|"
+                        r"letch|race|leat)\b", re.I)
+
+
+def proper(t: dict) -> bool:
+    """A name that names the place, not just what it is."""
+    words = re.findall(r"[\w'-]+|&", (t.get("name") or "").lower())
+    return bool(words) and not all(w in GENERIC_WORDS or w.isdigit() for w in words)
+
+
+def display_name(t: dict) -> str:
+    """What to call a feature on a spot's card: "River Wear" for a stretch mapped as "Wear", with a capital."""
+    name = t.get("name") or ""
+    if (t.get("waterway") == "river" or t.get("water") == "river") and not WATER_WORD.search(name):
+        name = f"River {name}"
+    return name[:1].upper() + name[1:]
+
+
+SIGHT_M = 90  # a spot this close to a named viaduct, bridge or landmark is named after it
+BY_M = 250  # ...else after a named place it's in, or one this close
+FAMOUS_PULL_M = 20
+FAMOUS_HISTORIC = {"abbey", "monastery", "ruins", "fort", "tower", "city_gate", "manor"}  # ...if it's listed
+# Where a spot is: a village a bit further off says it better than a farm or a headland (place=locality is
+# both), so Penshaw Monument is in Penshaw, not Cox Green. Business parks don't say it at all.
+PLACE_WEIGHT = {"hamlet": 1.3, "locality": 1.5}
+PLACE_M = 6000
+BUSINESS = re.compile(r"\b(business|industrial|technology|energy|enterprise|trading|retail|estate|offshore|yard|docks?)\b"
+                      r"|\(disused\)", re.I)
+WIDE_RIVER_M = 50  # the two banks of the Tyne or the Wear down here are different towns
+
+
+def is_place(t: dict) -> bool:
+    return bool(t.get("name")) and t.get("place") in {  # (Spring Gardens is a place)
+        "city", "town", "village", "hamlet", "suburb", "neighbourhood", "quarter", "locality"} and not (
+        t["place"] == "locality" and BUSINESS.search(t["name"]))
+
+
+def place_cost(t: dict, d: float) -> float:
+    return d * PLACE_WEIGHT.get(t["place"], 1.0)
 
 
 class Namer:
     def __init__(self, region: Region):
         o = osm.extract(region)
         a, n, ln = o["areas"], o["nodes"], o["lines"]
-        named = lambda g: g[g["tags"].map(lambda t: bool(t.get("name")))]
+        named = lambda g: g[g["tags"].map(proper)]
         good_area = named(a)[named(a)["tags"].map(lambda t: (any(k in t for k in (
             "leisure", "natural", "historic", "water", "place", "military", "tourism"))
             or t.get("landuse") in {"forest", "meadow", "recreation_ground", "quarry", "brownfield", "reservoir"})
-            and t.get("tourism") not in NOT_A_PLACE and t.get("leisure") not in NOT_A_PLACE)]
+            and t.get("tourism") not in NOT_A_PLACE and t.get("leisure") not in NOT_A_PLACE
+            and t.get("location") != "indoor")]  # (a club's hot tub was naming a whoop spot)
         good_area = good_area[good_area.geometry.area < 5e6]
         self.areas = good_area.reset_index(drop=True)
         self.area_tree = STRtree(self.areas.geometry.values)
         pts = named(n)
-        self.places = pts[pts["tags"].map(lambda t: t.get("place") in {
-            "city", "town", "village", "hamlet", "suburb", "neighbourhood", "quarter", "locality"})].reset_index(drop=True)
+        self.places = n[n["tags"].map(is_place)].reset_index(drop=True)
         self.place_tree = STRtree(self.places.geometry.values)
+        river = a[a["tags"].map(lambda t: t.get("water") == "river" or t.get("waterway") == "riverbank")]
+        wide = shapely.get_parts(river.geometry.buffer(-WIDE_RIVER_M / 2).values)
+        self.river_tree = STRtree(wide[~shapely.is_empty(wide)])
         # (memorial points are mostly plaques)
         feats = pts[pts["tags"].map(lambda t: any(k in t for k in ("natural", "historic", "tourism", "man_made"))
                                     and t.get("tourism") not in NOT_A_PLACE and t.get("historic") != "memorial")]
-        rivers = named(ln)[named(ln)["tags"].map(lambda t: t.get("waterway") in {"river", "canal"} or "bridge" in t)]
+        # (a railway or road over a bridge carries the line's or road's name: "Near Metro" says nothing)
+        rivers = named(ln)[named(ln)["tags"].map(lambda t: t.get("waterway") in {"river", "canal"} or (
+            "bridge" in t and bool(osm.BRIDGE_NAME.search(osm.bridge_name(t)))))]
         self.feats = pd.concat([feats, rivers]).reset_index(drop=True)
         self.feat_tree = STRtree(self.feats.geometry.values)
+        # A named viaduct, bridge, lighthouse or monument right at the spot is what you'd call it: the Nine
+        # Arches Viaduct, not the country park it stands in.
+        # (a railway or road on a viaduct carries the line's or road's name: the viaduct's is bridge:name)
+        sight = lambda t: bool(((osm.is_viaduct(t) or t.get("man_made") == "bridge" or osm.famous_bridge(t))
+                                and (t.get("bridge:name") or not (t.get("railway") or t.get("highway"))
+                                     or osm.BRIDGE_NAME.search(t.get("name") or "")))
+                               or t.get("man_made") in {"lighthouse", "windmill"} or t.get("historic") in {"monument", "castle"})
+        self.sights = pd.concat([g[g["tags"].map(sight)] for g in (named(ln), named(a), pts)]).reset_index(drop=True)
+        bridge_lines = ln[ln["tags"].map(lambda t: bool(t.get("bridge:name")) and sight(t))]
+        self.sights = pd.concat([self.sights, bridge_lines]).reset_index(drop=True)
+        self.sight_tree = STRtree(self.sights.geometry.values)
+        # A listed ruin or priory, or a famous artwork, names a spot that isn't in a named place already: Finchale
+        # Priory and the Angel of the North, but Gibside rather than its Orangery.
+        famous = lambda t: bool(t.get("wikidata") or t.get("heritage") or t.get("listed_status"))
+        minor = lambda t: (t.get("historic") in FAMOUS_HISTORIC and famous(t)) or (
+            t.get("tourism") == "artwork" and bool(t.get("wikidata")))
+        self.minor_sights = pd.concat([g[g["tags"].map(minor)] for g in (named(a), pts)]).reset_index(drop=True)
+        self.minor_tree = STRtree(self.minor_sights.geometry.values)
 
     def _nearest(self, tree, frame, p, max_d):
         if len(frame) == 0:
@@ -236,26 +314,82 @@ class Namer:
         d = frame.geometry.iloc[i].distance(p)
         return (frame.iloc[i], d) if d <= max_d else (None, None)
 
+    def _locality(self, p: Point):
+        """The nearest place by PLACE_WEIGHT, on this side of a wide river (Albert Edward Dock isn't in South Shields)."""
+        idx = self.place_tree.query(p, predicate="dwithin", distance=PLACE_M)
+        if not len(idx):
+            return None
+        order = sorted(idx, key=lambda i: place_cost(self.places["tags"].iloc[i], self.places.geometry.iloc[i].distance(p)))
+        for i in order[:5]:
+            if not len(self.river_tree.query(LineString([p, self.places.geometry.iloc[i]]), predicate="intersects")):
+                return self.places.iloc[i]
+        return self.places.iloc[order[0]]
+
+    def _by(self, p: Point):
+        """The named place a spot is by: the nearest within BY_M, though a famous one wins over one up to
+        FAMOUS_PULL_M nearer (by the BALTIC, not by the building firm's yard next door)."""
+        idx = self.area_tree.query(p, predicate="dwithin", distance=BY_M)
+        if not len(idx):
+            return None
+        famous = lambda t: bool(t.get("wikidata") or t.get("heritage") or t.get("listed_status"))
+        return self.areas.iloc[min(idx, key=lambda i: self.areas.geometry.iloc[i].distance(p)
+                                   - FAMOUS_PULL_M * famous(self.areas["tags"].iloc[i]))]
+
     def name(self, x: float, y: float) -> tuple[str, str]:
         p = Point(x, y)
         title = None
+        sight, _ = self._nearest(self.sight_tree, self.sights, p, SIGHT_M)
         cont = [i for i in self.area_tree.query(p, predicate="intersects")]
-        if cont:
+        minor = None if sight is not None or cont else self._nearest(self.minor_tree, self.minor_sights, p, SIGHT_M)[0]
+        if sight is not None:
+            title = sight["tags"].get("bridge:name") or display_name(sight["tags"])
+        elif minor is not None:
+            title = display_name(minor["tags"])
+        elif cont:
             best = min(cont, key=lambda i: self.areas.geometry.iloc[i].area)
-            title = self.areas["tags"].iloc[best]["name"]
+            title = display_name(self.areas["tags"].iloc[best])
         else:
-            row, d = self._nearest(self.area_tree, self.areas, p, 250)
+            row = self._by(p)
             if row is not None:
-                title = f"By {row['tags']['name']}"
+                title = f"By {display_name(row['tags'])}"
             else:
                 row, d = self._nearest(self.feat_tree, self.feats, p, 300)
                 if row is not None:
-                    title = f"Near {row['tags']['name']}"
-        loc_row, _ = self._nearest(self.place_tree, self.places, p, 6000)
+                    title = f"Near {osm.bridge_name(row['tags']) if 'bridge' in row['tags'] else display_name(row['tags'])}"
+        loc_row = self._locality(p)
         locality = loc_row["tags"]["name"] if loc_row is not None else ""
         if not title:
             title = f"Spot near {locality}" if locality else "Unnamed spot"
         return title, locality
+
+
+class Ground:
+    """What a take-off stands on: a beach, public open space (and its name) or farmland, from OpenStreetMap. The
+    smallest area round it says: a grazed field inside a country park is farmland."""
+
+    def __init__(self, region: Region):
+        from . import context
+
+        a = osm.extract(region)["areas"]
+        a = a[a.geom_type.isin(["Polygon", "MultiPolygon"])]
+        t = a["tags"]
+        a = a.assign(kind=np.select(
+            [t.map(lambda d: d.get("natural") in context.BEACH_NATURAL) & (a.geometry.area >= context.BEACH_MIN_M2),
+             t.map(lambda d: context.is_public(d) and not osm.is_institution(d)), t.map(context.is_farm)],
+            ["beach", "public", "farm"], ""))
+        self.areas = a[a["kind"] != ""].reset_index(drop=True)
+        self.tree = STRtree(self.areas.geometry.values)
+
+    def at(self, x: float, y: float) -> tuple[str | None, str | None]:
+        """("beach" | "public" | "farm" | None, the place's name if it has a proper one)."""
+        idx = self.tree.query(Point(x, y), predicate="within")
+        if not len(idx):
+            return None, None
+        rows = self.areas.iloc[idx]
+        beach = rows[rows["kind"] == "beach"]
+        row = (beach if len(beach) else rows).geometry.area.idxmin()
+        kind, tags = self.areas.at[row, "kind"], self.areas.at[row, "tags"]
+        return kind, display_name(tags) if proper(tags) else None
 
 
 # ---------------------------------------------------------------- previews
@@ -277,33 +411,84 @@ def _flush_pngs() -> None:
         _png_jobs.pop().result()
 
 
-def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float) -> dict | None:
+def spot_line(reader: HeightReader, x: float, y: float, line_key: str, radius: float,
+              hint: tuple[float, float] | None = None, tries: int = 10) -> dict | None:
     """The best flyable run starting within `radius` of the spot, as moves the 3D view can draw:
-    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre."""
+    each is [kind, lon, lat, dx, dy] with dx/dy in metres from the spot centre, and [lon, lat, dx, dy] of a
+    bend on the way in after those when the link to it bends round something. "takeoff_xy" is where to
+    stand for it (BNG), near `hint` if it can be: the leg from there to the first move stays off homes,
+    car parks and roads too, not just the run. When the best run has no such take-off (a tree pocket ringed
+    by roads), it's flown the other way round, or the next best run is, of the best `tries`; failing all
+    of those there's no line."""
     from . import features, lines
 
     size = 300
     x0, y0 = int(round(x - size / 2)), int(round(y - size / 2))
     t = reader.tile(x0, y0, size, features.MARGIN)
     _, _, _, runs = features.analyse(t, size=size, want_lines=True)
-    nodes, scores, paths = runs[line_key]
+    nodes, scores, paths, blocked, via = runs[line_key]
     if not len(nodes):
         return None
     px = t.x0 + nodes[:, 1] + 0.5
     py = t.y1 - nodes[:, 0] - 0.5
-    inside = np.hypot(px - x, py - y) <= radius
-    if not inside.any():
+    inside = np.flatnonzero((np.hypot(px - x, py - y) <= radius) & (np.array([len(p) for p in paths]) >= 2))
+    if not len(inside):
         return None
-    i = int(np.flatnonzero(inside)[np.argmax(scores[inside])])
-    path = paths[i]
-    if len(path) < 2:
+    style = lines.FREESTYLE if line_key == "line5" else lines.WHOOP
+    hint_rc = None if hint is None else (t.y1 - hint[1] - 0.5, hint[0] - t.x0 - 0.5)
+    best = None
+    for i in inside[np.argsort(-scores[inside], kind="stable")][:tries]:
+        for path in (paths[i], paths[i][::-1]):
+            tk = lines.takeoff(nodes[path[0], :2], float(nodes[path[0], 4]), runs["solid"], runs["open"], style,
+                               blocked, hint_rc)
+            if tk is not None:
+                best = (i, path, tk)
+                break
+        if best:
+            break
+    if best is None:  # every way in crosses gardens, a car park or a road: no line beats a bad one
         return None
+    i, path, tk = best
     moves = []
-    for j in path:
+    for k, j in enumerate(path):
         lon, lat = bng_to_lonlat(px[j], py[j])
-        moves.append([lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6),
-                      round(px[j] - x, 1), round(py[j] - y, 1)])
-    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path)), "moves": moves}
+        move = [lines.KIND_NAME[int(nodes[j, 2])], round(lon, 6), round(lat, 6), round(px[j] - x, 1), round(py[j] - y, 1)]
+        bend = via.get((min(path[k - 1], j), max(path[k - 1], j))) if k else None
+        if bend is not None:  # the way in bends round something: [lon, lat, dx, dy] of the bend
+            bx, by = t.x0 + bend[1] + 0.5, t.y1 - bend[0] - 0.5
+            blon, blat = bng_to_lonlat(bx, by)
+            move.append([round(blon, 6), round(blat, 6), round(bx - x, 1), round(by - y, 1)])
+        moves.append(move)
+    return {"score": round(float(scores[i]), 1), "length_m": round(lines.path_length(nodes, path, via)), "moves": moves,
+            "takeoff_xy": (t.x0 + tk[1] + 0.5, t.y1 - tk[0] - 0.5)}
+
+
+def snap_takeoff(reader: HeightReader, x: float, y: float, whoop: bool, reach: int = 40) -> tuple[float, float]:
+    """The nearest open ground to (x, y), within `reach` metres, that's off homes and gardens, car parks and
+    roads (and for the 5", clear of buildings): the take-off picked from the 50 m cells can land in a garden."""
+    from scipy import ndimage
+
+    from . import features, lines
+
+    size = 2 * reach
+    m = 20  # context, so a road just outside still counts
+    t = reader.tile(int(round(x - reach)), int(round(y - reach)), size, m)
+    road = t.ways == 1
+    style = lines.WHOOP if whoop else lines.FREESTYLE
+    d_bld = ndimage.distance_transform_edt(~t.bld) if t.bld.any() else None
+    d_road = ndimage.distance_transform_edt(~road) if road.any() else None
+    blocked = lines.keep_out(t.land, d_bld, d_road, style)
+    ok = (t.ohm < features.OPEN_M) & ~t.water & ~road & (t.ways != 3)
+    if blocked is not None:
+        ok &= ~blocked
+    ok[:m, :] = ok[-m:, :] = False
+    ok[:, :m] = ok[:, -m:] = False
+    rr, cc = np.nonzero(ok)
+    if not len(rr):
+        return x, y
+    r0, c0 = t.y1 - y - 0.5, x - t.x0 - 0.5
+    i = int(np.argmin(np.hypot(rr - r0, cc - c0)))
+    return t.x0 + cc[i] + 0.5, t.y1 - rr[i] - 0.5
 
 
 LINE_KEYS = {"freestyle5": "line5", "cine85": "linew"}
@@ -341,7 +526,8 @@ def spot_model(region: Region, r: int, c: int, profile_key: str, path: Path) -> 
 
 def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: float, y: float, path: Path,
                   size_m: int = PREVIEW_M, res_m: int = PREVIEW_RES) -> dict:
-    """160 x 160 px at 2 m: R = class*64, G = height above ground (0.25 m), B = ground (0.5 m above min)."""
+    """160 x 160 px at 2 m: R = class*40 (0 ground, 1 water, 2 road, 3 path, 4 tree, 5 building, 6 viaduct deck),
+    G = height above ground (0.25 m), B = ground (0.5 m above min)."""
     half = size_m // 2
     x0, y0 = int(round(x - half)), int(round(y - half))
     t = reader.tile(x0, y0, size_m, 0)
@@ -359,6 +545,8 @@ def write_preview(reader: HeightReader, dtm: np.ndarray, region: Region, x: floa
     cls[water] = 1
     cls[tree] = 4
     cls[bld] = 5
+    if t.land is not None:  # a viaduct deck: the 3D view draws it as a slab with open arches below
+        cls[(pool((t.land == VIADUCT_CODE).astype("uint8"), np.max) > 0) & (h >= 4)] = 6
     xmin, _, _, ymax = region.bbox
     # Ground: sample the 5 m DTM at each pixel centre (nearest, then smoothed over about 5 m).
     cols = ((x0 + (np.arange(n) + 0.5) * res_m - xmin) / legal.RES).astype(int)
@@ -447,10 +635,10 @@ def _line_mix(line: dict | None) -> str:
         return ""
     from collections import Counter
 
-    order = ["gap", "orbit", "dive", "skim"]
+    order = ["arch", "gap", "orbit", "dive", "skim"]
     n = Counter(m[0] for m in line["moves"])
     words = {"gap": ("a gap", "gaps"), "orbit": ("an orbit", "orbits"), "dive": ("a dive", "dives"),
-             "skim": ("a skim", "skims")}
+             "skim": ("a skim", "skims"), "arch": ("an arch", "arches")}
     return ", ".join(words[k][0] if n[k] == 1 else f"{n[k]} {words[k][1]}" for k in order if n[k])
 
 
@@ -458,8 +646,6 @@ def _why_text(k: str, key: str, s: dict) -> str:
     """One line per reason, with the numbers that earned it."""
     plural = lambda n, one, many: f"{n} {one if n == 1 else many}"
     away = lambda m: "right here" if m < 25 else f"{m} m away"
-    bando = (f"Ruin or abandoned structure {away(s['bando_m'])}" if s["bando_m"] <= s["bando_site_m"]
-             else f"Old industrial site {away(s['bando_site_m'])} (not much left standing)")
     texts = {
         "flow": (f"A {s['line_moves']}-move line over {s['line_m']} m" + (f": {s['line_mix']}" if s.get("line_mix") else "")
                  if s.get("line_moves", 0) >= 2 else "Obstacles you can chain into a run"),
@@ -473,16 +659,22 @@ def _why_text(k: str, key: str, s: dict) -> str:
         "mix": f"Good mix: {s['tree_pct']}% trees, {s['open_pct']}% open",
         "vertical": f"Tall stuff to dive, up to {s['max_height_m']:.0f} m",
         "relief": f"{s['relief_m']:.0f} m of height change: banks and slopes to dive",
-        "bando": bando,
+        "bando": f"Derelict building {away(s['bando_m'])}",
         "water": f"Water {s['water_m']} m away" if s["water_m"] >= 25 else "Right by the water",
         "bridge": f"Bridge or viaduct {away(s['bridge_m'])}",
+        "beach": f"Beach {away(s['beach_m'])}: open sand along the water",
+        "coast": f"Beach {away(s['beach_m'])}" if s["beach_m"] <= s["sea_m"] else f"The sea {away(s['sea_m'])}",
         "architecture": f"Buildings up to {s['bld_h_max']:.0f} m, {s['bld_pct']}% built up",
         "trees": f"{s['tree_pct']}% trees to weave through",
         "under": "Tall trees with see-through crowns: maybe room underneath (LiDAR can't see where branches start)",
         "landmark": f"Landmark {away(s['landmark_m'])}",
+        "hero": f"Big landmark {away(s['hero_m'])} to fly round" if "hero_m" in s else "A big landmark to fly round",
         "plaza": "Open plaza between buildings",
-        "sunset": f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"
-        if s["sunset_deg"] <= -1 else f"{s['west_edge_m']} m of trees and walls facing the sunset, open ground in front",
+        "sunset": f"{s['west_edge_m']} m of trees and walls facing the sunset, open ground in front"
+        if min(s["sunset_deg"], s["sunrise_deg"]) > -1
+        else f"Looks down on the sunset: the skyline west is {-s['sunset_deg']:.0f}° below you"
+        if s["sunset_deg"] <= s["sunrise_deg"]
+        else f"Looks down on the sunrise: the skyline east is {-s['sunrise_deg']:.0f}° below you",
         "public": "Public open space to fly from",
         "busy": f"Busy: {s['places']} shops, cafés and the like nearby, plus paths" if s["places"]
         else "Busy footpaths: expect walkers",
@@ -499,10 +691,10 @@ def _why_text(k: str, key: str, s: dict) -> str:
 
 def why(comp_vals: dict[str, float], profile: scoring.Profile, stats: dict, res: dict, r: int, c: int) -> list[dict]:
     """The score taken apart: points (out of 100) per reason, biggest first, penalties last.
-    The rule part is 60% of the score when there are seed spots (100% without), shared out by weight."""
+    The rule part is 1 - TASTE of the score when there are seed spots (all of it without), shared out by weight."""
     pos = sum(w for w in profile.weights.values() if w > 0)
     has_taste = res["sim"] is not None
-    scale = 100 * (0.6 if has_taste else 1.0) / (pos * max(res["top"], 1e-6))
+    scale = 100 * (1 - scoring.TASTE if has_taste else 1.0) / (pos * max(res["top"], 1e-6))
     out = []
     for k, w in profile.weights.items():
         pts = scale * w * comp_vals.get(k, 0.0)
@@ -510,7 +702,7 @@ def why(comp_vals: dict[str, float], profile: scoring.Profile, stats: dict, res:
             out.append({"key": k, "text": _why_text(k, profile.key, stats), "pts": round(pts, 1)})
     if has_taste:
         out.append({"key": "taste", "text": "Like your favourite spots and 👍 ratings",
-                    "pts": round(40 * float(res["sim"][r, c]), 1)})
+                    "pts": round(100 * scoring.TASTE * float(res["sim"][r, c]), 1)})
     out.sort(key=lambda d: -d["pts"])
     return out
 
@@ -530,12 +722,17 @@ def _grid_name(r: Region, cx: float, cy: float) -> str:
 
 
 def write_regions_index() -> list[dict]:
-    """web/public/data/regions.json: every region that has web data, for the app's region picker."""
-    from .config import load_regions
+    """web/public/data/regions.json: every region that has web data, for the app's region picker, or only
+    the ones config/app.toml lists."""
+    import tomllib
 
+    from .config import CONFIG_DIR, load_regions
+
+    app = CONFIG_DIR / "app.toml"
+    shown = tomllib.loads(app.read_text()).get("regions") if app.exists() else None
     out = []
     for key, r in load_regions().items():
-        if not (WEB_DATA_DIR / key / "meta.json").exists():
+        if not (WEB_DATA_DIR / key / "meta.json").exists() or (shown and key not in shown):
             continue
         w, s, e, n = r.lonlat_bbox()
         cx, cy = bng_to_lonlat((r.bbox[0] + r.bbox[2]) / 2, (r.bbox[1] + r.bbox[3]) / 2)
@@ -555,6 +752,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
         old.unlink()
     legal_corners = write_legal_layers(region)
     namer = Namer(region)
+    ground = Ground(region)
     gaps = pd.read_parquet(region.out_dir / "gaps.parquet")
     lone = pd.read_parquet(region.out_dir / "lone.parquet")
     gap_tree = STRtree(shapely.points(gaps.x.values, gaps.y.values)) if len(gaps) else None
@@ -594,7 +792,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             best, best_cost = (r, c), 1e9
             for rr in range(win[0].start, win[0].stop):
                 for cc in range(win[1].start, win[1].stop):
-                    if cells["open_frac"][rr, cc] < 0.5 or cells["a1_frac"][rr, cc] < 0.9:
+                    if cells["open_frac"][rr, cc] < 0.5 or cells["a1_frac"][rr, cc] < 0.9 or (
+                            "inst_frac" in cells and cells["inst_frac"][rr, cc] >= scoring.INSTITUTION_MAX):
                         continue
                     cost = cells["dist_path"][rr, cc] + 0.5 * CELL * math.hypot(rr - r, cc - c)
                     if cells[profile.legal_key][rr, cc] < 0.9:
@@ -630,7 +829,17 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
             line = None
             line_key = LINE_KEYS.get(key)
             if line_key and rank <= previews:
-                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL)
+                line = spot_line(reader, x, y, line_key, (R + 0.5) * CELL, (tx, ty))
+            # Where to stand: with a run, where the leg to its first move is clear too; without one, at least
+            # out of gardens, car parks and roads.
+            tk = line.pop("takeoff_xy") if line else None
+            if tk is None:
+                tk = snap_takeoff(reader, tx, ty, whoop=key == "cine85")
+            tx, ty = round(tk[0]), round(tk[1])
+            tlon, tlat = bng_to_lonlat(tx, ty)
+            on, on_name = ground.at(tx, ty)
+            br, bc = cell_of(region, (tx, ty))
+            best = (min(max(br, 0), H - 1), min(max(bc, 0), W - 1))
             gr = os_grid_ref(x, y)
             a3_clear = wm("a3_frac")
             if profile.legal_key == "a3_frac":
@@ -658,14 +867,18 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                     "tree_pct": round(100 * wm("tree_frac")), "bld_pct": round(100 * wm("bld_frac")),
                     "max_height_m": round(wmax("h_p90"), 1), "relief_m": round(wmax("relief_250"), 1),
                     "water_m": int(wmin("dist_water")), "bando_m": int(wmin("dist_bando")),
-                    "bridge_m": int(wmin("dist_bridge")), "path_m": int(wmin("dist_path")),
+                    "bridge_m": int(wmin("dist_bridge_fly" if key == "freestyle5" and "dist_bridge_fly" in cells
+                                         else "dist_bridge")), "path_m": int(wmin("dist_path")),
                     "parking_m": int(wmin("dist_parking")), "hazard_m": int(wmin("dist_hazard")),
                     "places": int(ws("places_n")), "buildings": int(ws("bld_n")),
                     "lidar_pct": round(100 * wm("lidar_frac")),
                     "gaps_all": int(ws("gaps_all")), "west_edge_m": int(ws("edge_w_m")), "treeline_m": int(ws("treeline_m")),
                     "open_r_m": int(wmax("open_r_m")), "sunset_deg": round(wmin("sunset_horizon"), 1),
+                    "sunrise_deg": round(wmin("sunrise_horizon"), 1),
                     "access_m": int(wmin("dist_access")), "road_busy_m": int(wmin("dist_road_busy")),
-                    "bando_site_m": int(wmin("dist_bando_site")), "landmark_m": int(wmin("dist_landmark")),
+                    "beach_m": int(min(wmin("dist_beach"), 99999)), "sea_m": int(min(wmin("dist_sea"), 99999)),
+                    "landmark_m": int(wmin("dist_landmark")),
+                    "hero_m": int(wmin("dist_hero" if "dist_hero" in cells else "dist_icon")),
                     "lone_h_max": round(wmax("lone_h_max"), 1), "bld_h_max": round(wmax("bld_h_max"), 1),
                     "gap_q": round(ws("gq5" if key != "cine85" else "gqw"), 1),
                     "line_moves": len(line["moves"]) if line else int(wmax("line5_n" if key != "cine85" else "linew_n")),
@@ -675,7 +888,8 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
                 "legal": {"summary": a_txt, "flags": _flags_text(flag_bits), "a3_clear_pct": round(100 * a3_clear),
                           "a3_edge_m": int(wmin("dist_a3_edge"))},
                 "takeoff": {"lon": round(tlon, 6), "lat": round(tlat, 6), "dx": tx - x, "dy": ty - y,
-                            "path_m": int(cells["dist_path"][best]), "parking_m": int(cells["dist_parking"][best])},
+                            "path_m": int(cells["dist_path"][best]), "parking_m": int(cells["dist_parking"][best]),
+                            "on": on, "on_name": on_name},
                 "gaps_list": near_gaps, "lone_list": near_lone, "preview": preview, "line": line,
                 "links": {
                     "satellite": f"https://www.google.com/maps/@{lat:.6f},{lon:.6f},250m/data=!3m1!1e3",

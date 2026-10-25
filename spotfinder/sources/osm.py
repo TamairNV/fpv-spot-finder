@@ -65,7 +65,7 @@ NODE_TAGS = {
 KEEP_TAG_KEYS = AREA_KEYS | set(LINE_TAGS) | set(NODE_TAGS) | {
     "name", "operator", "owner", "access", "building", "bridge", "layer", "height", "ele", "denotation",
     "leaf_type", "protect_class", "protection_title", "heritage", "listed_status", "generator:source",
-    "voltage", "location", "tunnel", "ref", "wikidata",
+    "voltage", "location", "tunnel", "ref", "wikidata", "bridge:name", "building:condition",
 }
 
 
@@ -82,7 +82,7 @@ class _Collector(osmium.SimpleHandler):
     def area(self, a):
         tags = a.tags
         interesting = any(k in tags for k in AREA_KEYS) or tags.get("building") in BUILDING_BANDO or any(
-            k.startswith(("abandoned:", "disused:", "ruins:")) for k, _ in tags)
+            k.startswith(("abandoned:", "disused:", "ruins:")) for k, _ in tags) or tags.get("building:condition") == "ruinous"
         if not interesting:
             return
         try:
@@ -204,3 +204,60 @@ def pbf_paths(region: Region) -> list[Path]:
 
 def tag(gdf: gpd.GeoDataFrame, key: str) -> pd.Series:
     return gdf["tags"].map(lambda t: t.get(key))
+
+
+VIADUCT_NAME = re.compile(r"\b(viaduct|aqueduct)\b", re.I)
+BRIDGE_NAME = re.compile(r"\b(bridge|viaduct|aqueduct|arch)\b", re.I)  # not "footbridge": a listed one still counts
+
+
+def bridge_name(t: dict) -> str:
+    """What a bridge is called: a railway over one carries the line's name, the bridge's is bridge:name."""
+    return t.get("bridge:name") or t.get("name") or ""
+
+
+def is_viaduct(t: dict) -> bool:
+    """Tagged a viaduct or aqueduct, or a bridge called one (Plessey Viaduct is mapped as bridge=yes)."""
+    return t.get("bridge") in {"viaduct", "aqueduct"} or (
+        t.get("bridge") not in (None, "no") and bool(VIADUCT_NAME.search(bridge_name(t))))
+
+
+def famous_bridge(t: dict) -> bool:
+    """A listed or heritage bridge, or one with a Wikidata entry of its own (Causey Arch): a railway bridge
+    often carries the line's Wikidata, so that only counts when the name is the bridge's."""
+    if t.get("bridge") in (None, "no"):
+        return False
+    return bool(t.get("heritage") or t.get("listed_status")) or (
+        bool(t.get("wikidata")) and bool(BRIDGE_NAME.search(bridge_name(t))))
+
+
+COUNTRY_PARK = re.compile(r"\bcountry park\b", re.I)
+
+
+def is_country_park(t: dict) -> bool:
+    """Named a country park, whatever it's tagged as (Bolam Lake is a nature reserve, Waldridge Fell a
+    protected area): public open space for recreation by definition. Not its car park or café, nor a
+    caravan site that calls itself one."""
+    return bool(COUNTRY_PARK.search(t.get("name") or "")) and not any(
+        k in t for k in ("amenity", "building", "shop", "tourism")) and t.get("landuse") != "residential"
+
+
+INSTITUTION_AMENITY = {"school", "kindergarten", "childcare", "college", "university", "hospital", "prison"}
+
+
+def is_institution(t: dict) -> bool:
+    """School, college, university, hospital or prison grounds: private, full of people, and a hospital
+    may have the air ambulance landing. Their playing fields are part of them, not a park."""
+    return t.get("amenity") in INSTITUTION_AMENITY or t.get("landuse") == "education"
+
+
+def is_power_line(t: dict) -> bool:
+    """An overhead power line, on pylons (power=line) or wooden poles (minor_line); not one that's buried."""
+    return t.get("power") in {"line", "minor_line"} and t.get("location") not in {"underground", "underwater"}
+
+
+ACTIVE_RAILWAY = {"rail", "light_rail", "tram", "subway", "narrow_gauge", "preserved"}
+
+
+def is_active_railway(t: dict) -> bool:
+    """A working railway in the open air (the Metro runs under half of central Newcastle)."""
+    return t.get("railway") in ACTIVE_RAILWAY and t.get("tunnel", "no") == "no" and t.get("location") != "underground"

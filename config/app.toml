@@ -1,0 +1,6 @@
+# Which regions the app lists (web/public/data/regions.json, rewritten by every `score` or by
+# `python -m spotfinder regions`). The others keep their data but the app doesn't offer them.
+# Take the line out to list every region that has data.
+# Newcastle only for now, while the bando, line and scoring rules settle: the other regions were
+# scored with the old ones.
+regions = ["newcastle"]

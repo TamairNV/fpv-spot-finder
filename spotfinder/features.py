@@ -20,6 +20,7 @@ from tqdm import tqdm
 from .config import Region
 from . import lines
 from .heights import HeightReader, Tile
+from .rasterize import KEEP_OFF, VIADUCT_CODE
 
 try:
     import edt as _edt_mod
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 CELL = 50        # metres per output cell
 TILE = 1000      # metres per processing tile (core)
 MARGIN = 40      # metres of context around each tile
+ARCH_W = 8.0     # how wide we take a viaduct arch to be, for the gap counts
 
 TALL_M = 4.0     # anything this tall is an obstacle to weave around
 OPEN_M = 1.5     # below this counts as open ground
@@ -113,7 +115,8 @@ class TileResult:
 
 def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = False):
     """Per-cell features, gaps and lone trees for one tile. With want_lines, also the flyable runs found
-    in it: {style name: (nodes, scores, paths)} in tile pixels."""
+    in it: {style name: (nodes, scores, paths, keep-out mask, bends)} in tile pixels, plus "solid" (heights
+    of everything but tree canopy) and "open" (open ground)."""
     ohm, trees = leaf_on(t)
     tall = ohm >= TALL_M
     road = t.ways == 1
@@ -178,10 +181,11 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     west_open[:, 3:] = open_[:, :-3]
     edge_w = tall & west_open
 
-    # --- Tree lines: long, narrow belts of trees (hedgerow trees, avenues, wood edges along a field).
+    # --- Tree lines: long, narrow belts of trees (hedgerow trees, avenues).
     tree_tall = is_tree & ~t.bld
     blab, bn = ndimage.label(tree_tall, structure=np.ones((3, 3)))
     treeline = np.zeros_like(tree_tall)
+    belt = np.zeros_like(tree_tall)
     if bn:
         objs = ndimage.find_objects(blab)
         b_area = np.bincount(blab.ravel(), minlength=bn + 1)[1:]
@@ -192,7 +196,13 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
             length = float(np.hypot(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start))
             if length >= TREELINE_MIN_LEN and b_area[i] / length <= TREELINE_MAX_W:
                 line_ids[i + 1] = True
-        treeline = edge_tree & line_ids[blab]
+        belt = line_ids[blab]
+        treeline = edge_tree & belt
+    # --- Wood edges: a wall of trees along a field, skimmed from the open a few metres off it. (A tree line's
+    # skim nodes sit on the belt itself.)
+    near_r, near_c = inds
+    wall_h = np.where(tree_tall[near_r, near_c] & ~belt[near_r, near_c], trees[near_r, near_c], np.float32(0))
+    lane = (lines.wood_lane(dt_tall, wall_h, open_), wall_h)
 
     # --- Under-canopy room (LiDAR only): last returns reach well below the canopy top.
     if t.porosity is not None:
@@ -237,8 +247,16 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     grid_n = size // n
     for key in ("gaps", "gaps_all", "gaps_whoop", "gap_flank_h", "lone", "lone_h_max"):
         cells[key] = np.zeros((grid_n, grid_n), dtype="float32")
+    # Nothing in people's gardens, on car parks, in school grounds, playgrounds or by the tracks or a power line
+    # counts, and a viaduct's arches are gaps too.
+    home = np.isin(t.land, KEEP_OFF) if t.land is not None else None
+    at_home = lambda r, c: home is not None and bool(home[min(int(round(r)), home.shape[0] - 1),
+                                                         min(int(round(c)), home.shape[1] - 1)])
+    gaps = [g for g in gaps if not at_home(g[0], g[1])]
+    lone = [o for o in lone if not at_home(o[0], o[1])]
+    arch = lines.arches(t.land == VIADUCT_CODE, t.ohm) if t.land is not None else []
     keep_gaps, keep_lone = [], []
-    for r, c, w, f, a, th, tf in gaps:
+    for r, c, w, f, a, th, tf in gaps + [(r, c, ARCH_W, h, ARCH_W * 10, True, 0.0) for r, c, h in arch]:
         rr, cc = r - m, c - m
         if 0 <= rr < size and 0 <= cc < size:
             i, j = int(rr // n), int(cc // n)
@@ -259,11 +277,18 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
             keep_lone.append((t.x0 + c + 0.5, t.y1 - r - 0.5, h, a))
     # --- Flyable lines: chain the obstacles into runs and keep the best run starting in each cell.
     runs = {}
+    # Over a river the heights are zeroed (bridges, water noise), but a line flown low along it still can't
+    # go through the trees hanging over it.
+    air = np.maximum(ohm, t.over_water) if t.over_water is not None else ohm
+    d_bld = ndimage.distance_transform_edt(~t.bld) if t.bld.any() else None
+    d_road = ndimage.distance_transform_edt(~road) if road.any() else None
     for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
-        nodes = lines.nodes_from(gaps, lone, treeline, style)
-        nb = lines.links(nodes, ohm, style)
-        scores, paths = lines.all_runs(nodes, nb)
-        runs[name] = (nodes, scores, paths)
+        blocked = lines.keep_out(t.land, d_bld, d_road, style)
+        nodes = lines.nodes_from(gaps, lone, treeline, style, blocked, arch, lane)
+        via: dict = {}
+        nb = lines.links(nodes, air, style, blocked, t.land == VIADUCT_CODE if t.land is not None else None, via)
+        scores, paths = lines.all_runs(nodes, nb, via)
+        runs[name] = (nodes, scores, paths, blocked, via)
         for k in (name, name + "_m", name + "_n"):
             cells[k] = np.zeros((grid_n, grid_n), dtype="float32")
         for i in np.argsort(scores):  # best last, so it wins the cell
@@ -271,10 +296,11 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
             if 0 <= rr < size and 0 <= cc < size:
                 ci, cj = int(rr // n), int(cc // n)
                 cells[name][ci, cj] = scores[i]
-                cells[name + "_m"][ci, cj] = lines.path_length(nodes, paths[i])
+                cells[name + "_m"][ci, cj] = lines.path_length(nodes, paths[i], via)
                 cells[name + "_n"][ci, cj] = len(paths[i])
     out = {k: v.astype("float32") for k, v in cells.items()}
     if want_lines:
+        runs["solid"], runs["open"] = np.where(trees >= lines.CLEAR_H, np.float32(0), ohm), open_
         return out, keep_gaps, keep_lone, runs
     return out, keep_gaps, keep_lone
 

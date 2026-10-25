@@ -1,0 +1,504 @@
+# Real places people fly (or that are obviously worth a look), used to check the scorer.
+# `python -m spotfinder eval` scores the region and says, for each one, where it lands and why.
+# They are not taste seeds: they don't steer the ranking, they only grade it.
+#
+# profiles = which drones it should show up for ("freestyle5", "cine5", "cine85")
+# kinds    = what makes it a spot, so misses can be grouped (viaduct, bridge, beach, coast, bando,
+#            ruin, landmark, hill, river, trees, park, quarry, urban)
+# source   = where it came from: "tamair" (said so), "web" (FPV/drone videos or drone-club spot
+#            listings found online), "osm+local" (well-known landmark, coords from OSM)
+# Coordinates come from the OSM feature unless `approx = true`.
+# Legality isn't graded here: plenty of these are NT land, railway or busy; the app labels that.
+
+[[spot]]
+name = "Nine Arches (Lockhaugh) Viaduct, Derwent Walk"
+lat = 54.93360
+lon = -1.71985
+radius_m = 150
+profiles = ["cine5", "freestyle5"]
+kinds = ["viaduct", "river", "trees"]
+source = "tamair"
+why = "Nine-arch disused railway viaduct ~25 m over the Derwent, now a footpath; arches to fly through, river and woods either side."
+
+[[spot]]
+name = "River Derwent beach under the Nine Arches"
+lat = 54.93290
+lon = -1.72060
+radius_m = 120
+approx = true
+profiles = ["cine5", "freestyle5"]
+kinds = ["beach", "river", "viaduct"]
+source = "tamair"
+why = "Gravel river beach next to the viaduct: a take-off spot with the arches and water in front. Not mapped in OSM."
+
+[[spot]]
+name = "Old Hollinside manor ruins, Derwent Walk"
+lat = 54.93362
+lon = -1.71210
+radius_m = 100
+profiles = ["freestyle5"]
+kinds = ["bando", "ruin", "trees"]
+source = "osm+local"
+why = "Roofless medieval manor house on the valley side 500 m from the viaduct (scheduled monument, so look, don't touch)."
+
+[[spot]]
+name = "Hownsgill Viaduct, Consett"
+lat = 54.83585
+lon = -1.85224
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["viaduct", "relief"]
+source = "web"
+why = "Tall disused railway viaduct (C2C cycleway) over a deep gill; big dives and reveals."
+
+[[spot]]
+name = "Causey Arch gorge"
+lat = 54.89740
+lon = -1.68784
+radius_m = 120
+profiles = ["cine5", "cine85"]
+kinds = ["bridge", "river", "trees", "relief"]
+source = "web"
+why = "World's oldest surviving railway arch over a wooded burn gorge; drone videos of it on Grey Arrows / YouTube."
+
+[[spot]]
+name = "Victoria Viaduct, Fatfield"
+lat = 54.88479
+lon = -1.50318
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["viaduct", "river"]
+source = "web"
+why = "Grade II* railway viaduct over the Wear near Penshaw, open riverside fields to fly from."
+
+[[spot]]
+name = "Penshaw Monument and hill"
+lat = 54.88304
+lon = -1.48099
+radius_m = 150
+profiles = ["cine5", "freestyle5"]
+kinds = ["landmark", "hill"]
+source = "web"
+why = "Temple on a 136 m hill, seen for miles; dives down the slopes, orbits of the columns (NT land)."
+
+[[spot]]
+name = "Herrington Country Park"
+lat = 54.87523
+lon = -1.47231
+radius_m = 250
+profiles = ["freestyle5"]
+kinds = ["park", "hill", "landmark"]
+source = "web"
+why = "Big landscaped ex-colliery park: open hills, lake, sculptures, view to Penshaw Monument."
+
+[[spot]]
+name = "Angel of the North"
+lat = 54.91412
+lon = -1.58952
+radius_m = 120
+profiles = ["cine5"]
+kinds = ["landmark", "hill"]
+source = "web"
+why = "20 m steel sculpture on a mound; classic orbit and reveal shot (busy A1/A167 beside it)."
+
+[[spot]]
+name = "Tynemouth Priory and Castle, King Edward's Bay"
+lat = 55.01927
+lon = -1.41954
+radius_m = 200
+profiles = ["cine5"]
+kinds = ["ruin", "coast", "beach", "landmark"]
+source = "web"
+why = "Ruined priory on the headland over a sandy cove; long-range FPV videos fly it with the piers and lighthouses."
+
+[[spot]]
+name = "Longsands, Tynemouth"
+lat = 55.02713
+lon = -1.42639
+radius_m = 250
+profiles = ["cine5", "freestyle5"]
+kinds = ["beach", "coast"]
+source = "web"
+why = "Long surf beach; low skims over the waves and surfers, cliffs at both ends."
+
+[[spot]]
+name = "Cullercoats Bay"
+lat = 55.03424
+lon = -1.43126
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["beach", "coast"]
+source = "web"
+why = "Small horseshoe bay with piers and cliffs; drone footage of it is in the Newcastle Uni drone-film archive."
+
+[[spot]]
+name = "St Mary's Lighthouse and island"
+lat = 55.07168
+lon = -1.44946
+radius_m = 200
+profiles = ["cine5"]
+kinds = ["landmark", "coast", "beach"]
+source = "web"
+why = "Lighthouse on a tidal island with a causeway and rock pools; one of the most filmed drone spots on the coast."
+
+[[spot]]
+name = "Marsden Rock and the Leas"
+lat = 54.97742
+lon = -1.37533
+radius_m = 200
+profiles = ["cine5"]
+kinds = ["coast", "beach", "landmark", "relief"]
+source = "web"
+why = "Sea stack off 30 m limestone cliffs, beach below, open clifftop grass (the Leas) to fly from."
+
+[[spot]]
+name = "Souter Lighthouse"
+lat = 54.97049
+lon = -1.36411
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["landmark", "coast"]
+source = "web"
+why = "Red-and-white lighthouse on open clifftop grassland (NT)."
+
+[[spot]]
+name = "Roker pier and beach"
+lat = 54.92645
+lon = -1.36443
+radius_m = 200
+profiles = ["cine5"]
+kinds = ["beach", "coast", "landmark"]
+source = "osm+local"
+why = "Long pier with a lighthouse, sandy beach and Roker cliff park."
+
+[[spot]]
+name = "Ouseburn valley viaducts"
+lat = 54.97622
+lon = -1.59378
+radius_m = 150
+profiles = ["cine5", "cine85"]
+kinds = ["viaduct", "bridge", "river", "urban"]
+source = "web"
+why = "Rail, road and Metro bridges stacked over the Ouseburn; old warehouses below. Byker/Ouseburn drone videos online."
+
+[[spot]]
+name = "Tyne bridges from the Quayside"
+lat = 54.96796
+lon = -1.60607
+radius_m = 150
+profiles = ["cine85", "cine5"]
+kinds = ["bridge", "river", "landmark", "urban"]
+source = "osm+local"
+why = "Tyne, Swing, High Level and Millennium bridges in one shot; the city's postcard view."
+
+[[spot]]
+name = "Dunston Staiths"
+lat = 54.95796
+lon = -1.63361
+radius_m = 150
+profiles = ["freestyle5", "cine5"]
+kinds = ["bando", "ruin", "river", "bridge"]
+source = "web"
+why = "Huge derelict timber coal staith on the Tyne (Heritage at Risk); legs and decks to weave, water all round."
+
+[[spot]]
+name = "Hagg Bank Bridge, Wylam"
+lat = 54.97305
+lon = -1.82754
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["bridge", "river"]
+source = "osm+local"
+why = "Single big iron arch over the Tyne, now a cycleway; riverside fields both banks."
+
+[[spot]]
+name = "Plessey Viaduct"
+lat = 55.10525
+lon = -1.64724
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["viaduct", "river", "trees"]
+source = "osm+local"
+why = "East Coast Main Line viaduct over the Blyth in Plessey Woods (live railway: keep well off it)."
+
+[[spot]]
+name = "Northumberlandia"
+lat = 55.08865
+lon = -1.62979
+radius_m = 200
+profiles = ["freestyle5", "cine5"]
+kinds = ["landmark", "hill", "park"]
+source = "osm+local"
+why = "34 m high landform sculpture of a reclining woman; slopes to dive and skim, open ground."
+
+[[spot]]
+name = "Rising Sun Country Park"
+lat = 55.01461
+lon = -1.53084
+radius_m = 250
+profiles = ["freestyle5"]
+kinds = ["park", "hill", "trees"]
+source = "osm+local"
+why = "Big ex-colliery park: open hills, ponds, tree lines and woodland edges."
+
+[[spot]]
+name = "Jesmond Dene"
+lat = 54.99456
+lon = -1.59551
+radius_m = 400
+profiles = ["cine85"]
+kinds = ["trees", "river", "bridge", "park"]
+source = "web"
+why = "Wooded dene with a waterfall, old mill and footbridges; whoop lines under the canopy. Drone footage in the Newcastle Uni archive."
+
+[[spot]]
+name = "Prudhoe Castle"
+lat = 54.96512
+lon = -1.85845
+radius_m = 120
+profiles = ["cine5"]
+kinds = ["ruin", "landmark"]
+source = "osm+local"
+why = "Ruined castle on a wooded ridge over the Tyne valley (English Heritage)."
+
+[[spot]]
+name = "Gibside, Column to Liberty"
+lat = 54.92655
+lon = -1.72149
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["landmark", "trees", "ruin"]
+source = "osm+local"
+why = "45 m column at the end of a long tree avenue, ruined hall nearby (NT: ask first)."
+
+[[spot]]
+name = "Ryton Willows"
+lat = 54.97958
+lon = -1.75633
+radius_m = 200
+profiles = ["freestyle5", "cine5"]
+kinds = ["river", "beach", "trees"]
+source = "osm+local"
+why = "Riverside meadow and willows on the Tyne with gravel banks at low water; open ground plus trees."
+
+[[spot]]
+name = "Chopwell Wood"
+lat = 54.91657
+lon = -1.79156
+radius_m = 250
+profiles = ["freestyle5"]
+kinds = ["trees"]
+source = "osm+local"
+why = "Forestry woodland with rides and clearings to weave (Forestry England)."
+
+[[spot]]
+name = "Penshaw Hill quarry"
+lat = 54.88354
+lon = -1.47886
+radius_m = 100
+profiles = ["freestyle5"]
+kinds = ["quarry", "hill", "bando"]
+source = "osm+local"
+why = "Old quarry cut into the back of Penshaw Hill; faces and drops right under the monument."
+
+[[spot]]
+name = "Marsden old quarry"
+lat = 54.97268
+lon = -1.38621
+radius_m = 120
+profiles = ["freestyle5"]
+kinds = ["quarry", "relief"]
+source = "osm+local"
+why = "Disused limestone quarry (nature reserve) behind the Leas; faces and drops."
+
+
+[[spot]]
+name = "Northern Spire bridge, Sunderland"
+lat = 54.91716
+lon = -1.42468
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["bridge", "river", "landmark"]
+source = "osm+local"
+why = "105 m cable-stayed pylon over the Wear; a big modern landmark with riverbanks to fly from."
+
+[[spot]]
+name = "Herd Sand and the Groyne, South Shields"
+lat = 55.00483
+lon = -1.42221
+radius_m = 250
+profiles = ["cine5", "freestyle5"]
+kinds = ["beach", "coast", "landmark"]
+source = "web"
+why = "Wide beach at the Tyne mouth with the red Groyne lighthouse and both piers; long-range FPV videos fly Tynemouth to South Shields."
+
+[[spot]]
+name = "Seaton Sluice harbour and South Beach"
+lat = 55.08428
+lon = -1.47464
+radius_m = 250
+profiles = ["cine5"]
+kinds = ["coast", "beach", "relief"]
+source = "web"
+why = "Rock-cut harbour cut, Rocky Island, dunes and a long beach north to Blyth (YouTube drone videos of Seaton Sluice)."
+
+[[spot]]
+name = "Ravensworth Castle ruins"
+lat = 54.92649
+lon = -1.63823
+radius_m = 120
+profiles = ["freestyle5", "cine5"]
+kinds = ["ruin", "bando", "trees"]
+source = "osm+local"
+why = "Ruined towers of a demolished castle in woodland (scheduled monument: look, don't touch)."
+
+[[spot]]
+name = "Hylton Castle"
+lat = 54.92255
+lon = -1.44325
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["landmark", "ruin", "park"]
+source = "osm+local"
+why = "Medieval gatehouse castle in open parkland."
+
+[[spot]]
+name = "Finchale Priory"
+lat = 54.81826
+lon = -1.54045
+radius_m = 150
+profiles = ["cine5"]
+kinds = ["ruin", "river", "landmark"]
+source = "osm+local"
+why = "Priory ruins in a loop of the Wear, wooded banks opposite (English Heritage)."
+
+# Bandos: `spotfinder eval` also checks the app's bando layer (web/public/data/<region>/bandos.geojson,
+# as the last `score` wrote it). A `[[bando]]` should have a dot within radius_m; a `[[not_bando]]`
+# (parks on old pit sites and the like) should have none. Real bandos are big and still standing:
+# see config/reference_bandos.toml for what they look like in OSM.
+
+[[bando]]
+name = "Dunston Staiths"
+lat = 54.95765
+lon = -1.63663
+radius_m = 120
+why = "Derelict timber coal staith, 8,000 m2, 15 m high"
+
+[[bando]]
+name = "Angel Heights flats (abandoned)"
+lat = 54.97386
+lon = -1.64559
+radius_m = 60
+why = "Empty block of flats, 15 m"
+
+[[bando]]
+name = "Gibson Street Baths"
+lat = 54.97420
+lon = -1.59845
+radius_m = 60
+why = "Disused listed baths, 15 m"
+
+[[bando]]
+name = "Wylam Pumping Station"
+lat = 54.97601
+lon = -1.84166
+radius_m = 60
+why = "Disused pumping station, 10 m"
+
+[[bando]]
+name = "Disused works near Ebchester"
+lat = 54.89901
+lon = -1.85785
+radius_m = 80
+why = "Group of disused buildings, 5,000 m2 main shed"
+
+[[bando]]
+name = "Southwick lime kilns"
+lat = 54.91721
+lon = -1.39285
+radius_m = 60
+why = "Ruined lime kilns on the Wear, 7 m"
+
+[[bando]]
+name = "Abandoned industrial, Derwenthaugh"
+lat = 54.96167
+lon = -1.71732
+radius_m = 60
+why = "abandoned:industrial distributor shed, 7 m"
+
+[[not_bando]]
+name = "Rising Sun Country Park (old colliery)"
+lat = 55.01461
+lon = -1.53084
+radius_m = 300
+why = "Landscaped pit heap: a park now"
+
+[[not_bando]]
+name = "Herrington Country Park (old colliery)"
+lat = 54.87523
+lon = -1.47231
+radius_m = 300
+why = "Landscaped pit site: a park now"
+
+[[not_bando]]
+name = "Town Moor"
+lat = 54.98700
+lon = -1.62500
+radius_m = 400
+why = "Open grazing moor"
+
+[[not_bando]]
+name = "Saltwell Park"
+lat = 54.94435
+lon = -1.60459
+radius_m = 250
+why = "Victorian park with a lake"
+
+[[not_bando]]
+name = "Leazes Park"
+lat = 54.97850
+lon = -1.62350
+radius_m = 150
+why = "City park by St James' Park"
+
+[[not_bando]]
+name = "Northumberlandia"
+lat = 55.08865
+lon = -1.62979
+radius_m = 200
+why = "Landform sculpture park"
+
+[[not_bando]]
+name = "Elba Park (old pit marker)"
+lat = 54.85560
+lon = -1.49987
+radius_m = 200
+why = "Reclaimed colliery park; only a pit marker left"
+
+[[not_bando]]
+name = "Good Street Sports Fields (old pit marker)"
+lat = 54.87716
+lon = -1.70343
+radius_m = 150
+why = "Playing fields on an old pit"
+
+[[not_bando]]
+name = "Rainton Meadows (old pit marker)"
+lat = 54.82896
+lon = -1.49264
+radius_m = 250
+why = "Nature reserve on an opencast site"
+
+[[not_bando]]
+name = "Roseberry Grange golf course (old pit marker)"
+lat = 54.86765
+lon = -1.63433
+radius_m = 250
+why = "Golf course"
+
+[[not_bando]]
+name = "Low ruined walls in a meadow near Blyth"
+lat = 55.09980
+lon = -1.49990
+radius_m = 120
+why = "Ten 30-160 m2 wall stubs 2-5 m high in a field: nothing to fly through"

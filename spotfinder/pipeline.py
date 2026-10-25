@@ -26,12 +26,14 @@ def prepare(region: Region) -> None:
     canopy.build_chm(region)
     terrain.build_dtm(region)
     rasterize.build_vector_rasters(region)
+    rasterize.build_land_raster(region)
     basemap.write_basemap(region)
 
 
 def compute_cells(region: Region, use_lidar: bool = True, workers: int = 4) -> dict[str, np.ndarray]:
     """All per-cell features for the region, cached in data/out/<region>/cells.npz."""
     g = legal.build_legal(region)  # first: it's quick, and fails fast on a missing NATS file
+    rasterize.build_land_raster(region)  # a cached one from before the current land codes is rebuilt
     t0 = time.time()
     height_cells, gaps, lone = features.run(region, workers=workers, use_lidar=use_lidar)
     log.info("height features in %.0fs", time.time() - t0)
@@ -186,11 +188,12 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
     """Score every cell and export the spots. By default legality is a label on each spot, not a filter:
     the app lists potential places and says which rules they meet. No-fly zones, MOD land and danger areas
     stay out either way. strict=True only lists spots each drone may fly under its Open subcategory."""
+    rasterize.build_land_raster(region)  # the lines keep off its homes, car parks and school grounds
     cells = derived.add_derived(load_cells(region), region)
     meta = json.loads((region.out_dir / "cells_meta.json").read_text())
     seeds = load_seeds()
     results = {}
-    land = (cells["water_frac"] < 0.6) & (cells["elev"] > -2)
+    land = ((cells["water_frac"] - cells["beach_frac"]) < 0.6) & (cells["elev"] > -2)  # a beach is land
     rated = load_ratings(region)
     H, W = land.shape
 
@@ -218,6 +221,8 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
                 eligible &= scoring.win_mean(cells[profile.legal_key], profile.radius_cells) >= profile.legal_window_min
         else:  # anywhere outside flight restriction zones
             eligible = land & (cells["a1_frac"] >= 0.9) & ~keep_out
+        if "inst_frac" in cells:  # never a spot on a school, hospital or prison's grounds
+            eligible &= cells["inst_frac"] < scoring.INSTITUTION_MAX
         groups = [seed_group(region, s, profile, (H, W)) for s in seeds if s.profile == key]
         groups = [g for g in groups if g is not None]
         up, down = rated.get(key, ([], []))
@@ -232,11 +237,11 @@ def score_and_export(region: Region, n_spots: int = 250, previews: int = 100_000
         top = float(rule[eligible].max()) if eligible.any() else 1.0
         top = score_scale(region, key, meta["legal_mode"], top)
         rule_n = scoring.soft_cap(rule / max(top, 1e-6))
-        final = rule_n if sim is None else 0.6 * rule_n + 0.4 * sim
+        final = scoring.blend(rule_n, sim)
         # Same blend on the place's style alone, ignoring any A3 mask: how your seed spots score.
         style_n = scoring.soft_cap(scoring.rule_score(style, profile) / max(top, 1e-6))
-        style_final = style_n if sim is None else 0.6 * style_n + 0.4 * sim
-        spots = scoring.pick_spots(final, eligible, profile.spacing_m, n_spots)
+        style_final = scoring.blend(style_n, sim)
+        spots = scoring.pick_spots(final, eligible, profile.spacing_m, n_spots, anchor=profile.anchor(cells))
         # every park without a spot gets one at its best place, listed after the ranking
         park_spots = parks.picks(park_grid, park_list, final, eligible, spots, profile.spacing_m)
         spots += park_spots
