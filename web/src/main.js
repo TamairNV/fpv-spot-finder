@@ -939,6 +939,24 @@ function markSelected(id) {
   state.pins.forEach((m) => m.getElement().classList.toggle('on', m.getElement().dataset.id === id));
 }
 
+// The moves as a path on the map. Between two arches side by side the line swings out round the pier,
+// alternately either side of the viaduct, like the 3D view draws it.
+function weave(moves) {
+  const out = [];
+  let n = 0;
+  moves.forEach((m, i) => {
+    const prev = moves[i - 1];
+    if (m[0] === 'arch' && prev?.[0] === 'arch') {
+      const ex = m[3] - prev[3], ey = m[4] - prev[4], len = Math.hypot(ex, ey) || 1, side = (n++ % 2 ? 1 : -1) * 9;
+      const ox = (-ey / len) * side, oy = (ex / len) * side; // metres across the viaduct
+      const lat = (prev[2] + m[2]) / 2;
+      out.push([(prev[1] + m[1]) / 2 + ox / (111320 * Math.cos((lat * Math.PI) / 180)), lat + oy / 110540]);
+    }
+    out.push([m[1], m[2]]);
+  });
+  return out;
+}
+
 function showSelection(f) {
   const p = f.properties;
   const feats = [{ type: 'Feature', geometry: circlePolygon(f.geometry.coordinates, state.meta.profiles[state.profile].radius_m), properties: { k: 'area' } }];
@@ -947,7 +965,7 @@ function showSelection(f) {
   const moves = p.line?.moves || [];
   if (moves.length) { // the suggested line: take-off, then each move in order
     const start = p.takeoff ? [[p.takeoff.lon, p.takeoff.lat]] : [];
-    feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [...start, ...moves.map((m) => [m[1], m[2]])] }, properties: { k: 'path' } });
+    feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [...start, ...weave(moves)] }, properties: { k: 'path' } });
     moves.forEach((m, i) => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [m[1], m[2]] }, properties: { k: 'move', n: i + 1, kind: m[0] } }));
   }
   if (p.takeoff) feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.takeoff.lon, p.takeoff.lat] }, properties: { k: 'takeoff' } });
@@ -1498,7 +1516,7 @@ function aboutHtml() {
   <ul>
     <li><b>Gaps</b>: openings 2–12 m wide between trees or buildings at least 5 m tall (whoop gaps up to 6 m).</li>
     <li><b>Lone trees</b>: single trees with open ground all round, for orbits and power loops.</li>
-    <li><b>Viaducts and bridges</b> (arches to fly through), <b>beaches</b>, <b>public land</b> to fly from, and <b>edges, open space, tall stuff, slopes, water and bandos</b> nearby; for the whoop: architecture, plazas, landmarks and under-canopy space. A spot's pin sits on the viaduct, landmark or beach it's about.</li>
+    <li><b>Viaducts and bridges</b> (arches to fly through), <b>beaches</b>, <b>public land</b> to fly from, and <b>edges, open space, tall stuff, slopes, water and bandos</b> nearby; for 5" cine: a subject to film (a lighthouse, castle, pier, viaduct or the coast) with big water, hills and a sunrise or sunset round it; for the whoop: architecture, plazas, landmarks and under-canopy space. A spot's pin sits on the viaduct, landmark or beach it's about, and a run can weave through a viaduct's arches where trees don't crowd it.</li>
     <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
     <li><b>Parks</b>: every public park or common of 4 ha or more gets a spot at its best place, even if it doesn't make the top 250. Tap “Parks” above the list to see them.</li>
     <li><b>Bandos</b>: derelict, abandoned and disused buildings mapped on OpenStreetMap, still standing at least 4 m tall in the LiDAR. Ruins in parks, monuments, old pit sites and capped shafts aren't bandos, so they're left out. Tap the “Bandos” chip to list them biggest first, tap one for its card and a 3D close-up, or use Filters › Bando within for spots near one.</li>

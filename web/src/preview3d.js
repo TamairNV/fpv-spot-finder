@@ -28,6 +28,7 @@ const G = 9.81;
 const MOVE_COLOUR = { gap: '#ff3d7f', orbit: '#ffc400', dive: '#a78bfa', skim: '#22d3ee', arch: '#fb923c' };
 const DECK = 6; // preview class: a viaduct deck, drawn as a slab in the air so its arches show
 const DECK_T = 2.5; // m, how thick the deck slab is
+const WEAVE_OUT = 9; // m either side of a viaduct that a weave swings out to between arches
 const LINE_SPEED = { freestyle5: 15, cine5: 11, cine85: 6 }; // m/s for "Watch the line"
 const COARSE = matchMedia('(pointer: coarse)');
 const AXES_KEY = 'fpvspots:gamepad-axes';
@@ -352,6 +353,7 @@ export class Preview3D {
     const moves = (this.spot.line?.moves || []).filter((m) => Math.abs(m[3]) <= this.half && Math.abs(m[4]) <= this.half);
     if (!moves.length) return;
     const pts = [this.takeoff.clone().add(new THREE.Vector3(0, 2, 0))];
+    let weave = 0;
     moves.forEach(([kind, , , dx, dy], i) => {
       const x = dx, z = -dy, prev = pts.at(-1);
       const into = new THREE.Vector3(x - prev.x, 0, z - prev.z).normalize();
@@ -374,8 +376,12 @@ export class Preview3D {
         mark = new THREE.Vector3(x, top + 14, z);
       } else if (kind === 'arch') { // under the deck, a third of the way up the arch
         const k = this.idx(x, z), deck = k >= 0 ? this.h[k] : 12;
-        const p = new THREE.Vector3(x, ground + Math.max(3, (deck - DECK_T) * 0.4), z);
-        pts.push(p);
+        const y = ground + Math.max(3, (deck - DECK_T) * 0.4);
+        if (moves[i - 1]?.[0] === 'arch') { // weaving: out of the last arch, round the pier, back through this one
+          const side = (weave++ % 2 ? 1 : -1) * WEAVE_OUT, mx = (prev.x + x) / 2 - into.z * side, mz = (prev.z + z) / 2 + into.x * side;
+          pts.push(new THREE.Vector3(mx, Math.max(y, this.groundAt(mx, mz) + 3), mz));
+        }
+        pts.push(new THREE.Vector3(x, y, z));
         mark = new THREE.Vector3(x, ground + deck + 4, z);
       } else if (kind === 'gap') { // through the middle of the ring
         const gate = this.gates.reduce((b, g) => {

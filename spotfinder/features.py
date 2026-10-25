@@ -273,7 +273,7 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
         blocked = lines.keep_out(t.land, d_bld, d_road, style)
         nodes = lines.nodes_from(gaps, lone, treeline, style, blocked, arch)
-        nb = lines.links(nodes, ohm, style, blocked)
+        nb = lines.links(nodes, ohm, style, blocked, t.land == VIADUCT_CODE if t.land is not None else None)
         scores, paths = lines.all_runs(nodes, nb)
         runs[name] = (nodes, scores, paths)
         for k in (name, name + "_m", name + "_n"):

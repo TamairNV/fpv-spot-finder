@@ -187,8 +187,9 @@ seeds; places like your thumbs-down spots get pulled down.
    Lines keep off people's homes and gardens (residential land that isn't a park or a big green),
    car parks and roads (6 m for the 5", 3 m for the whoop), and the 5" keeps 12 m from any building;
    gaps and lone trees in gardens or on car parks don't count at all. A railway or footpath viaduct
-   whose deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and a move of its own
-   (two arches of one viaduct don't link, they sit side by side). `land_1m.tif` holds those homes,
+   whose deck is 8 m+ above the ground has an arch every 15 m: a fly-through gap and a move of its own.
+   Neighbouring arches link under the deck, so a run can weave through up to four of them (out
+   through one, round the pier, back through the next). `land_1m.tif` holds those homes,
    car parks and viaduct decks.
 3. **Context** from OSM and Overture: distance to water, the sea and beaches, bridges and viaducts,
    bandos, cliffs and quarries, landmarks, masts and cranes, paths, car parks, fast main roads,
@@ -198,10 +199,14 @@ seeds; places like your thumbs-down spots get pulled down.
    seeing walls 4 m+ tall on its footprint. A bridge counts where LiDAR sees its deck 4 m+ in the air
    for 30 m over water or 80 m anywhere (Overture flags whole road segments, culverts and all);
    railway and footpath viaducts always count. Lighthouses, famous artworks, listed bridges and named
-   viaducts are landmarks. A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
+   viaducts are landmarks; the named ones you'd build a shot round (a lighthouse, castle, abbey,
+   monument, pier or viaduct) are icons, and count in full for 5" cine where a viewpoint, water tower
+   or chimney only counts in part. A beach is mapped sand, shingle or beach of 1,500 m² or more that isn't on a
    golf course (so no bunkers or long-jump pits); for 5" cine only a beach by the sea is "the coast".
    Power lines (within 50 m) and fast roads cost a spot in full only when its middle is on one, and
-   otherwise up to half, by how much of it is near one. Golden hour counts a clear view down to the
+   otherwise up to half, by how much of it is near one; for 5" cine a road only costs by how much of
+   the spot it fills (you film the Angel, not the A167). For 5" cine water counts by how much of the
+   frame it fills too: a big river or the sea beats a burn. Golden hour counts a clear view down to the
    sunrise as well as the sunset: the coast here faces east.
    Also worked out per spot: how big the open field is, how far it is to walk in from a path or road,
    and how high the skyline is towards the sunset (west-south-west to west-north-west, out to 2 km,
@@ -216,13 +221,16 @@ seeds; places like your thumbs-down spots get pulled down.
    land is part of the taste match too: without it the taste part filled the top with private fields
    that happen to look like the Town Moor. Bridges,
    bandos, beaches and landmarks are measured from the middle of the spot, so the best cell is on
-   them, not 300 m away in the next field. Spots are
+   them, not 300 m away in the next field. 5" cine is led by its subject (landmarks, the coast,
+   bridges) more than by water, hills and sunsets, which every river valley has, and being busy only
+   costs it a little: you film at first light. Spots are
    suggestions to go and look at, so legality is a label rather than a filter: anywhere outside
    flight restriction zones and away from MOD land can be picked, and each spot says how much of it
    is A3-clear. `python -m spotfinder score --strict` brings back the old behaviour (the 5" only
    gets A3-clear ground). Spots are picked greedily with a minimum spacing (400 m for the 5", 600 m
    for 5" cine, 250 m for the whoop). When a viaduct, bridge, landmark, bando or beach is within 85% of
-   that and scores at most 6 points less, the pin goes on it.
+   that and scores at most 6 points less, the pin goes on it, a stronger subject pulling a little
+   harder (for 5" cine: an icon, then a bridge, a bando, a beach).
    Each spot carries a "why" list: points out of 100 per reason, with the numbers behind it (e.g.
    "14 fly-through gaps", "361 m of tree line to skim", "820 m from the nearest path or road").
 6. **Parks**: the ranking alone favours woods and riversides out of town, so every named park,

@@ -8,7 +8,8 @@ smooth heading, and keep the best run. A spot's line score is the best run that 
 
 Lines stay off people's homes and gardens, car parks and roads, and the 5 inch keeps clear of
 buildings altogether. A viaduct's arches are obstacles too: LiDAR only sees the deck, so where the
-deck stands high above the ground there's an arch every few metres to fly through.
+deck stands high above the ground there's an arch every few metres to fly through, and a run can weave
+from one arch to the next under the deck.
 """
 
 from __future__ import annotations
@@ -35,6 +36,9 @@ MAX_NODES = 12
 ARCH_MIN_H = 8.0    # a viaduct deck this high above the ground has arches you can fly through
 ARCH_STEP = 15.0    # one arch node per this many metres of deck
 ARCH_R = 8.0        # metres round an arch node that are the viaduct itself
+WEAVE_MAX = 1.6 * ARCH_STEP  # arches this close are side by side: a run weaves from one to the next
+WEAVE_ROOM = 4.0    # ...if there are this many metres of open air beside the deck, both sides, to turn in
+MAX_ARCHES = 4      # ...for this many, so a long viaduct doesn't swamp every other line
 
 
 @dataclass(frozen=True)
@@ -106,8 +110,30 @@ def nodes_from(gaps: list[tuple], lone: list[tuple], treeline: np.ndarray, style
     return nodes
 
 
-def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray | None = None) -> list[list[int]]:
-    """Neighbour lists: pairs within range with clear air between them, and not over `blocked` ground."""
+def room_to_weave(p: np.ndarray, q: np.ndarray, ohm: np.ndarray, deck: np.ndarray | None,
+                  blocked: np.ndarray | None) -> bool:
+    """Is there open air beside the deck, on both sides, between the arches at p and q (row, col)? A weave
+    goes out through one arch, turns round the pier and comes back through the next, a third of the way up
+    the arches, so anything lower than that doesn't matter but trees crowding the viaduct do."""
+    h, w = ohm.shape
+    at = lambda xy: (min(max(int(round(xy[0])), 0), h - 1), min(max(int(round(xy[1])), 0), w - 1))
+    fly_h = max(CLEAR_H, 0.4 * min(ohm[at(p)], ohm[at(q)]))
+    u = (q - p) / max(float(np.hypot(*(q - p))), 1e-6)
+    m, n = (p + q) / 2, np.array([-u[1], u[0]])
+    for side in (1, -1):
+        for s in np.arange(ARCH_R, ARCH_R + WEAVE_ROOM + 1):
+            rc = at(m + side * s * n)
+            if deck is not None and deck[rc]:
+                continue  # still under the deck
+            if ohm[rc] >= fly_h or (blocked is not None and blocked[rc]):
+                return False
+    return True
+
+
+def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray | None = None,
+          deck: np.ndarray | None = None) -> list[list[int]]:
+    """Neighbour lists: pairs within range with clear air between them, and not over `blocked` ground.
+    `deck` is the viaduct decks, where arches are."""
     n = len(nodes)
     nb: list[list[int]] = [[] for _ in range(n)]
     if n < 2:
@@ -117,8 +143,15 @@ def links(nodes: np.ndarray, ohm: np.ndarray, style: Style, blocked: np.ndarray 
         return nb
     a, b = nodes[pairs[:, 0], :2], nodes[pairs[:, 1], :2]
     d = np.hypot(*(b - a).T)
-    # two arches of one viaduct sit side by side under the deck: there's no flying from one to the next
-    keep = (d >= style.min_link) & ~((nodes[pairs[:, 0], 2] == ARCH) & (nodes[pairs[:, 1], 2] == ARCH))
+    # Two arches of one viaduct sit side by side under the deck: neighbours link when there's room beside
+    # the deck to weave between them (out through one arch, round the pier, back through the next), and
+    # arches further apart don't link at all.
+    both = (nodes[pairs[:, 0], 2] == ARCH) & (nodes[pairs[:, 1], 2] == ARCH)
+    for i, j in pairs[both & (d <= WEAVE_MAX)]:
+        if room_to_weave(nodes[i, :2], nodes[j, :2], ohm, deck, blocked):
+            nb[i].append(int(j))
+            nb[j].append(int(i))
+    keep = (d >= style.min_link) & ~both
     pairs, a, b, d = pairs[keep], a[keep], b[keep], d[keep]
     if not len(pairs):
         return nb
@@ -151,11 +184,12 @@ def best_run(start: int, nodes: np.ndarray, nb: list[list[int]]) -> tuple[float,
     score = VALUE[int(nodes[start, 2])] * nodes[start, 3]
     heading = None
     kinds = {int(nodes[start, 2])}
+    n_arch = int(nodes[start, 2] == ARCH)
     while len(path) < MAX_NODES:
         cur = path[-1]
         best, best_v, best_h = None, 0.0, None
         for j in nb[cur]:
-            if j in seen:
+            if j in seen or (nodes[j, 2] == ARCH and n_arch >= MAX_ARCHES):
                 continue
             dv = nodes[j, :2] - nodes[cur, :2]
             hd = np.degrees(np.arctan2(dv[1], -dv[0]))
@@ -177,6 +211,7 @@ def best_run(start: int, nodes: np.ndarray, nb: list[list[int]]) -> tuple[float,
         path.append(best)
         seen.add(best)
         kinds.add(int(nodes[best, 2]))
+        n_arch += int(nodes[best, 2] == ARCH)
         score += best_v
         heading = best_h
     # Variety: a run of four different moves beats twelve skims along one hedge.

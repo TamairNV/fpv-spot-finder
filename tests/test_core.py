@@ -286,6 +286,24 @@ def test_viaduct_deck_gives_arches():
     assert 4 <= len(a) <= 7 and all(h >= lines.ARCH_MIN_H for _, _, h in a)
 
 
+def test_run_weaves_through_neighbouring_arches():
+    from spotfinder import lines
+
+    ohm = np.zeros((200, 200), "float32")
+    ohm[98:103, 10:190] = 20  # the deck is solid to LiDAR all the way along
+    # seven arches 15 m apart, and one far end of the viaduct beyond a missing arch
+    arch = [(100.0, 20.0 + 15 * k, 20.0) for k in range(7)] + [(100.0, 170.0, 20.0)]
+    nodes = lines.nodes_from([], [], np.zeros((200, 200), bool), lines.FREESTYLE, arch=arch)
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    assert sorted(nb[3]) == [2, 4] and nb[7] == []
+    score, path = lines.best_run(0, nodes, nb)
+    assert path == list(range(lines.MAX_ARCHES))  # capped, so a long viaduct doesn't swamp every other line
+    assert abs(score - lines.VALUE[lines.ARCH] * lines.MAX_ARCHES) < 1e-9
+    ohm[85:92, 60:80] = 15  # trees crowding one side of the viaduct between the 4th and 5th arches
+    nb = lines.links(nodes, ohm, lines.FREESTYLE)
+    assert 4 not in nb[3] and sorted(nb[2]) == [1, 3]
+
+
 
 def test_line_links_need_clear_air():
     from spotfinder import lines

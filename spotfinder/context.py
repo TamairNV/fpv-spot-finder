@@ -30,6 +30,10 @@ BRIDGE_UP_M = 4.0    # a bridge deck this high above the ground (LiDAR) is reall
 BRIDGE_SPAN_M = 30   # ...and a run of it this long is a bridge worth flying, if it crosses water
 BRIDGE_BIG_M = 80    # ...or this long anywhere (a valley, a railway cutting)
 LANDMARK_HISTORIC = {"castle", "monument", "fort", "ruins", "city_gate", "tower", "monastery", "abbey", "citywalls"}
+# Icons: landmarks you'd build a cinematic shot round, with a name to them (a lighthouse, a castle, an abbey,
+# a monument, a named pier or viaduct), rather than a viewpoint bench, a water tower or a chimney.
+ICON_MAN_MADE = {"lighthouse", "windmill", "obelisk"}
+ICON_PIER = {"pier", "breakwater", "groyne"}
 # Land you can usually walk onto and fly from, if the rules allow: parks, commons, open access grass.
 PUBLIC_LEISURE = {"park", "common", "recreation_ground", "nature_reserve", "dog_park", "village_green"}
 PUBLIC_LANDUSE = {"recreation_ground", "village_green"}
@@ -145,6 +149,15 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
                                       or (t.get("man_made") == "bridge" and (famous(t) or named_viaduct(t))))]).geometry,
         lines[lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct"} and (famous(t) or named_viaduct(t)))].geometry,
     ])
+    named = lambda t: bool(t.get("name") or t.get("wikidata"))
+    icon = lambda t: named(t) and (t.get("man_made") in ICON_MAN_MADE or t.get("historic") in LANDMARK_HISTORIC
+                                   or (t.get("tourism") in {"artwork", "attraction"} and bool(t.get("wikidata"))))
+    icons = pd.concat([
+        nodes[nodes["tags"].map(icon)].geometry,
+        polys(areas[areas["tags"].map(lambda t: icon(t) or (t.get("man_made") == "bridge" and (famous(t) or named_viaduct(t))))]).geometry,
+        lines[lines["tags"].map(lambda t: (t.get("bridge") in {"viaduct", "aqueduct"} and (famous(t) or named_viaduct(t)))
+                                or (t.get("man_made") in ICON_PIER and named(t)))].geometry,
+    ])
     hazards = pd.concat([
         lines[lines["tags"].map(lambda t: t.get("power") in {"line", "minor_line"})].geometry,
         nodes[nodes["tags"].map(lambda t: t.get("man_made") in HAZARD_MAN_MADE
@@ -193,6 +206,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
         "dist_cliff": dist_to(cliffs),
         "dist_quarry": dist_to(quarry.geometry),
         "dist_landmark": dist_to(landmarks),
+        "dist_icon": dist_to(icons),
         "dist_hazard": dist_to(hazards),
         "dist_parking": dist_to(parking),
         "dist_path": dist_to(paths.geometry),

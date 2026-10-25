@@ -278,7 +278,8 @@ function lineBox(p) {
     el('h4', {}, 'A line to fly'),
     head ? el('p', { class: 'muted small' }, `${head}. From the take-off, in this order; the 3D view numbers them and “Watch the line” rides it.`) : null,
     el('ol', { class: 'moves' }, moves.map(([kind], i) => el('li', {},
-      el('span', { class: `mv mv-${kind}` }, i + 1), MOVE_TEXT[kind] || kind))));
+      el('span', { class: `mv mv-${kind}` }, i + 1),
+      kind === 'arch' && moves[i - 1]?.[0] === 'arch' ? 'Round the pier and back through the next arch' : MOVE_TEXT[kind] || kind))));
 }
 
 export function nice(k) {
