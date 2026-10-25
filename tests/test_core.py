@@ -243,6 +243,23 @@ def test_only_real_derelict_buildings_are_bandos():
     assert not bandos.heritage({"building": "yes", "disused": "yes", "listed_status": "Grade II"})
 
 
+def test_ruins_in_a_monuments_grounds_are_not_bandos():
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from spotfinder import bandos
+
+    areas = gpd.GeoDataFrame({"tags": [
+        {"historic": "abbey", "designation": "scheduled_monument", "name": "Finchale Priory"},  # 0.7 ha of grounds
+        {"boundary": "administrative", "designation": "civil_parish", "name": "Framwellgate Moor"},
+        {"designation": "area_of_outstanding_natural_beauty"},  # a whole landscape
+        {"leisure": "park"},
+        {"building": "industrial", "abandoned": "yes"},
+    ]}, geometry=[box(0, 0, 70, 100), box(0, 0, 4000, 3000), box(0, 0, 2000, 2000), box(0, 0, 50, 50),
+                  box(0, 0, 30, 30)], crs="EPSG:27700")
+    assert list(bandos.off_limits(areas).index) == [0, 3]
+
+
 def test_bando_labels_say_what_it_was():
     assert bandos.kind({"building": "ruins"}) == "Ruins"
     assert bandos.kind({"building": "warehouse", "disused:military": "ammunition"}) == "Old military building"

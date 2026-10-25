@@ -201,7 +201,8 @@ seeds; places like your thumbs-down spots get pulled down.
    bandos, cliffs and quarries, landmarks, masts and cranes, paths, car parks, fast main roads,
    farmland and public open space; and how busy a place is. A bando is a mapped building or works
    tagged derelict, abandoned, ruined or disused, 100 m² or more, not in a park, churchyard or
-   museum, not a monument (scheduled, a castle, fort, chapel or abbey ruin), and with LiDAR still
+   museum, not a monument (scheduled, a castle, fort, chapel or abbey ruin) or in a monument's grounds
+   (a priory's outbuildings are often mapped on their own, untagged), and with LiDAR still
    seeing walls 4 m+ tall on its footprint. A bridge counts where LiDAR sees its deck 4 m+ in the air
    for 30 m over water or 80 m anywhere (Overture flags whole road segments, culverts and all);
    railway and footpath viaducts always count. Lighthouses, famous artworks, listed bridges and named
@@ -223,9 +224,11 @@ seeds; places like your thumbs-down spots get pulled down.
    reach onto them. National Trust, Forestry England, Woodland Trust, nature reserves, golf courses,
    cemeteries, railways (not ones in tunnels) and power lines are flagged.
 5. **Score**: a weighted rule score blended 60/40 with similarity to your seed spots. For the 5",
-   public land (parks, commons, country parks, beaches) and bridges and viaducts weigh in, and public
-   land is part of the taste match too: without it the taste part filled the top with private fields
-   that happen to look like the Town Moor. Bridges,
+   public land (parks, commons, country parks, beaches), bridges and viaducts, and bandos most of all
+   weigh in, and public land is part of the taste match too: without it the taste part filled the top
+   with private fields that happen to look like the Town Moor. Height to dive (tall trees or walls, a
+   hill) only counts for the 5" where there's open air beside it: a valley side that's woods all the
+   way down is canopy to hop over, not a dive. Bridges,
    bandos, beaches and landmarks are measured from the middle of the spot, so the best cell is on
    them, not 300 m away in the next field. 5" cine is led by its subject (landmarks, the coast,
    bridges) more than by water, hills and sunsets, which every river valley has, and being busy only

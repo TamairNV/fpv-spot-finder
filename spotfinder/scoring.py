@@ -98,9 +98,10 @@ PROFILES = {
         key="freestyle5", label="5\" freestyle", short="5\"", drone="5 inch, 800 g (no class mark)",
         category="Open A3", radius_cells=2, spacing_m=400, legal_key="a3_frac", legal_min=0.6, legal_window_min=0.5,
         # "flow" is the best run you can chain through the spot; gaps, trees and edges still count on their own.
-        # Viaducts and bridges are dive and gap spots in their own right; public land is where you can turn up.
+        # Viaducts and bridges are dive and gap spots in their own right, and a derelict building still
+        # standing is the classic freestyle spot; public land is where you can turn up.
         weights={"flow": 0.22, "gaps": 0.12, "lone": 0.08, "edges": 0.10, "space": 0.10, "mix": 0.06, "vertical": 0.08,
-                 "relief": 0.10, "bando": 0.10, "water": 0.04, "bridge": 0.12, "beach": 0.08, "public": 0.12, "sunset": 0.04,
+                 "relief": 0.10, "bando": 0.16, "water": 0.04, "bridge": 0.12, "beach": 0.08, "public": 0.12, "sunset": 0.04,
                  "busy": -0.15, "hazard": -0.2, "permission": -0.08, "wet": -0.2,
                  "remote": -0.10, "farm": -0.05, "road": -0.12},
         style_features=["flow", "gaps", "lone", "edges", "space", "mix", "vertical", "relief", "water", "public"],
@@ -204,8 +205,12 @@ def components(f: dict[str, np.ndarray], p: Profile, legal_only: bool = True) ->
         tall_m = win_mean(f["tall_frac"], r)
         c["space"] = 0.5 * ramp(open_m, 0.3, 0.7) + 0.5 * ramp(win_max(f["open_r_m"], r), 50, 200)
         c["mix"] = np.clip(1 - np.abs(tall_m - 0.25) / 0.25, 0, 1)
-        c["vertical"] = ramp(win_max(f["h_p90"], r), 10, 25)
-        c["relief"] = np.maximum(ramp(win_max(f["relief_250"], r), 8, 45), 0.6 * win_max(f["steep_frac"], r) ** 0.5)
+        # Height only counts with open air beside it to dive into: tree faces at a wood's edge, a grassy
+        # hill. Inside a wood, or down a valley side that's trees all the way, it's canopy to hop over.
+        c["vertical"] = ramp(win_max(f["h_p90"] * ramp(f["open_frac"], 0.15, 0.4), r), 10, 25)
+        dive_air = ramp(f["open_frac"], 0.2, 0.5)
+        c["relief"] = np.maximum(ramp(win_max(f["relief_250"] * dive_air, r), 8, 45),
+                                 0.6 * win_max(f["steep_frac"] * dive_air, r) ** 0.5)
         c["bando"] = near(f["dist_bando"], 30, 350)  # a derelict building LiDAR says is still standing
         c["water"] = near(win_min(f["dist_water"], r), 50, 250)
         c["bridge"] = near(f["dist_bridge"], 20, 250)

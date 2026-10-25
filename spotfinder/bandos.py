@@ -57,6 +57,7 @@ LIVED_IN = {"residential", "house", "apartments", "detached", "semidetached_hous
 PARK_LEISURE = {"park", "garden", "golf_course", "playground", "common", "village_green"}
 PARK_LANDUSE = {"cemetery", "religious", "recreation_ground", "village_green"}
 PARK_TOURISM = {"museum", "attraction", "theme_park", "zoo"}
+MONUMENT_SITE_MAX = 50e4  # m²: a priory's or castle's grounds, not a whole designated landscape
 CLUSTER_M = 20.0     # footprints this close are one site: a works, a row of ruins
 SAME_KIND_M = 100.0  # ...or this close if they're the same kind of thing: a depot of sheds
 
@@ -174,6 +175,15 @@ def standing_height(region: Region, geoms: gpd.GeoSeries) -> np.ndarray:
     return out
 
 
+def off_limits(areas: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Places a ruin can't be a bando in: parks, graveyards, attractions, and a monument's grounds (a
+    priory's ruined outbuildings are often mapped on their own, with no tags to say whose they are)."""
+    park = areas["tags"].map(lambda t: t.get("leisure") in PARK_LEISURE or t.get("landuse") in PARK_LANDUSE
+                             or t.get("amenity") == "grave_yard" or t.get("tourism") in PARK_TOURISM)
+    grounds = areas["tags"].map(lambda t: heritage(t) and "boundary" not in t) & (areas.geometry.area <= MONUMENT_SITE_MAX)
+    return areas[park | grounds]
+
+
 def find(region: Region) -> gpd.GeoDataFrame:
     """Every bando in the region: osm_id, tags, footprint geometry and standing height (m, NaN = no LiDAR)."""
     o = osm.extract(region)
@@ -187,8 +197,7 @@ def find(region: Region) -> gpd.GeoDataFrame:
     cand = cand[cand.geometry.notna() & ~cand.geometry.is_empty]
     cand = cand[cand.geom_type.isin(["Polygon", "MultiPolygon"]) & (cand.geometry.area >= MIN_AREA)]
     cand = cand.drop_duplicates(subset="geometry")  # a node and the way it sits in
-    parks = areas[areas["tags"].map(lambda t: t.get("leisure") in PARK_LEISURE or t.get("landuse") in PARK_LANDUSE
-                                    or t.get("amenity") == "grave_yard" or t.get("tourism") in PARK_TOURISM)]
+    parks = off_limits(areas)
     if len(parks):
         inside = gpd.sjoin(gpd.GeoDataFrame(geometry=cand.geometry.representative_point(), crs=cand.crs),
                            parks[["geometry"]], predicate="within").index
