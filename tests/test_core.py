@@ -3,7 +3,7 @@
 import numpy as np
 
 from spotfinder import bandos, features, legal, parks, scoring
-from spotfinder.export import os_grid_ref
+from spotfinder.export import os_grid_ref, tell_apart
 from spotfinder.heights import Tile
 from spotfinder.sources import lidar_wcs
 
@@ -19,6 +19,16 @@ def make_tile(ohm, trees=None, bld=None):
 def test_grid_ref_newcastle():
     assert os_grid_ref(424000, 564000) == "NZ240640"
     assert os_grid_ref(424567, 564321, digits=8) == "NZ24566432"
+
+
+def test_spots_sharing_a_name_say_which_part():
+    spot = lambda title, place="Hebburn": {"properties": {"title": title, "locality": place}}
+    feats = [spot("Riverside Park"), spot("Riverside Park"), spot("Riverside Park"), spot("Town Moor", "Spital Tongues"),
+             spot("By River Wear", "Brasside"), spot("By River Wear", "Durham")]
+    tell_apart(feats, [(0, -400), (60, -250), (0, 600), (5000, 0), (9000, 0), (9000, 4000)])
+    assert [f["properties"]["title"] for f in feats] == [
+        "Riverside Park (south)", "Riverside Park (middle)", "Riverside Park (north)", "Town Moor",
+        "By River Wear", "By River Wear"]  # a different place under the name tells those two apart already
 
 
 def test_parse_lower_limits():
@@ -494,6 +504,9 @@ def test_what_the_take_off_stands_on(monkeypatch):
     assert g.at(2100, 50) == ("beach", "Longsands")
     assert g.at(5025, 25) == ("public", None)  # a name that only says what it is
     assert g.at(9000, 9000) == (None, None)
+    pub = g.public(0, 1000, (1000, 1000))  # the same, on a 1 m grid for picking take-offs
+    assert pub[500, 500] and not pub[800, 200] and pub.sum() == 1000 * 1000 - 200 * 200
+    assert g.public(2000, 100, (100, 200)).all() and not g.public(9000, 9100, (50, 50)).any()
 
 
 def test_viaduct_deck_gives_arches():
@@ -506,6 +519,51 @@ def test_viaduct_deck_gives_arches():
     ohm[58:63, 10:110] = np.r_[np.linspace(2, 25, 50), np.linspace(25, 2, 50)]  # high over the middle
     a = lines.arches(deck, ohm)
     assert 4 <= len(a) <= 7 and all(h >= lines.ARCH_MIN_H for _, _, h in a)
+
+
+def test_a_bridge_over_a_river_is_a_deck_in_the_3d_model(monkeypatch, tmp_path):
+    import types
+
+    import geopandas as gpd
+    from PIL import Image
+    from shapely.geometry import LineString, box
+
+    from spotfinder import export
+    from spotfinder.sources import osm
+
+    lines_ = gpd.GeoDataFrame({"tags": [{"railway": "rail", "bridge": "yes"}, {"railway": "rail"},
+                                        {"highway": "footway", "bridge": "yes"}, {"highway": "path", "bridge": "viaduct"}]},
+                              geometry=[LineString([(160, 0), (160, 320)]), LineString([(60, 0), (60, 320)]),
+                                        LineString([(100, 0), (100, 320)]), LineString([(220, 0), (220, 320)])])
+    areas = gpd.GeoDataFrame({"tags": [{"man_made": "bridge"}, {"leisure": "park"}]},
+                             geometry=[box(250, 140, 270, 180), box(0, 0, 50, 50)])
+    monkeypatch.setattr(osm, "extract", lambda region: {"areas": areas, "lines": lines_})
+    decks = export.Decks(None)
+    m = decks.mask(0, 320, (320, 320))
+    assert m[:, 157:163].all() and not m[:, 150].any()  # the railway on its bridge, 8 m wide...
+    assert not m[:, 60].any() and m[150:170, 255].all() and not m[200:, :50].any()  # ...not on the ground
+    assert not m[:, 100].any() and m[:, 220].all()  # a footbridge in a dene is the trees, a path's viaduct isn't
+    # a river running east under it, with LiDAR seeing the bridge 20 m over the water
+    n = 320
+    water = np.zeros((n, n), bool)
+    water[140:180, :] = True
+    zero = np.zeros((n, n), "float32")
+    over = np.where(water & m, 20.0, 0.0).astype("float32")
+    over[140:180, 156:158] = 6  # its side, lower down
+    t = Tile(x0=0, y1=n, ohm=zero, trees=zero, bldh=zero, bld=np.zeros((n, n), bool), water=water,
+             ways=np.zeros((n, n), "uint8"), porosity=None, lidar=np.ones((n, n), bool), over_water=over)
+    reader = types.SimpleNamespace(tile=lambda x0, y0, size, margin: t)
+    region = types.SimpleNamespace(bbox=(0, 0, n, n))
+    dtm, out = np.zeros((n // 5, n // 5), "float32"), tmp_path / "p.png"
+    export.write_preview(reader, dtm, region, n / 2, n / 2, out, decks=decks)
+    export._flush_pngs()  # (written in the background)
+    px = np.asarray(Image.open(out).convert("RGB"))
+    assert px[80, 80, 0] == 6 * 40 and px[80, 80, 1] == 20 * 4  # over the river: a deck 20 m up
+    assert px[80, 78, 0] == 6 * 40 and px[80, 78, 1] == 20 * 4  # level across, not a block hanging off it
+    assert px[80, 40, 0] == 40 and px[80, 40, 1] == 0  # the river beside it
+    export.write_preview(reader, dtm, region, n / 2, n / 2, out)
+    export._flush_pngs()
+    assert tuple(np.asarray(Image.open(out).convert("RGB"))[80, 80, :2]) == (40, 0)  # it used to be missing
 
 
 def test_run_weaves_through_neighbouring_arches():
@@ -543,6 +601,21 @@ def test_takeoff_leg_stays_off_homes():
     assert tk is not None and tk[0] >= 94 and not (tk[0] >= 105 and 93 <= tk[1] <= 107)
 
 
+def test_take_off_on_public_ground_if_its_close():
+    from spotfinder import lines
+
+    flat, open_ = np.zeros((200, 200), "float32"), np.ones((200, 200), bool)
+    first = np.array([100.0, 100.0])
+    park = np.zeros((200, 200), bool)
+    park[130:, :] = True  # a park starts 30 m south of the first move, with a farmer's field all round it
+    tk = lines.takeoff(first, 6.0, flat, open_, lines.FREESTYLE, None)
+    assert not park[tk]  # the nearest open ground is in the field
+    tk = lines.takeoff(first, 6.0, flat, open_, lines.FREESTYLE, None, prefer=park)
+    assert park[tk] and np.hypot(tk[0] - 100, tk[1] - 100) < 40
+    park[:160] = False  # 60 m off: not worth the walk
+    assert not park[lines.takeoff(first, 6.0, flat, open_, lines.FREESTYLE, None, prefer=park)]
+
+
 def test_line_links_need_clear_air():
     from spotfinder import lines
 
@@ -553,6 +626,25 @@ def test_line_links_need_clear_air():
     ohm[80:120, 110] = 10  # a wall between the gap and the last tree
     nb = lines.links(nodes, ohm, lines.FREESTYLE)
     assert nb[1] == [0] and nb[2] == []
+
+
+def test_lines_keep_off_school_grounds_right_up_to_the_hedge():
+    from spotfinder import lines
+
+    # The first few metres off a hedge are skipped for heights (that's the hedge), not for keep-off ground.
+    blocked = np.zeros((60, 60), bool)
+    blocked[37:39, 27:29] = True  # the corner of a school field, a few metres off the hedge
+    nodes = np.array([[40, 30, lines.SKIM, 1.0, lines.END_SKIP], [30, 10, lines.SKIM, 1.0, 1.5],
+                      [50, 10, lines.SKIM, 1.0, 1.5]])
+    nb = lines.links(nodes, np.zeros((60, 60), "float32"), lines.WHOOP, blocked)
+    assert nb[0] == [2]  # off the hedge the other way, not over the corner of the field
+    # and the take-off leg in to the first move
+    blocked = np.zeros((200, 200), bool)
+    blocked[96:98, 90:111] = True  # the end of a school field just short of the hedge, on the path side
+    tk = lines.takeoff(np.array([100.0, 100.0]), lines.END_SKIP, np.zeros((200, 200), "float32"),
+                       np.ones((200, 200), bool), lines.FREESTYLE, blocked, hint=(40.0, 100.0))
+    leg = np.rint(np.array(tk) + np.linspace(0, 1, 500)[:, None] * (np.array([100.0, 100.0]) - tk)).astype(int)
+    assert not blocked[leg[:, 0], leg[:, 1]].any()
 
 
 def test_a_link_bends_round_a_clump_of_trees():
@@ -610,16 +702,110 @@ def test_a_woods_edge_is_skimmed_from_the_field():
     ohm[300:700, 200:500] = 12  # a wood in the middle of a field...
     ohm[490:500, 200:500] = 0  # ...with a 10 m ride through it
     _, _, _, runs = features.analyse(make_tile(ohm), margin=m, size=1000, want_lines=True)
-    nodes = runs["line5"][0]
-    lane = nodes[(nodes[:, 2] == lines.SKIM) & (nodes[:, 4] == lines.LANE_R)]
-    assert len(lane) >= 20  # all round the wood, one every SKIM_STEP or so
-    r, c = lane[:, 0], lane[:, 1]
-    ride = (r >= 490) & (r < 500)
-    off = np.maximum.reduce([300 - r, r - 699, 200 - c, c - 499])[~ride]  # metres out from the wood
-    assert (off >= lines.LANE_IN - 1).all() and (off <= lines.LANE_OUT + 1).all() and (lane[:, 3] == 1.0).all()
-    assert not (ride & (c >= 210) & (c < 490)).any()  # not along the ride, past its mouths: no room there
-    assert not (runs["linew"][0][:, 4] == lines.LANE_R).any()  # the whoop sticks to tree lines
-    assert runs["line5"][1].max() > 2  # and they chain into a run along the edge
+    for name, lane in (("line5", lines.WOOD_EDGE), ("linew", lines.WALLS)):  # the whoop skims it closer in
+        nodes = runs[name][0]
+        on = nodes[(nodes[:, 2] == lines.SKIM) & (nodes[:, 4] == lane.r)]
+        assert len(on) >= 20  # all round the wood, one every SKIM_STEP or so
+        r, c = on[:, 0], on[:, 1]
+        ride = (r >= 490) & (r < 500)
+        off = np.maximum.reduce([300 - r, r - 699, 200 - c, c - 499])[~ride]  # metres out from the wood
+        assert (off >= lane.near - 1).all() and (off <= lane.far + 1).all() and (on[:, 3] == 1.0).all()
+        assert not (ride & (c >= 210) & (c < 490)).any()  # not along the ride, past its mouths: no room there
+        assert runs[name][1].max() > 2  # and they chain into a run along the edge
+
+
+def test_the_whoop_skims_a_buildings_side_and_the_5_inch_keeps_off():
+    from spotfinder import lines
+
+    n, m = 1080, 40
+    ohm = np.zeros((n, n))
+    bld = np.zeros((n, n), dtype=bool)
+    ohm[450:550, 300:700] = 15  # an office block on a big square
+    bld[450:550, 300:700] = True
+    ohm[600:604, 300:700] = 4  # with a low wall across the square: not tall enough to skim
+    _, _, _, runs = features.analyse(make_tile(ohm, trees=np.zeros((n, n)), bld=bld), margin=m, size=1000,
+                                     want_lines=True)
+    nodes = runs["linew"][0]
+    on = nodes[(nodes[:, 2] == lines.SKIM) & (nodes[:, 4] == lines.WALLS.r)]
+    assert len(on) >= 30
+    r, c = on[:, 0], on[:, 1]
+    off = np.maximum.reduce([450 - r, r - 549, 300 - c, c - 699])
+    assert (off >= lines.WALLS.near - 1).all() and (off <= lines.WALLS.far + 1).all()
+    assert runs["linew"][1].max() > 2
+    assert not (runs["line5"][0][:, 2] == lines.SKIM).any()  # 800 g keeps 12 m off buildings
+
+
+def test_a_skim_says_what_its_along():
+    from types import SimpleNamespace
+
+    from spotfinder import export, lines
+
+    ohm = np.zeros((100, 100), "float32")
+    bld = np.zeros((100, 100), bool)
+    ohm[20:40, 20:40], bld[20:40, 20:40] = 15, True  # an office block
+    ohm[60:90, 20:40] = 12  # a wood
+    t = SimpleNamespace(ohm=ohm, bld=bld)
+    node = lambda r, c, kind, radius: np.array([r, c, kind, 1.0, radius], dtype=float)
+    assert export.move_kind(t, node(30, 43, lines.SKIM, lines.WALLS.r), lines.WHOOP) == "wall"
+    assert export.move_kind(t, node(75, 43, lines.SKIM, lines.WALLS.r), lines.WHOOP) == "edge"
+    assert export.move_kind(t, node(75, 43, lines.SKIM, lines.END_SKIP), lines.WHOOP) == "skim"  # on a tree line
+    assert export.move_kind(t, node(50, 50, lines.GAP, lines.END_SKIP), lines.WHOOP) == "gap"
+    assert export._line_mix({"moves": [["gap"], ["wall"], ["edge"], ["skim"]]}) == "a gap, 3 skims"
+
+
+def test_a_shot_orbits_the_lighthouse_round_its_open_side():
+    from spotfinder import shots
+
+    assert shots.longest_run(np.array([1, 1, 0, 0, 1, 1, 1], bool), circular=True) == (4, 5)
+    assert shots.longest_run(np.array([1, 1, 0, 0, 1, 1, 1], bool)) == (4, 3)
+    air = np.zeros((400, 400), "float32")
+    air[195:205, 195:205] = 24  # a lighthouse 10 m across
+    blocked = np.zeros((400, 400), bool)
+    o = shots.orbit(air, blocked, (199.5, 199.5), 7.0, 24.0)
+    assert o == {"r": 32, "h": 29, "alt": 29.0, "from": 0.0, "deg": 360.0}  # all the way round, 25 m out, 5 m over the top
+    blocked[:, :170] = True  # the keepers' cottages and their gardens to the west
+    o = shots.orbit(air, blocked, (199.5, 199.5), 7.0, 24.0)
+    mid = (o["from"] + o["deg"] / 2) % 360
+    assert o["r"] == 32 and 180 <= o["deg"] < 360 and abs(mid - 90) <= 6  # round the east side
+    air[100:300, 220:300] = 26  # and a wood to the east taller than the orbit
+    o = shots.orbit(air, blocked, (199.5, 199.5), 7.0, 24.0)
+    assert o is None or abs((o["from"] + o["deg"] / 2) % 360 - 90) > 45
+    assert shots.orbit(np.zeros((400, 400), "float32"), None, (200, 200), 80.0, 30.0) is None  # too big to orbit
+
+
+def test_a_shot_passes_along_the_bridge_on_its_open_side():
+    from spotfinder import shots
+
+    air = np.zeros((400, 400), "float32")
+    air[198:203, 50:350] = 25  # a viaduct's deck, 25 m up, running east
+    blocked = np.zeros((400, 400), bool)
+    blocked[:175, :] = True  # houses all along its north side
+    p = shots.pass_along(air, blocked, (200, 50), (200, 349), 25.0)
+    assert p["off"] == 25 and p["side"] == 180.0 and p["h"] == 25 and p["len"] >= 290  # south side, deck height
+    assert abs(p["a"][0] - 225) < 1 and abs(p["b"][0] - 225) < 1
+    blocked[:] = True
+    assert shots.pass_along(air, blocked, (200, 50), (200, 349), 25.0) is None
+
+
+def test_a_shot_flies_level_so_rising_ground_stays_under_it():
+    from spotfinder import shots
+
+    # a monument on the side of a hill that rises steeply to the west: no orbit round the uphill side
+    air = np.zeros((400, 400), "float32")
+    air[195:205, 195:205] = 24
+    ground = np.broadcast_to(np.clip((185.0 - np.arange(400)) * 2, 0, None), (400, 400)).astype("float32")
+    o = shots.orbit(air, None, (199.5, 199.5), 7.0, 24.0, ground)
+    assert o["r"] == 32 and o["alt"] == 29.0 and 180 <= o["deg"] < 360
+    assert abs((o["from"] + o["deg"] / 2) % 360 - 90) <= 6
+    # a viaduct 30 m over a valley floor whose sides rise to it: the pass is the part over the valley
+    ground = np.broadcast_to(np.clip((np.abs(np.arange(400) - 200.0) - 80) * 0.5, 0, None), (400, 400)).astype("float32")
+    air = np.zeros((400, 400), "float32")
+    air[198:203, 50:350] = np.clip(30 - ground[198:203, 50:350], 0, None)
+    p = shots.pass_along(air, None, (200, 50), (200, 349), 30.0, ground)
+    assert p["h"] == 30 and p["alt"] == 30.0 and 230 <= p["len"] <= 262
+    assert 68 <= min(p["a"][1], p["b"][1]) and max(p["a"][1], p["b"][1]) <= 332
+    flat = shots.pass_along(air, None, (200, 50), (200, 349), 30.0)
+    assert flat["len"] > p["len"] + 30
 
 
 def test_lines_dont_fly_through_trees_hanging_over_a_river(monkeypatch):

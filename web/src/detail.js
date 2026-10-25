@@ -1,7 +1,7 @@
 // The spot card: a sticky header (back, name, score), then can you fly it, what's there, a 3D look,
 // the wind and the light, and the score breakdown.
 import { el, metres, compass, scoreColour, SANDBOXED } from './util.js';
-import { sunBox, weatherBox } from './conditions.js';
+import { goldenSun, sunBox, weatherBox } from './conditions.js';
 
 const NICE = {
   gaps: 'Gaps', lone: 'Lone trees', edges: 'Tree lines / edges', space: 'Open space', mix: 'Obstacle mix',
@@ -205,7 +205,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   }
 
   const p3dHost = el('div');
-  kids.push(p3dHost, lineBox(p));
+  kids.push(p3dHost, lineBox(p), shotBox(p, lon, lat));
 
   const why = whyList(p);
   if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
@@ -277,7 +277,8 @@ function notesBox(p, ratings, onNote) {
 }
 
 // The pipeline's suggested run through the spot, numbered like the markers in the 3D view.
-const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the edge', arch: 'Through the viaduct arch' };
+const MOVE_TEXT = { gap: 'Through the gap', orbit: 'Orbit the lone tree', dive: 'Dive over the tall stuff', skim: 'Skim low along the tree line',
+  edge: 'Skim along the edge of the trees', wall: 'Skim along the side of the building', arch: 'Through the viaduct arch' };
 function lineBox(p) {
   const moves = p.line?.moves;
   if (!moves?.length) return null;
@@ -288,6 +289,36 @@ function lineBox(p) {
     el('ol', { class: 'moves' }, moves.map(([kind], i) => el('li', {},
       el('span', { class: `mv mv-${kind}` }, i + 1),
       kind === 'arch' && moves[i - 1]?.[0] === 'arch' ? 'Round the pier and back through the next arch' : MOVE_TEXT[kind] || kind))));
+}
+
+// The 5" cine's shot: an orbit round what the spot's named after or a pass along a bridge (from the
+// pipeline's shots.py), and where the sun is for it at golden hour: lit from the front, or a silhouette.
+const towards = (deg) => compass(Math.sin((deg * Math.PI) / 180), Math.cos((deg * Math.PI) / 180));
+const apart = (a, b) => Math.abs((((a - b) % 360) + 540) % 360 - 180);
+function shotBox(p, lon, lat) {
+  const s = p.shot;
+  if (!s) return null;
+  const sun = goldenSun(lon, lat);
+  const inArc = (deg) => s.deg >= 360 || (((deg - s.from) % 360) + 360) % 360 <= s.deg;
+  const light = (sb) => {
+    if (s.kind === 'pass') {
+      const d = apart(sb, s.side);
+      return d < 70 ? 'the pass sees it lit up' : d > 110 ? 'the pass sees it against the sun, a silhouette' : 'the pass sees it lit from the side';
+    }
+    if (s.deg >= 360) return `fly the ${towards(sb)} side for it lit up, the ${towards(sb + 180)} side for a silhouette`;
+    if (inArc(sb)) return `the ${towards(sb)} part of the arc sees it lit up`;
+    if (inArc(sb + 180)) return 'the arc sees it against the sun, a silhouette';
+    return 'the arc sees it lit from the side';
+  };
+  const what = s.kind === 'orbit'
+    ? `Orbit ${s.subject}: ${s.r} m out and ${s.h} m up, ${s.deg >= 360 ? 'all the way round' : `round its ${towards(s.from + s.deg / 2)} side (${s.deg}°)`}.`
+    : `Fly along ${s.subject} at its deck height, ${s.h} m up and ${s.off} m off its ${towards(s.side)} side, for ${s.len} m.`;
+  return el('div', { class: 'box line-box shot-box' },
+    el('h4', {}, 'A shot to film'),
+    el('p', {}, what),
+    el('p', { class: 'muted small' }, `It keeps off houses, roads and the rest, and clear of anything that sticks up into it. The 3D view draws it and “Watch the shot” flies it.`),
+    el('div', { class: 'small' }, `Morning golden hour (${sun.am.time}): sun in the ${towards(sun.am.bearing)}, so ${light(sun.am.bearing)}.`),
+    el('div', { class: 'small' }, `Evening golden hour (${sun.pm.time}): sun in the ${towards(sun.pm.bearing)}, so ${light(sun.pm.bearing)}.`));
 }
 
 export function nice(k) {

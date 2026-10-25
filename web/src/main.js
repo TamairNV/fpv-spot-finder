@@ -971,6 +971,17 @@ function weave(moves) {
   return out;
 }
 
+// A 5" cine shot on the map: the pass between its ends, or the orbit's arc round its centre.
+function shotPath(s) {
+  if (s.kind === 'pass') return [s.a_ll, s.b_ll];
+  const [lon, lat] = s.ll, n = Math.max(8, Math.round(s.deg / 5)), out = [];
+  for (let k = 0; k <= n; k++) {
+    const b = ((s.from + (s.deg * k) / n) * Math.PI) / 180;
+    out.push([lon + (Math.sin(b) * s.r) / (111320 * Math.cos((lat * Math.PI) / 180)), lat + (Math.cos(b) * s.r) / 110540]);
+  }
+  return out;
+}
+
 function showSelection(f) {
   const p = f.properties;
   const feats = [{ type: 'Feature', geometry: circlePolygon(f.geometry.coordinates, state.meta.profiles[state.profile].radius_m), properties: { k: 'area' } }];
@@ -982,6 +993,7 @@ function showSelection(f) {
     feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [...start, ...weave(moves)] }, properties: { k: 'path' } });
     moves.forEach((m, i) => feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [m[1], m[2]] }, properties: { k: 'move', n: i + 1, kind: m[0] } }));
   }
+  if (p.shot) feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: shotPath(p.shot) }, properties: { k: 'path' } });
   if (p.takeoff) feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.takeoff.lon, p.takeoff.lat] }, properties: { k: 'takeoff' } });
   map.getSource('sel')?.setData({ type: 'FeatureCollection', features: feats });
 }
@@ -1531,7 +1543,8 @@ function aboutHtml() {
     <li><b>Gaps</b>: openings 2–12 m wide between trees or buildings at least 5 m tall (whoop gaps up to 6 m).</li>
     <li><b>Lone trees</b>: single trees with open ground all round, for orbits and power loops.</li>
     <li><b>Viaducts and bridges</b> (arches to fly through), <b>beaches</b>, <b>public land</b> to fly from, and <b>edges, open space, tall stuff, slopes, water and bandos</b> nearby; for 5" cine: a subject to film (a lighthouse, castle, pier, viaduct or the coast) with big water, hills and a sunrise or sunset round it; for the whoop: architecture, plazas, landmarks and under-canopy space. A spot's pin sits on the viaduct, landmark or beach it's about, and a run can weave through a viaduct's arches where trees don't crowd it.</li>
-    <li><b>Lines</b>: each top spot gets a suggested line chaining its gaps, trees, arches, tree lines and the edges of woods through clear air (straight, or with one bend round a clump of trees), from a take-off on open ground with a clean way in. Lines keep off gardens, car parks, roads, school and hospital grounds, playgrounds, working railways and power lines.</li>
+    <li><b>Lines</b>: each top spot gets a suggested line chaining its gaps, trees, arches, tree lines, the edges of woods and, for the whoop, the sides of buildings through clear air (straight, or with one bend round a clump of trees), from a take-off on open ground (a park, common or beach if there's one close) with a clean way in. Lines keep off gardens, car parks, roads, school and hospital grounds, playgrounds, working railways and power lines.</li>
+    <li><b>Shots</b> (5" cine): a spot named after a lighthouse, castle, monument or ruin gets an orbit round it, and a bridge or viaduct a pass along it at deck height, kept off houses and roads and clear of anything in the way, with where the golden-hour sun lights it from.</li>
     <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
     <li><b>Parks</b>: every public park or common of 4 ha or more gets a spot at its best place, even if it doesn't make the top 250. Tap “Parks” above the list to see them.</li>
     <li><b>Bandos</b>: derelict, abandoned and disused buildings mapped on OpenStreetMap, still standing at least 4 m tall in the LiDAR. Ruins in parks, monuments, old pit sites and capped shafts aren't bandos, so they're left out. Tap the “Bandos” chip to list them biggest first, tap one for its card and a 3D close-up, or use Filters › Bando within for spots near one.</li>

@@ -198,11 +198,12 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
                 line_ids[i + 1] = True
         belt = line_ids[blab]
         treeline = edge_tree & belt
-    # --- Wood edges: a wall of trees along a field, skimmed from the open a few metres off it. (A tree line's
-    # skim nodes sit on the belt itself.)
+    # --- Walls to skim from the open a few metres off them: the edge of a wood along a field, and for the whoop
+    # a building's side along a square too. (A tree line's skim nodes sit on the belt itself.)
     near_r, near_c = inds
-    wall_h = np.where(tree_tall[near_r, near_c] & ~belt[near_r, near_c], trees[near_r, near_c], np.float32(0))
-    lane = (lines.wood_lane(dt_tall, wall_h, open_), wall_h)
+    wood = tree_tall[near_r, near_c] & ~belt[near_r, near_c]
+    wall_h = {False: np.where(wood, trees[near_r, near_c], np.float32(0)),
+              True: np.where(wood | t.bld[near_r, near_c], ohm[near_r, near_c], np.float32(0))}
 
     # --- Under-canopy room (LiDAR only): last returns reach well below the canopy top.
     if t.porosity is not None:
@@ -284,6 +285,8 @@ def analyse(t: Tile, margin: int = MARGIN, size: int = TILE, want_lines: bool = 
     d_road = ndimage.distance_transform_edt(~road) if road.any() else None
     for name, style in (("line5", lines.FREESTYLE), ("linew", lines.WHOOP)):
         blocked = lines.keep_out(t.land, d_bld, d_road, style)
+        h = wall_h[style.lane.buildings] if style.lane else None
+        lane = (lines.lane_mask(style.lane, dt_tall, h, open_), h) if style.lane else None
         nodes = lines.nodes_from(gaps, lone, treeline, style, blocked, arch, lane)
         via: dict = {}
         nb = lines.links(nodes, air, style, blocked, t.land == VIADUCT_CODE if t.land is not None else None, via)
