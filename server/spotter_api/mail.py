@@ -1,10 +1,12 @@
-"""Account emails (confirm your address, reset your password) over SMTP, set by environment:
+"""Account emails (confirm your address, reset your password) over SMTP.
 
-  SMTP_HOST, SMTP_PORT (587 = STARTTLS, 465 = TLS), SMTP_USER, SMTP_PASS, MAIL_FROM
-  PUBLIC_URL  the app's address, for the links (https://spotter.tamairnv.co.uk)
+Only the two secrets need setting: SMTP_USER (the Gmail address it sends from) and SMTP_PASS (a
+Gmail app password). The rest have defaults that can be overridden: SMTP_HOST (smtp.gmail.com),
+SMTP_PORT (587 = STARTTLS, 465 = TLS), MAIL_FROM ("FPV Spot Finder <SMTP_USER>") and PUBLIC_URL,
+the app's address for the links.
 
-Without SMTP_HOST nothing is sent and the link goes to the log instead (for local testing), and
-/api/health says accounts can't be made.
+Without SMTP_USER and SMTP_PASS nothing is sent and accounts stay switched off (MAIL_LOG_ONLY=1
+writes the links to the log instead, for local testing).
 """
 import logging
 import os
@@ -19,14 +21,18 @@ PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://spotter.tamairnv.co.uk").rstr
 sent: list[EmailMessage] = []  # the tests read these
 
 
+def _live() -> bool:
+    return bool(os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASS"))
+
+
 def configured() -> bool:
-    return bool(os.environ.get("SMTP_HOST")) or os.environ.get("MAIL_LOG_ONLY") == "1"
+    return _live() or os.environ.get("MAIL_LOG_ONLY") == "1"
 
 
 def _send(msg: EmailMessage) -> None:
-    host = os.environ.get("SMTP_HOST")
-    if not host:
-        log.warning("no SMTP_HOST: not sending %r to %s; body:\n%s", msg["Subject"], msg["To"], msg.get_content())
+    host = os.environ.get("SMTP_HOST") or "smtp.gmail.com"
+    if not _live():
+        log.warning("no SMTP_USER/SMTP_PASS: not sending %r to %s; body:\n%s", msg["Subject"], msg["To"], msg.get_content())
         sent.append(msg)
         return
     port = int(os.environ.get("SMTP_PORT", "587"))
@@ -38,8 +44,7 @@ def _send(msg: EmailMessage) -> None:
             s = smtplib.SMTP(host, port, timeout=20)
             s.starttls(context=ctx)
         with s:
-            if os.environ.get("SMTP_USER"):
-                s.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASS", ""))
+            s.login(os.environ["SMTP_USER"], os.environ["SMTP_PASS"])
             s.send_message(msg)
         log.info("sent %r to %s", msg["Subject"], msg["To"])
     except Exception:
@@ -49,7 +54,8 @@ def _send(msg: EmailMessage) -> None:
 def send(to: str, subject: str, text: str) -> None:
     """In the background, so a slow mail server can't hold a request up or say whether an address exists."""
     msg = EmailMessage()
-    msg["From"] = os.environ.get("MAIL_FROM") or os.environ.get("SMTP_USER") or "FPV Spot Finder <no-reply@localhost>"
+    user = os.environ.get("SMTP_USER")
+    msg["From"] = os.environ.get("MAIL_FROM") or (f"FPV Spot Finder <{user}>" if user else "FPV Spot Finder <no-reply@localhost>")
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(text)
