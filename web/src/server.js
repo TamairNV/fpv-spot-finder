@@ -3,15 +3,17 @@
 // and a heads-up the evening before a good day. On GitHub Pages there's no /api, so none of this
 // shows and the app works as before.
 //
-// No accounts: the first time there's something to save this device gets a random key; another
-// device joins the same profile with a short code (or QR) from the first. Changes queue up offline
-// and go when there's signal; each item is last-edit-wins, so two phones can't trample each other.
+// The first time there's something to save this device gets a random key; another device joins the
+// same profile with a short code (or QR) from the first, or you make an account (username and
+// password) and sign in anywhere. Changes queue up offline and go when there's signal; each item is
+// last-edit-wins, so two phones can't trample each other. Star reviews from accounts are public.
 import qrcode from 'qrcode-generator';
 import { $, el, store, save, SANDBOXED } from './util.js';
 import './server.css';
 
 const KEY = 'fpvspots:server-key';
 const SEEN = 'fpvspots:server-seen';
+const USER = 'fpvspots:account';  // the username this device is signed in as, if any
 const api = (path) => new URL(`api/${path}`, location.href.split('#')[0]).href;
 const hm = (iso) => iso.slice(11, 16);
 const dayName = (iso) => new Date(`${iso.slice(0, 10)}T12:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -73,6 +75,8 @@ class Server {
     this.pending = [];  // photos queued in IndexedDB: [{id, flight, url}]
     this.boxes = new Set();  // redraw functions of the flight boxes on open spot cards
     this.status = 'idle';
+    this.reviewCache = new Map();  // "<drone>/<id>" -> other people's reviews, as last fetched
+    this.summary = {};  // drone -> {spot id: [average stars, count]}
     this.wrapRatings();
     // first sync sends everything; after that, anything edited while the server wasn't listening yet
     this.queueEverything(store(this.keys.rev, null) == null ? 0 : store(this.keys.at, 0));
@@ -94,6 +98,24 @@ class Server {
       const item = r.notes[id];
       this.queue('note', id, item || null, item?.t || Date.now());
     };
+    const setSaved = r.setSaved.bind(r), setReview = r.setReview.bind(r), setPlace = r.setPlace.bind(r);
+    r.setSaved = (profile, id, on, extra = {}) => {
+      setSaved(profile, id, on, extra);
+      const k = `${profile}/${id}`, item = r.saved[k];
+      this.queue('saved', k, item ? { ...item, ll: item.ll || this.coords(profile, id) } : null, item?.t || Date.now());
+      this.fcDirty = true;  // the forecast watches saved spots too
+    };
+    r.setReview = (profile, id, value, extra = {}) => {
+      setReview(profile, id, value, extra);
+      const k = `${profile}/${id}`, item = r.reviews[k];
+      this.queue('review', k, item || null, item?.t || Date.now());
+      this.reviewCache.delete(k);
+    };
+    r.setPlace = (id, value) => {
+      setPlace(id, value);
+      const item = r.places[id];
+      this.queue('place', id, item || null, item?.t || Date.now());
+    };
   }
 
   queueEverything(since = 0) {
@@ -105,6 +127,9 @@ class Server {
       add('rating', k, { ...item, ll: this.coords(profile, rest.join('/')) });
     }
     for (const [k, item] of Object.entries(this.ratings.notes)) add('note', k, item);
+    for (const [k, item] of Object.entries(this.ratings.saved)) add('saved', k, item);
+    for (const [k, item] of Object.entries(this.ratings.reviews)) add('review', k, item);
+    for (const [k, item] of Object.entries(this.ratings.places)) add('place', k, item);
     for (const [k, item] of Object.entries(this.flights)) add('flight', k, item);
     save(this.keys.outbox, this.outbox);
   }
@@ -149,8 +174,14 @@ class Server {
       else this.renderBar();  // the re-rank offer counts your ratings
     } catch (e) {
       this.setStatus(e.status === 401 ? 'lost' : 'offline');
-      if (e.status === 401) {  // the key's gone (server reset): start a new profile with everything on here
+      if (e.status === 401) {  // the key's gone (signed out elsewhere, password changed, server reset)
+        const was = store(USER, null);
         save(KEY, null);
+        save(USER, null);
+        if (was) {  // what's on here stays, and merges back in when you sign in again
+          this.toast(`Signed out of ${was}: sign in again to sync with your account.`);
+          this.renderAccountBtn();
+        }
         forgetRevs();
         this.queueEverything();
       }
@@ -168,7 +199,7 @@ class Server {
     let changed = false;
     for (const it of items) {
       if (this.outbox[`${it.kind}|${it.k}`]?.t > it.t) continue;  // our unsent edit is newer
-      const into = { rating: r.data, note: r.notes, flight: this.flights }[it.kind];
+      const into = { rating: r.data, note: r.notes, flight: this.flights, saved: r.saved, place: r.places, review: r.reviews }[it.kind];
       if (!into) continue;
       const cur = into[it.k];
       if (cur && (cur.t || 0) > it.t) continue;
@@ -181,6 +212,9 @@ class Server {
     if (changed) {
       save(r.key, r.data);
       save(r.notesKey, r.notes);
+      save(r.savedKey, r.saved);
+      save(r.placesKey, r.places);
+      save(r.reviewsKey, r.reviews);
       save(this.keys.flights, this.flights);
       // a note written on another device, for the spot open here
       const area = document.querySelector('.note-text');
@@ -374,10 +408,10 @@ class Server {
       el('div', { class: 'srv-row' },
         el('button', { class: 'linklike', onclick: () => this.openFlights() }, n ? `✈ Your flights (${n})` : '✈ Flight log'),
         el('span', { class: 'sep' }, '·'),
-        el('button', { class: 'linklike', onclick: () => this.openDevices(), title: 'Sync your ratings, notes and flights with your other devices' },
+        el('button', { class: 'linklike', onclick: () => this.openAccount(), title: 'Sync your ratings, saved spots, notes and flights with your other devices' },
           `${{ ok: '☁︎', syncing: '☁︎', offline: '⚠︎', lost: '⚠︎', idle: '☁︎' }[this.status]} ${syncText}`),
         el('span', { class: 'sep' }, '·'),
-        el('button', { class: 'linklike', onclick: () => this.openDevices() }, 'Link a device')),
+        el('button', { class: 'linklike', onclick: () => this.openAccount() }, store(USER, null) ? `👤 ${store(USER, null)}` : this.health?.features?.includes('accounts') ? '👤 Sign in' : 'Link a device')),
       this.rerankRow() || '');
   }
 
@@ -464,11 +498,273 @@ class Server {
     return box;
   }
 
+  // ---- account
+
+  renderAccountBtn() {
+    const btn = $('#btn-account');
+    if (!btn) return;
+    const user = store(USER, null);
+    btn.hidden = false;
+    btn.classList.toggle('signed-in', !!user);
+    btn.title = user ? `Signed in as ${user}` : 'Sign in or make an account';
+    const accounts = this.health?.features?.includes('accounts');
+    btn.querySelector('.lbl').textContent = user || (accounts ? 'Sign in' : 'Devices');
+    this.renderBar();
+  }
+
+  openAccount(mode) {
+    const user = store(USER, null);
+    if (user) return this.openSignedIn(user);
+    if (!this.health?.features?.includes('accounts')) {
+      return this.showDialog('account', [el('h2', {}, 'Your devices'), ...this.linkBits()]);
+    }
+    mode ||= 'signup';
+    if (mode === 'forgot') return this.openForgot();
+    const signup = mode === 'signup';
+    const body = [el('h2', {}, signup ? 'Make an account' : 'Sign in')];
+    body.push(el('p', { class: 'muted' }, signup
+      ? 'Keeps your saved spots, star ratings, notes and flight log, and lets you sign in on any phone or computer. Your star reviews show to other pilots under your username; notes and your email stay private.'
+      : 'Whatever is on this device merges into your account.'));
+    const name = el('input', { class: 'srv-input plain', name: 'username', autocomplete: signup ? 'username' : 'username', placeholder: signup ? 'Username (shown on your reviews)' : 'Username or email', required: true, minlength: 3, maxlength: signup ? 24 : 254, autocapitalize: 'none', spellcheck: 'false' });
+    const email = signup ? el('input', { class: 'srv-input plain', type: 'email', name: 'email', autocomplete: 'email', placeholder: 'Email (for confirming and password resets)', required: true, maxlength: 254 }) : null;
+    const pw = el('input', { class: 'srv-input plain', type: 'password', name: 'password', autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? 'Password (10+ characters)' : 'Password', required: true, minlength: signup ? 10 : 1 });
+    const human = signup ? this.captcha() : null;
+    const err = el('p', { class: 'srv-err', role: 'alert' });
+    const go = el('button', { class: 'btn', type: 'submit' }, signup ? 'Make account' : 'Sign in');
+    const form = el('form', { class: 'srv-acct' }, name, email, pw, human?.node, err, go);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      go.disabled = true;
+      err.textContent = '';
+      try {
+        if (signup) {
+          await this.signup(name.value.trim(), email.value.trim(), pw.value, human?.token());
+          this.showDialog('account', [el('h2', {}, 'Check your email'),
+            el('p', {}, `We’ve sent a link to ${email.value.trim()}. Open it to finish making your account (it works for 48 hours).`),
+            el('p', { class: 'muted small' }, 'Nothing there? Check spam. Signing in sends the link again.')]);
+        } else {
+          await this.login(name.value.trim(), pw.value);
+          this.dialog.close();
+        }
+      } catch (ex) {
+        err.textContent = ex.message;
+        human?.reset();
+      }
+      go.disabled = false;
+    });
+    body.push(form);
+    body.push(el('p', { class: 'small srv-alt' },
+      el('button', { class: 'linklike', onclick: () => this.openAccount(signup ? 'login' : 'signup') }, signup ? 'I have an account' : 'Make an account'),
+      signup ? null : el('span', { class: 'sep' }, ' · '),
+      signup ? null : el('button', { class: 'linklike', onclick: () => this.openAccount('forgot') }, 'Forgot password?')));
+    body.push(el('details', { class: 'box' }, el('summary', {}, 'Or link a device without an account'), ...this.linkBits()));
+    this.showDialog('account', body);
+    setTimeout(() => name.focus(), 50);
+  }
+
+  openForgot() {
+    const email = el('input', { class: 'srv-input plain', type: 'email', autocomplete: 'email', placeholder: 'Your account’s email', required: true, maxlength: 254 });
+    const human = this.captcha();
+    const err = el('p', { class: 'srv-err', role: 'alert' });
+    const go = el('button', { class: 'btn', type: 'submit' }, 'Send me a link');
+    const form = el('form', { class: 'srv-acct' }, email, human.node, err, go);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      go.disabled = true;
+      try {
+        await call('account/forgot', { method: 'POST', body: { email: email.value.trim(), captcha: human.token() }, auth: false });
+        this.showDialog('account', [el('h2', {}, 'Check your email'),
+          el('p', {}, `If ${email.value.trim()} has an account, a reset link is on its way. It works once, for an hour.`)]);
+      } catch (ex) {
+        err.textContent = ex.message;
+        human.reset();
+      }
+      go.disabled = false;
+    });
+    this.showDialog('account', [el('h2', {}, 'Forgot password'), el('p', { class: 'muted' }, 'We’ll email you a link to pick a new one.'), form,
+      el('p', { class: 'small' }, el('button', { class: 'linklike', onclick: () => this.openAccount('login') }, 'Back to sign in'))]);
+    setTimeout(() => email.focus(), 50);
+  }
+
+  // Cloudflare Turnstile, when the server has a site key: { node, token(), reset() }
+  captcha() {
+    const site = this.health?.turnstile;
+    if (!site) return { node: null, token: () => null, reset: () => {} };
+    const node = el('div', { class: 'srv-captcha' });
+    let id = null, tok = null;
+    loadTurnstile().then((ts) => {
+      id = ts.render(node, { sitekey: site, theme: 'dark', callback: (t) => { tok = t; }, 'expired-callback': () => { tok = null; } });
+    }).catch(() => node.replaceChildren(el('p', { class: 'muted small' }, 'The are-you-human check couldn’t load: try again in a bit.')));
+    return { node, token: () => tok, reset: () => { tok = null; if (id != null) window.turnstile?.reset(id); } };
+  }
+
+  async signup(username, email, password, captcha) {
+    await this.sync();  // so everything on here is on the profile the account takes over
+    const res = await call('account/signup', { method: 'POST', body: { username, email, password, captcha } });
+    if (res.key) save(KEY, res.key);
+  }
+
+  // The link from the email: #verify=… confirms the account and signs this device in
+  async verifyLink(token) {
+    try {
+      const res = await call('account/verify', { method: 'POST', body: { token }, auth: false });
+      this.signedIn(res);
+      await this.sync();
+      this.toast(`Email confirmed: you’re signed in as ${res.username}.`);
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
+  // #reset=… : pick a new password
+  resetLink(token) {
+    const pw = el('input', { class: 'srv-input plain', type: 'password', autocomplete: 'new-password', placeholder: 'New password (10+ characters)', required: true, minlength: 10 });
+    const err = el('p', { class: 'srv-err', role: 'alert' });
+    const go = el('button', { class: 'btn', type: 'submit' }, 'Set password and sign in');
+    const form = el('form', { class: 'srv-acct' }, pw, err, go);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      go.disabled = true;
+      try {
+        const res = await call('account/reset', { method: 'POST', body: { token, password: pw.value }, auth: false });
+        this.signedIn(res);
+        await this.sync();
+        this.dialog.close();
+        this.toast(`Password changed: you’re signed in as ${res.username}, and every other device is signed out.`);
+      } catch (ex) {
+        err.textContent = ex.message;
+      }
+      go.disabled = false;
+    });
+    this.showDialog('account', [el('h2', {}, 'Pick a new password'), form]);
+    setTimeout(() => pw.focus(), 50);
+  }
+
+  signedIn(res) {
+    save(KEY, res.key);
+    save(USER, res.username);
+    forgetRevs();  // possibly a different profile: fetch it all, and send what's here so it merges in
+    this.queueEverything();
+    this.renderAccountBtn();
+    this.loadForecast();
+  }
+
+  async login(username, password) {
+    const res = await call('account/login', { method: 'POST', body: { username, password }, auth: false });
+    this.signedIn(res);
+    await this.sync();
+    this.toast(`Signed in as ${res.username}.`);
+  }
+
+  async logout(wipe, gone = false) {
+    if (!gone) {
+      await this.sync();
+      if (Object.keys(this.outbox).length && !confirm('Some changes haven’t reached the server yet (no signal?). Sign out anyway and lose them?')) return;
+      try {
+        await call('account/logout', { method: 'POST' });
+      } catch { /* the key's dropped here either way */ }
+    }
+    save(KEY, null);
+    save(USER, null);
+    forgetRevs();
+    this.outbox = {};
+    save(this.keys.outbox, this.outbox);
+    if (wipe) {
+      this.ratings.clearAll();
+      this.flights = {};
+      this.photos = {};
+      save(this.keys.flights, this.flights);
+      save(this.keys.photos, this.photos);
+      save(this.mineKey, null);
+      for (const k of Object.keys(localStorage)) {
+        if (/^fpvspots:[^:]+:(ratings|notes|saved|places|reviews|flights|photos|outbox|mine)$/.test(k)) localStorage.removeItem(k);
+      }
+    }
+    this.dialog?.close();
+    this.renderAccountBtn();
+    this.changed();
+    if (!gone) this.toast(wipe ? 'Signed out, and this device is cleared.' : 'Signed out. Your stuff is still on this device.');
+  }
+
+  openSignedIn(user) {
+    const body = [el('h2', {}, `👤 ${user}`)];
+    const stats = el('p', { class: 'muted small' }, '…');
+    body.push(stats);
+    const saved = Object.keys(this.ratings.saved).length, places = Object.keys(this.ratings.places).length;
+    const reviews = Object.keys(this.ratings.reviews).length;
+    const n = (x, w) => `${x} ${w}${x === 1 ? '' : 's'}`;
+    body.push(el('p', {}, `On here: ${n(saved, 'saved spot')}, ${n(places, 'place')} of your own, ${n(reviews, 'review')}, ${n(this.allFlights().length, 'flight')}.`));
+    body.push(el('p', { class: 'muted small' }, 'Star reviews show to other pilots under your name. Notes, flights and photos are only yours.'));
+
+    const old = el('input', { class: 'srv-input plain', type: 'password', autocomplete: 'current-password', placeholder: 'Current password', required: true });
+    const neu = el('input', { class: 'srv-input plain', type: 'password', autocomplete: 'new-password', placeholder: 'New password (8+ characters)', required: true, minlength: 8 });
+    const err = el('p', { class: 'srv-err', role: 'alert' });
+    const go = el('button', { class: 'btn', type: 'submit' }, 'Change password');
+    const pwForm = el('form', { class: 'srv-acct' }, old, neu, err, go);
+    pwForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      go.disabled = true;
+      try {
+        await call('account/password', { method: 'POST', body: { old: old.value, new: neu.value } });
+        err.textContent = '';
+        this.toast('Password changed. Other devices need to sign in again.');
+        this.dialog.close();
+      } catch (ex) {
+        err.textContent = ex.message;
+      }
+      go.disabled = false;
+    });
+    const statsBtn = el('button', { class: 'btn', hidden: true, onclick: () => this.openStats() }, '📊 Site stats');
+    body.push(statsBtn);
+    body.push(el('details', { class: 'box' }, el('summary', {}, 'Change password'), pwForm));
+    body.push(el('details', { class: 'box' }, el('summary', {}, 'Link a device with a code'), ...this.linkBits()));
+    const delPw = el('input', { class: 'srv-input plain', type: 'password', autocomplete: 'current-password', placeholder: 'Your password', required: true });
+    const delErr = el('p', { class: 'srv-err', role: 'alert' });
+    const delForm = el('form', { class: 'srv-acct' }, el('p', { class: 'muted small' }, 'Deletes your account, reviews, saved spots, notes, flights and photos from the server for good.'), delPw, delErr,
+      el('button', { class: 'btn danger', type: 'submit' }, 'Delete my account'));
+    delForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!confirm('Delete your account and everything in it? This can’t be undone.')) return;
+      try {
+        await call('account/delete', { method: 'POST', body: { password: delPw.value } });
+        this.outbox = {};
+        await this.logout(true, true);
+        this.toast('Account deleted.');
+      } catch (ex) {
+        delErr.textContent = ex.message;
+      }
+    });
+    body.push(el('details', { class: 'box' }, el('summary', {}, 'Delete account'), delForm));
+    body.push(el('div', { class: 'srv-signout' },
+      el('button', { class: 'btn', onclick: () => this.logout(false) }, 'Sign out'),
+      el('button', { class: 'linklike del', onclick: () => confirm('Sign out and remove your saved spots, ratings, notes and flights from this device? They stay in your account.') && this.logout(true) }, 'Sign out and clear this device')));
+    this.showDialog('account', body);
+    call('me').then((m) => {
+      if (m.username) save(USER, m.username);
+      statsBtn.hidden = !m.admin;
+      stats.textContent = `${n(m.devices, 'device')} signed in.`;
+    }).catch((e) => { stats.textContent = e.status === 401 ? 'Signed out on the server: sign in again.' : 'Offline: changes sync when there’s signal.'; });
+  }
+
+  // The admin-only stats page (site-stats module, served by the API). The server says 404 to anyone else.
+  async openStats() {
+    const host = el('div');
+    this.showDialog('stats', [host]);
+    this.dialog.classList.add('wide');
+    this.dialog.addEventListener('close', () => this.dialog.classList.remove('wide'), { once: true });
+    try {
+      const { renderStats } = await import(/* @vite-ignore */ api('stats/dashboard.js'));
+      await renderStats(host, { title: 'Spot Finder stats', fetchJson: (path) => call(`stats/${path}`) });
+    } catch (e) {
+      host.replaceChildren(el('p', { class: 'muted' }, `Stats unavailable (${e.message}).`));
+    }
+  }
+
   // ---- devices
 
-  openDevices() {
-    const body = [el('h2', {}, 'Your devices')];
-    body.push(el('p', {}, 'Your 👍 / 👎, notes and flight log sync between every device you link. No account: a code from this device lets another one join.'));
+  linkBits() {
+    const body = [];
+    body.push(el('p', { class: 'muted small' }, 'A code from this device lets another one join the same saved spots, ratings, notes and flight log.'));
     const out = el('div', { class: 'srv-link' });
     const make = el('button', { class: 'btn' }, 'Show a code for another device');
     make.onclick = async () => {
@@ -493,18 +789,10 @@ class Server {
     };
     const input = el('input', { class: 'srv-input', placeholder: 'ABCD-EFGH', autocomplete: 'off', autocapitalize: 'characters', 'aria-label': 'Code from your other device' });
     const join = el('button', { class: 'btn', onclick: () => this.claim(input.value, join) }, 'Join');
-    body.push(el('div', { class: 'box' }, el('h4', {}, 'Add another device'), make, out));
-    body.push(el('div', { class: 'box' }, el('h4', {}, 'Have a code from your other device?'), el('div', { class: 'srv-join' }, input, join),
-      el('p', { class: 'muted small' }, 'What’s on this device is kept and merged in.')));
-    body.push(el('p', { class: 'muted small', id: 'srv-devices' }));
-    this.showDialog('devices', body);
-    if (store(KEY, null)) {
-      call('me').then((m) => {
-        const c = m.counts[this.region] || {};
-        const n = (x, w) => `${x || 0} ${w}${x === 1 ? '' : 's'}`;
-        $('#srv-devices').textContent = `${n(m.devices, 'device')} linked · here: ${n(c.rating, 'rating')}, ${n(c.note, 'note')}, ${n(c.flight, 'flight')}.`;
-      }).catch(() => {});
-    }
+    body.push(el('h4', {}, 'Add another device'), make, out);
+    body.push(el('h4', {}, 'Have a code from your other device?'), el('div', { class: 'srv-join' }, input, join),
+      el('p', { class: 'muted small' }, 'What’s on this device is kept and merged in.'));
+    return body;
   }
 
   async claim(code, btn) {
@@ -519,7 +807,10 @@ class Server {
       await this.sync();
       this.dialog?.close();
       this.loadForecast();
-      this.toast('Linked: this device now syncs with your others.');
+      const m = await call('me').catch(() => ({}));
+      if (m.username) save(USER, m.username);
+      this.renderAccountBtn();
+      this.toast(m.username ? `Linked: signed in as ${m.username}.` : 'Linked: this device now syncs with your others.');
     } catch (e) {
       alert(e.message);
     }
@@ -574,6 +865,19 @@ class Server {
     document.body.append(t);
     setTimeout(() => t.remove(), 4000);
   }
+}
+
+let tsLoad = null;
+function loadTurnstile() {
+  tsLoad ||= new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    sc.async = true;
+    sc.onload = () => (window.turnstile ? resolve(window.turnstile) : reject(new Error('no turnstile')));
+    sc.onerror = () => { tsLoad = null; reject(new Error('turnstile blocked')); };
+    document.head.append(sc);
+  });
+  return tsLoad;
 }
 
 function forgetRevs() {
@@ -646,6 +950,34 @@ export function flightBox(spot, profile, rerender) {
   return box;
 }
 
+// What other pilots with accounts think of a spot: {avg, n, reviews: [{user, stars, text, t}]}.
+// null without a server.
+export async function spotReviews(profile, id) {
+  if (!S) return null;
+  const k = `${profile}/${id}`;
+  if (!S.reviewCache.has(k)) {
+    S.reviewCache.set(k, call(`reviews?region=${encodeURIComponent(S.region)}&drone=${profile}&spot=${encodeURIComponent(id)}`, { auth: false })
+      .catch((e) => { S.reviewCache.delete(k); throw e; }));
+  }
+  return S.reviewCache.get(k);
+}
+
+// {spot id: [average stars, count]} for the list, once it's loaded (it redraws the list when it is).
+export function reviewSummary(profile) {
+  if (!S) return null;
+  if (!(profile in S.summary)) {
+    S.summary[profile] = null;
+    call(`reviews/summary?region=${encodeURIComponent(S.region)}&drone=${profile}`, { auth: false })
+      .then((m) => { S.summary[profile] = m; S.onChange?.(); })
+      .catch(() => { delete S.summary[profile]; });
+  }
+  return S.summary[profile];
+}
+
+export const signedInAs = () => (S ? store(USER, null) : null);
+export const openAccount = () => S?.openAccount();
+export const canAccount = () => !!S?.health?.features?.includes('accounts');
+
 // A spot's 3D model and line, built by the server the first time anyone opens it. null without a server.
 export async function fetchModel(region, profile, id) {
   if (!S || !region || !/^\d+-\d+$/.test(id || '')) return null;
@@ -656,23 +988,38 @@ export async function fetchModel(region, profile, id) {
 // Called once the spots are loaded. Does nothing if there's no server behind the app.
 export async function attachServer(opts) {
   if (SANDBOXED) return null;
-  let up = false;
+  let up = false, health = null;
   try {
-    up = !!(await call('health', { auth: false, timeout: 4000 })).ok;
+    health = await call('health', { auth: false, timeout: 4000 });
+    up = !!health.ok;
     save(SEEN, true);
   } catch {
     up = store(SEEN, false);  // offline in the field, but this app has a server: queue things for later
   }
   if (!up) return null;
   S = new Server(opts);
+  S.health = health;
   await S.loadPending();
   S.mountBar();
+  S.renderAccountBtn();
+  $('#btn-account')?.addEventListener('click', () => S.openAccount());
   S.loadForecast();
-  const m = location.hash.match(/^#link=([A-Z0-9-]+)$/i);
+  const m = location.hash.match(/^#(link|verify|reset)=([\w-]+)$/i);
   if (m) {
-    history.replaceState(null, '', location.pathname + location.search);
-    S.claim(m[1]);
+    history.replaceState(null, '', location.pathname + location.search);  // so the token isn't left in the history
+    if (m[1] === 'link') S.claim(m[2]);
+    else if (m[1] === 'verify') S.verifyLink(m[2]);
+    else S.resetLink(m[2]);
+    if (m[1] === 'reset') S.sync();
   } else S.sync();
+  // an email link opened while the app's already open in this tab
+  window.addEventListener('hashchange', () => {
+    const h = location.hash.match(/^#(verify|reset)=([\w-]+)$/);
+    if (!h) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    if (h[1] === 'verify') S.verifyLink(h[2]);
+    else S.resetLink(h[2]);
+  });
   const kick = () => document.visibilityState === 'visible' && S.sync();
   document.addEventListener('visibilitychange', kick);
   window.addEventListener('online', kick);

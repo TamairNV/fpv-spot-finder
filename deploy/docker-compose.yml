@@ -18,6 +18,10 @@ services:
       context: ..
       dockerfile: server/Dockerfile
     restart: unless-stopped
+    # email, the are-you-human check and who sees the stats page: deploy/.env (not in git), see deploy/env.example
+    env_file:
+      - path: .env
+        required: false
     user: "${SPOTTER_UID:-1000}:${SPOTTER_GID:-1000}"  # files in the data folder belong to tnv, not root
     volumes:
       - ${SPOTTER_DATA_DIR:-../../fpv-spot-finder-data}:/data

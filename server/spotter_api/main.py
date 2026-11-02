@@ -2,12 +2,14 @@
 forecast and evening notifications. The app works without it (GitHub Pages); it switches these
 on when /api/health answers.
 
-No accounts: a device gets a random key the first time it has something to save, and another
-device joins the same profile with a short code from the first one.
+A device gets a random key the first time it has something to save, and another device joins the
+same profile with a short code from the first one. An account (username + password) is optional on
+top: it lets you sign in on any device, and your star reviews show to others under your username.
 """
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from collections import defaultdict
@@ -19,7 +21,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import forecast, photos
-from .db import DATA_DIR, DB
+from sitestats import Stats
+
+from . import mail, turnstile
+from .db import DATA_DIR, DB, NotVerified, Taken, check_pw
 from .models import Models, NotHere
 from .rerank import Busy, Reranker
 
@@ -31,7 +36,9 @@ reranker = Reranker(db, DATA_DIR)
 models = Models(DATA_DIR)
 PHOTO_DIR = DATA_DIR / "photos"
 REGION_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
-KINDS = {"rating", "note", "flight"}
+KINDS = {"rating", "note", "flight", "saved", "place", "review"}
+USER_RE = re.compile(r"^[A-Za-z0-9_.-]{3,24}$")
+DRONE_RE = re.compile(r"^[a-z0-9]{1,40}$")
 MAX_PHOTOS = 3000
 MAX_UPLOAD = 30 * 1024 * 1024
 NOTIFY_AT = (18, 30)  # local time the evening-before check runs
@@ -53,6 +60,39 @@ async def lifespan(app):
 
 
 app = FastAPI(title="FPV Spot Finder API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+# The admin stats page (site-stats): only for verified accounts whose email is in SPOTTER_ADMIN_EMAILS.
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("SPOTTER_ADMIN_EMAILS", "").split(",") if e.strip()}
+stats = Stats(DATA_DIR / "stats.db")
+
+
+def is_admin_pid(pid: int | None) -> bool:
+    acct = db.account(pid) if pid else None
+    return bool(acct and acct["verified"] and acct["email"].lower() in ADMIN_EMAILS)
+
+
+def is_admin(request: Request) -> bool:
+    key = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    return is_admin_pid(db.profile_for(key) if key else None)
+
+
+stats.install(app, is_admin)
+for kind, text in {"signup": "Account made (unconfirmed)", "verified": "Email confirmed", "login": "Signed in",
+                   "login_fail": "Wrong password", "unverified_login": "Sign-in before confirming", "captcha_fail": "Failed are-you-human check",
+                   "rate_limited": "Rate limited (429)", "limit_hit": "Hit a sign-in/sign-up/email limit", "reset_request": "Password reset asked for", "reset_done": "Password reset",
+                   "signup_taken_email": "Sign-up with an email in use", "account_deleted": "Account deleted", "new_profile": "New device profile"}.items():
+    stats.label(kind, text)
+_one = lambda sql: (db.one(sql) or [0])[0]
+stats.gauge("Device profiles", lambda: _one("SELECT COUNT(*) FROM profiles"), "Users")
+stats.gauge("Accounts", lambda: _one("SELECT COUNT(*) FROM accounts WHERE verified = 1"), "Users")
+stats.gauge("Unconfirmed sign-ups", lambda: _one("SELECT COUNT(*) FROM accounts WHERE verified = 0"), "Users")
+stats.gauge("Devices seen, 7 days", lambda: db.one("SELECT COUNT(*) FROM keys WHERE seen > ?", time.time() - 7 * 86400)[0], "Users")
+stats.gauge("Star reviews", lambda: _one("SELECT COUNT(*) FROM items WHERE kind = 'review' AND value != 'null'"), "Content")
+stats.gauge("Saved spots", lambda: _one("SELECT COUNT(*) FROM items WHERE kind = 'saved' AND value != 'null'"), "Content")
+stats.gauge("Own places", lambda: _one("SELECT COUNT(*) FROM items WHERE kind = 'place' AND value != 'null'"), "Content")
+stats.gauge("Flights logged", lambda: _one("SELECT COUNT(*) FROM items WHERE kind = 'flight' AND value != 'null'"), "Content")
+stats.gauge("Photos", lambda: _one("SELECT COUNT(*) FROM photos"), "Content")
+stats.gauge("Push subscriptions", lambda: _one("SELECT COUNT(*) FROM push_subs"), "Content")
 
 
 # ---------------------------------------------------------------- auth
@@ -82,7 +122,9 @@ def client_ip(req: Request) -> str:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "features": ["sync", "flights", "photos", "forecast", "rerank"] + (["push"] if push else [])}
+    return {"ok": True, "features": ["sync", "flights", "photos", "forecast", "rerank", "reviews"]
+            + (["accounts"] if mail.configured() else []) + (["push"] if push else []),
+            "turnstile": turnstile.SITE_KEY or None}
 
 
 @app.post("/api/profile")
@@ -94,12 +136,258 @@ def new_profile(req: Request):
         raise HTTPException(429, "too many new profiles from here today")
     _made[ip].append(now)
     _, key = db.new_profile()
+    stats.event("new_profile", req)
     return {"key": key}
 
 
 @app.get("/api/me")
 def me(pid: int = Depends(profile)):
-    return {"devices": db.devices(pid), "counts": db.counts(pid)}
+    acct = db.account(pid)
+    return {"devices": db.devices(pid), "counts": db.counts(pid),
+            "username": acct["username"] if acct and acct["verified"] else None, "admin": is_admin_pid(pid)}
+
+
+# ---------------------------------------------------------------- accounts
+#
+# Made with a username, an email and a password; it can't sign in, and its reviews don't show, until
+# the email link is opened. Bots are kept out by Cloudflare Turnstile and per-address limits; nothing
+# says whether an email has an account (sign-up and "forgot password" answer the same either way).
+
+EMAIL_RE = re.compile(r"^[^@\s<>,;\"']{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
+
+
+class Signup(BaseModel):
+    username: str = Field(max_length=40)
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=200)
+    captcha: str | None = Field(default=None, max_length=2048)
+
+
+class Login(BaseModel):
+    username: str = Field(max_length=254)  # or the email
+    password: str = Field(max_length=200)
+
+
+def tries(bucket: dict, who: str, limit: int, window: float = 600) -> None:
+    now = time.time()
+    bucket[who] = [t for t in bucket[who] if now - t < window]
+    if len(bucket[who]) >= limit:
+        stats.event("limit_hit", ip=who if not who.startswith(("user:", "to:")) else "", detail=who.split(":")[0] if ":" in who else None)
+        raise HTTPException(429, "too many tries, wait a while and try again")
+    bucket[who].append(now)
+
+
+_logins: dict[str, list[float]] = defaultdict(list)
+_signups: dict[str, list[float]] = defaultdict(list)
+_mails: dict[str, list[float]] = defaultdict(list)
+
+
+def good_password(pw: str, username: str = "", email: str = "") -> None:
+    low = pw.lower()
+    if len(pw) < 10:
+        raise HTTPException(400, "pick a password of at least 10 characters")
+    if len(set(pw)) < 5 or (username and username.lower() in low) or (email and email.split("@")[0].lower() in low) \
+            or low in {"password123", "1234567890", "qwertyuiop", "password12", "letmein123", "iloveyou12"}:
+        raise HTTPException(400, "that password's too easy to guess")
+
+
+def captcha_ok(token: str | None, req: Request) -> None:
+    if not turnstile.check(token, client_ip(req)):
+        stats.event("captcha_fail", req)
+        raise HTTPException(403, "the are-you-human check didn't pass: try again")
+
+
+def accounts_on() -> None:
+    if not mail.configured():
+        raise HTTPException(503, "accounts aren't switched on here yet")
+
+
+@app.post("/api/account/signup")
+def signup(body: Signup, req: Request, authorization: str = Header(default="")):
+    accounts_on()
+    ip = client_ip(req)
+    tries(_signups, ip, 5, 86400)  # five accounts a day from one address is plenty for people
+    captcha_ok(body.captcha, req)
+    name, email = body.username.strip(), body.email.strip().lower()
+    if not USER_RE.match(name):
+        raise HTTPException(400, "usernames are 3 to 24 letters, numbers, dots, dashes or underscores")
+    if not EMAIL_RE.match(email):
+        raise HTTPException(400, "that email doesn't look right")
+    good_password(body.password, name, email)
+    key = authorization.removeprefix("Bearer ").strip()
+    pid = db.profile_for(key) if key else None
+    try:
+        new_pid, new_key = db.signup(pid, name, email, body.password)
+    except Taken as e:
+        if e.args[0] == "username":
+            raise HTTPException(409, "that username's taken")
+        # the email has an account: tell its owner, and answer as if it worked so this can't be used
+        # to find out who's signed up
+        acct = db.by_email(email)
+        stats.event("signup_taken_email", req)
+        tries(_mails, "to:" + email, 3, 3600)
+        mail.taken(email, acct["username"])
+        return {"key": key or None, "check_email": True}
+    stats.event("signup", req, name)
+    tries(_mails, "to:" + email, 3, 3600)
+    mail.verify(email, name, db.new_token(new_pid, "verify"))
+    # this device keeps its key (and everything on it); a device with none gets the new profile's
+    return {"key": new_key or key, "check_email": True}
+
+
+class Token(BaseModel):
+    token: str = Field(max_length=100)
+
+
+@app.post("/api/account/verify")
+def verify(body: Token, req: Request):
+    tries(_logins, client_ip(req), 20)
+    key = db.verify(body.token)
+    if not key:
+        raise HTTPException(404, "that link has expired or was already used: sign in, or sign up again")
+    name = db.account(db.profile_for(key))["username"]
+    stats.event("verified", req, name)
+    return {"key": key, "username": name}
+
+
+@app.post("/api/account/login")
+def login(body: Login, req: Request):
+    who = body.username.strip()
+    tries(_logins, client_ip(req), 20)
+    tries(_logins, "user:" + who.lower(), 10, 3600)  # slows guessing at one account from many addresses
+    try:
+        key = db.login(who, body.password)
+    except NotVerified:
+        acct = db.by_email(who.lower()) or db.one("SELECT profile_id, username, email FROM accounts WHERE username = ?", who)
+        if acct:
+            try:
+                tries(_mails, "to:" + acct["email"], 3, 3600)
+                mail.verify(acct["email"], acct["username"], db.new_token(acct["profile_id"], "verify"))
+            except HTTPException:
+                pass
+        stats.event("unverified_login", req)
+        raise HTTPException(403, "confirm your email first: we've sent the link again")
+    if not key:
+        stats.event("login_fail", req)
+        raise HTTPException(401, "wrong username or password")
+    name = db.account(db.profile_for(key))["username"]
+    stats.event("login", req, name)
+    return {"key": key, "username": name}
+
+
+class Forgot(BaseModel):
+    email: str = Field(max_length=254)
+    captcha: str | None = Field(default=None, max_length=2048)
+
+
+@app.post("/api/account/forgot")
+def forgot(body: Forgot, req: Request):
+    accounts_on()
+    tries(_mails, client_ip(req), 5, 3600)
+    captcha_ok(body.captcha, req)
+    email = body.email.strip().lower()
+    acct = db.by_email(email) if EMAIL_RE.match(email) else None
+    stats.event("reset_request", req)
+    if acct:
+        try:
+            tries(_mails, "to:" + email, 3, 3600)
+            mail.reset(email, acct["username"], db.new_token(acct["profile_id"], "reset"))
+        except HTTPException:
+            pass  # quietly: the answer mustn't differ
+    return {"ok": True}  # the same whether or not there's an account
+
+
+class Reset(BaseModel):
+    token: str = Field(max_length=100)
+    password: str = Field(max_length=200)
+
+
+@app.post("/api/account/reset")
+def reset(body: Reset, req: Request):
+    tries(_logins, client_ip(req), 20)
+    good_password(body.password)
+    key = db.reset_password(body.token, body.password)
+    if not key:
+        raise HTTPException(404, "that link has expired or was already used: ask for a new one")
+    name = db.account(db.profile_for(key))["username"]
+    stats.event("reset_done", req, name)
+    return {"key": key, "username": name}
+
+
+@app.post("/api/account/logout")
+def logout(authorization: str = Header(default=""), pid: int = Depends(profile)):
+    db.drop_key(authorization.removeprefix("Bearer ").strip())
+    return {"ok": True}
+
+
+class NewPassword(BaseModel):
+    old: str = Field(max_length=200)
+    new: str = Field(max_length=200)
+
+
+@app.post("/api/account/password")
+def password(body: NewPassword, req: Request, authorization: str = Header(default=""), pid: int = Depends(profile)):
+    tries(_logins, client_ip(req), 20)
+    acct = db.account(pid) or {}
+    good_password(body.new, acct.get("username", ""), acct.get("email", ""))
+    if not db.set_password(pid, body.old, body.new, authorization.removeprefix("Bearer ").strip()):
+        raise HTTPException(403, "that's not your current password")
+    return {"ok": True}
+
+
+class Delete(BaseModel):
+    password: str = Field(max_length=200)
+
+
+@app.post("/api/account/delete")
+def delete_account(body: Delete, req: Request, pid: int = Depends(profile)):
+    tries(_logins, client_ip(req), 20)
+    row = db.one("SELECT pw FROM accounts WHERE profile_id = ?", pid)
+    if not row or not check_pw(body.password, row["pw"]):
+        raise HTTPException(403, "that's not your password")
+    ids = [r["id"] for r in db.q("SELECT id FROM photos WHERE profile_id = ?", pid)]
+    db.delete_account(pid)
+    stats.event("account_deleted", req)
+    for i in ids:
+        photos.delete(i, PHOTO_DIR)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- reviews (public: stars and words from accounts)
+
+@app.get("/api/reviews")
+def reviews(region: str, drone: str, spot: str):
+    region_ok(region)
+    if not DRONE_RE.match(drone) or len(spot) > 100:
+        raise HTTPException(400, "bad spot")
+    out = db.reviews(region, f"{drone}/{spot}")
+    n = len(out)
+    return {"avg": round(sum(r["stars"] for r in out) / n, 1) if n else None, "n": n, "reviews": out[:50]}
+
+
+class Hide(BaseModel):
+    region: str
+    drone: str
+    spot: str = Field(max_length=100)
+    user: str = Field(max_length=40)
+
+
+@app.post("/api/reviews/hide")
+def hide_review(body: Hide, pid: int = Depends(profile)):
+    if not is_admin_pid(pid):
+        raise HTTPException(403, "not allowed")
+    region_ok(body.region)
+    if not DRONE_RE.match(body.drone) or not db.hide_review(body.region, f"{body.drone}/{body.spot}", body.user):
+        raise HTTPException(404, "no such review")
+    return {"ok": True}
+
+
+@app.get("/api/reviews/summary")
+def review_summary(region: str, drone: str):
+    region_ok(region)
+    if not DRONE_RE.match(drone):
+        raise HTTPException(400, "bad drone")
+    return db.review_summary(region, drone)
 
 
 @app.post("/api/link")
@@ -211,12 +499,17 @@ def get_photo(name: str):
 # ---------------------------------------------------------------- forecast
 
 def watched_spots(pid: int, region: str, drone: str) -> list[dict]:
-    """Spots worth a forecast: the ones you 👍 for this drone, then the ones you've flown."""
+    """Spots worth a forecast: the ones you 👍 or saved for this drone, then the ones you've flown."""
     out: dict[str, dict] = {}
     for r in db.items(pid, region, "rating"):
         d, _, sid = r["k"].partition("/")
         ll = r.get("ll")
         if r.get("v", 0) > 0 and d == drone and ll:
+            out.setdefault(sid, {"id": sid, "title": r.get("title") or sid, "lon": ll[0], "lat": ll[1], "drone": d})
+    for r in db.items(pid, region, "saved"):
+        d, _, sid = r["k"].partition("/")
+        ll = r.get("ll")
+        if d == drone and ll:
             out.setdefault(sid, {"id": sid, "title": r.get("title") or sid, "lon": ll[0], "lat": ll[1], "drone": d})
     for f in db.items(pid, region, "flight"):
         ll = f.get("ll")

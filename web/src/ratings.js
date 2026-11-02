@@ -8,6 +8,60 @@ export class Ratings {
     // your own notes on a place ("security at weekends", "best gaps at the north end"), by spot id
     this.notesKey = `fpvspots:${regionKey}:notes`;
     this.notes = store(this.notesKey, {});
+    // spots you've saved (★), by "<drone>/<id>"; your own places off the list, by id; your star reviews
+    this.savedKey = `fpvspots:${regionKey}:saved`;
+    this.saved = store(this.savedKey, {});
+    this.placesKey = `fpvspots:${regionKey}:places`;
+    this.places = store(this.placesKey, {});
+    this.reviewsKey = `fpvspots:${regionKey}:reviews`;
+    this.reviews = store(this.reviewsKey, {});
+  }
+
+  isSaved(profile, id) {
+    return !!this.saved[`${profile}/${id}`];
+  }
+
+  setSaved(profile, id, on, extra = {}) {
+    const k = `${profile}/${id}`;
+    if (!on) delete this.saved[k];
+    else this.saved[k] = { t: Date.now(), ...extra };
+    save(this.savedKey, this.saved);
+  }
+
+  savedFor(profile) {
+    return Object.entries(this.saved).filter(([k]) => k.startsWith(`${profile}/`))
+      .map(([k, r]) => ({ id: k.slice(profile.length + 1), ...r }));
+  }
+
+  review(profile, id) {
+    return this.reviews[`${profile}/${id}`] || null;
+  }
+
+  setReview(profile, id, value, extra = {}) {
+    const k = `${profile}/${id}`;
+    if (!value?.stars) delete this.reviews[k];
+    else this.reviews[k] = { stars: value.stars, text: value.text || '', t: Date.now(), ...extra };
+    save(this.reviewsKey, this.reviews);
+  }
+
+  // places of your own: { name, ll: [lon, lat], note, drone }
+  setPlace(id, value) {
+    if (!value) delete this.places[id];
+    else this.places[id] = { ...value, t: Date.now() };
+    save(this.placesKey, this.places);
+  }
+
+  placeList() {
+    return Object.entries(this.places).map(([id, p]) => ({ id, ...p })).sort((a, b) => b.t - a.t);
+  }
+
+  // what an account sync keeps: everything, so signing out can wipe it off a shared device
+  clearAll() {
+    for (const [obj, key] of [[this.data, this.key], [this.notes, this.notesKey], [this.saved, this.savedKey],
+      [this.places, this.placesKey], [this.reviews, this.reviewsKey]]) {
+      for (const k of Object.keys(obj)) delete obj[k];
+      save(key, obj);
+    }
   }
 
   note(id) {
@@ -38,7 +92,8 @@ export class Ratings {
   }
 
   export() {
-    return JSON.stringify({ kind: 'fpv-spot-finder-ratings', version: 1, ratings: this.data, notes: this.notes }, null, 2);
+    return JSON.stringify({ kind: 'fpv-spot-finder-ratings', version: 1, ratings: this.data, notes: this.notes,
+      saved: this.saved, places: this.places, reviews: this.reviews }, null, 2);
   }
 
   import(text) {
@@ -47,6 +102,10 @@ export class Ratings {
     save(this.key, this.data);
     Object.assign(this.notes, j.notes || {});
     save(this.notesKey, this.notes);
+    for (const [name, key] of [['saved', this.savedKey], ['places', this.placesKey], ['reviews', this.reviewsKey]]) {
+      Object.assign(this[name], j[name] || {});
+      save(key, this[name]);
+    }
   }
 }
 

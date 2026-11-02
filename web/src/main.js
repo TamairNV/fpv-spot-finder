@@ -4,10 +4,10 @@ import './style.css';
 import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save, SANDBOXED } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
-import { renderSpot, legalBadge, nice, BANDO_STATE } from './detail.js';
+import { renderSpot, legalBadge, nice, BANDO_STATE, starsText } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
-import { attachServer } from './server.js';
+import { attachServer, reviewSummary } from './server.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -87,6 +87,7 @@ const state = {
   kind: null,
   bandoList: false, // the list shows bandos instead of spots
   saved: false,
+  starred: false, // only the spots you've saved (★)
   more: {},
   moreOpen: false,
   bandos: false,
@@ -94,6 +95,7 @@ const state = {
   detail: null,
   pins: [],
   seedMarkers: [],
+  placeMarkers: [],
   me: null,
   base: 'map',
   sheet: 'half',
@@ -136,6 +138,7 @@ function kindsFor(profile) {
   return kindCache[profile];
 }
 const liked = (f) => ratings.get(state.profile, f.properties.id) > 0;
+const starred = (f) => ratings.isSaved(state.profile, f.properties.id);
 
 // Filters on the numbers behind each spot. Distances are fixed steps; counts follow the drone's own
 // spread (25 gaps is a lot for a whoop spot and few for a 5" one), from the middle up to the top quarter.
@@ -206,7 +209,7 @@ async function boot() {
     ratings, region: REGION, meta: state.meta,
     coords: (profile, id) => state.spots[profile]?.features.find((f) => f.properties.id === id)?.geometry.coordinates || null,
     getProfile: () => state.profile,
-    onChange: () => renderList(),
+    onChange: () => { renderList(); drawPlaces(); },
     openSpot: (profile, id) => {
       if (profile && profile !== state.profile) setProfile(profile);
       select(id, true);
@@ -568,6 +571,7 @@ function addOverlays() {
   applyLayerToggles();
   drawPins();
   drawSeeds();
+  drawPlaces();
   if (state.selected) {
     const f = feature(state.selected);
     if (f) showSelection(f);
@@ -688,13 +692,15 @@ function orderedSpots() {
     }
   }
   const q = state.query.trim().toLowerCase();
-  const hay = (p) => `${p.title} ${p.locality} ${p.gridref} ${p.park || ''} ${ratings.note(p.id)}`.toLowerCase();
+  const hay = (p) => `${p.title} ${p.locality} ${p.gridref} ${p.park || ''} ${ratings.note(p.id)} ${ratings.review(state.profile, p.id)?.text || ''}`.toLowerCase();
   let list = feats.filter((f) => !q || hay(f.properties).includes(q));
   if (state.a3only && isA3()) list = list.filter((f) => f.properties.a3 >= 50);
   if (state.kind && !kindsFor(state.profile).some(([k]) => k === state.kind)) state.kind = null;
   if (state.kind) list = list.filter((f) => hasKind(f, state.kind));
   if (state.saved && !feats.some(liked)) state.saved = false;
   if (state.saved) list = list.filter(liked);
+  if (state.starred && !feats.some(starred) && !ratings.placeList().length) state.starred = false;
+  if (state.starred) list = list.filter(starred);
   for (const m of MORE) {
     const v = state.more[m.key];
     if (v != null) list = list.filter((f) => f.properties.stats && m.test(f.properties.stats, v, f.properties));
@@ -717,12 +723,19 @@ function spotRow(f, i) {
   const r = ratings.get(state.profile, p.id);
   const place = p.park && !p.title.includes(p.park) ? `in ${p.park}` : p.locality;
   const sub = [place, state.me ? metres(haversine(state.me, f.geometry.coordinates)) : null, subline(p)].filter(Boolean).join(' · ');
+  const mine = ratings.review(state.profile, p.id);
+  const crowd = reviewSummary(state.profile)?.[p.id];
   return el('li', { class: `row-item${state.selected === p.id ? ' on' : ''}${r < 0 ? ' rated-down' : ''}`, 'data-id': p.id },
     thumbBox(p.preview, el('i', {}, i + 1)),
     el('div', {},
-      el('div', { class: 'spot-name' }, p.title, r > 0 ? el('span', { class: 'rated-up', title: 'You rated it good' }, '▲') : null,
+      el('div', { class: 'spot-name' }, p.title,
+        ratings.isSaved(state.profile, p.id) ? el('span', { class: 'is-saved', title: 'Saved' }, '★') : null,
+        r > 0 ? el('span', { class: 'rated-up', title: 'You rated it good' }, '▲') : null,
         ratings.note(p.id) ? el('span', { class: 'has-note', title: ratings.note(p.id) }, '📝') : null),
-      el('div', { class: 'spot-sub' }, sub)),
+      el('div', { class: 'spot-sub' }, sub),
+      mine || crowd ? el('div', { class: 'spot-stars' },
+        mine ? el('span', { title: 'Your rating' }, el('span', { class: 'stars' }, starsText(mine.stars)), ' you') : null,
+        crowd ? el('span', { title: `${crowd[1]} pilot${crowd[1] > 1 ? 's' : ''} rated it` }, el('span', { class: 'stars crowd' }, '★'), ` ${crowd[0]} (${crowd[1]})`) : null) : null),
     el('div', { class: 'row-side' },
       el('span', { class: 'score', style: `--c:${scoreColour(p.score)}` }, p.score),
       isA3() ? legalBadge(p, true) : null));
@@ -740,6 +753,7 @@ function renderFilters() {
   const chip = (key, on, title, label, n) => el('button', { class: 'fchip', 'data-filter': key, 'aria-pressed': String(on), title },
     label, n != null ? el('span', { class: 'n' }, n) : null);
   const saved = state.spots[state.profile].features.filter(liked).length;
+  const nStarred = state.spots[state.profile].features.filter(starred).length + ratings.placeList().length;
   // shut, the chip says which filters are on; open, the panel does
   const on = moreOn();
   const more = chip('more', on.length > 0, 'Filter by bandos nearby, gaps, lone trees, height, water, parking, people about',
@@ -751,6 +765,7 @@ function renderFilters() {
   box.replaceChildren(...[
     more,
     isA3() ? chip('a3', state.a3only, 'Only spots that are mostly 150 m clear of houses and parks', 'A3-clear only') : null,
+    nStarred ? chip('starred', state.starred, 'Spots you saved, and your own places', '★ Saved', nStarred) : null,
     saved ? chip('saved', state.saved, 'Spots you rated 👍', 'Your 👍', saved) : null,
     hasBandos() ? chip('bandos', state.bandoList, 'List the derelict buildings themselves', 'Bandos', bandoCount()) : null,
     ...kindsFor(state.profile).map(([k, n]) => chip(`kind:${k}`, state.kind === k, `Spots with ${KINDS[k].toLowerCase()}`, KINDS[k], n)),
@@ -811,7 +826,8 @@ function renderList() {
   const empty = $('#list-empty');
   empty.hidden = list.length > 0;
   if (!list.length) {
-    empty.replaceChildren(state.query ? `No spots match “${state.query}”.` : 'No spots with these filters.',
+    empty.replaceChildren(state.query ? `No spots match “${state.query}”.`
+      : state.starred && !moreActive() && !state.kind ? 'No saved spots for this drone yet: open one and press ☆ Save.' : 'No spots with these filters.',
       el('br'), el('button', { class: 'linklike', onclick: clearFilters }, 'Clear filters'));
   }
   const total = state.spots[state.profile].features.length;
@@ -831,6 +847,7 @@ function clearFilters() {
   state.kind = null;
   state.bandoList = false;
   state.saved = false;
+  state.starred = false;
   state.more = {};
   $('#search').value = '';
   $('#search-clear').hidden = true;
@@ -899,7 +916,19 @@ function renderSeeds(label) {
   box.hidden = false;
   const seeds = seedsFor(state.profile);
   const showSeeds = seeds.length && !state.query && !state.like;
+  // your own places sit at the top of the Saved view
+  const places = state.starred && !state.query && !state.like ? ratings.placeList() : [];
   box.replaceChildren(...[
+    places.length ? el('div', { class: 'section-label' }, 'Your places') : null,
+    places.length ? el('ol', { class: 'seed-list' }, places.map((p) => {
+      const li = el('li', { class: 'row-item', title: 'A place you saved off the map' },
+        el('span', { class: 'thumb none' }, el('i', { class: 'star' }, '📍')),
+        el('div', {}, el('div', { class: 'spot-name' }, p.name),
+          el('div', { class: 'spot-sub' }, [p.note, state.me && p.ll ? metres(haversine(state.me, p.ll)) : null].filter(Boolean).join(' · ') || 'Your place')),
+        el('div', { class: 'row-side' }));
+      li.addEventListener('click', () => openPlace(p));
+      return li;
+    })) : null,
     showSeeds ? el('div', { class: 'section-label' }, 'Your spots') : null,
     showSeeds ? el('ol', { class: 'seed-list' }, seeds.map((s) => {
       const f = seedSpot(s);
@@ -1050,6 +1079,7 @@ function showSpot(f, isSeed) {
     },
     onBack: () => goBack(),
     onNote: () => renderList(),
+    onSave: () => renderList(),
     nearBandos: hasBandos() ? () => loadBandos().then(() => bandosNear(f.geometry.coordinates, 1000, 4)) : null,
     onBando: showBandoOnMap,
   });
@@ -1139,14 +1169,15 @@ function onMapClick(e) {
 
 // The answer goes in a card under the button (a popup on the map gets cut off on phones),
 // with a dot where you checked.
-function showCheck(lngLat, point) {
+function showCheck(lngLat, point, place = null) {
   const { lng, lat } = lngLat;
   const zones = map.getLayer('zones-fill') ? map.queryRenderedFeatures(point, { layers: ['zones-fill'] }).map((z) => z.properties.name) : [];
   const v = verdicts(state.meta, lookup?.at(lng, lat), [...new Set(zones)]);
   const card = $('#check-card');
   card.replaceChildren(...[
     el('button', { class: 'x', 'aria-label': 'Close', onclick: () => (state.checking ? closeCheck() : setChecking(false)) }, '×'),
-    el('h4', {}, 'Can I fly here?'),
+    place ? el('h4', { class: 'place-name' }, '📍 ', place.name) : el('h4', {}, 'Can I fly here?'),
+    placeBits(lngLat, place),
     ...(v
       ? [...v.verdicts.map((x) => el('div', { class: 'check-row' },
         el('span', { class: `ico ${x.ok ? 'ok' : 'bad'}` }, x.ok ? '✓' : '✕'),
@@ -1159,6 +1190,78 @@ function showCheck(lngLat, point) {
   bandoOpen = false;
   if (!checkPopup) checkPopup = new maplibregl.Marker({ element: el('div', { class: 'check-dot' }) });
   checkPopup.setLngLat(lngLat).addTo(map);
+}
+
+// ---------------------------------------------------------------- your own places
+
+// Under "Can I fly here?": save the point as a place of your own, or, for one you've saved, its note,
+// directions and delete.
+function placeBits({ lng, lat }, place) {
+  const ll = [+lng.toFixed(6), +lat.toFixed(6)];
+  if (!place) {
+    const name = el('input', { class: 'place-input', placeholder: 'Name it, e.g. “Quarry by the farm”', maxlength: 80, 'aria-label': 'Place name' });
+    const form = el('form', { class: 'place-form', hidden: true }, name, el('button', { class: 'btn small', type: 'submit' }, 'Save'));
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const value = { name: name.value.trim() || `Place at ${ll[1].toFixed(4)}, ${ll[0].toFixed(4)}`, ll, note: '' };
+      ratings.setPlace(id, value);
+      drawPlaces();
+      renderList();
+      showCheck({ lng, lat }, map.project(ll), { id, ...value });
+    });
+    const open = el('button', { class: 'linklike', onclick: () => { form.hidden = false; open.hidden = true; name.focus(); } }, '☆ Save this place');
+    return el('div', { class: 'place-bits' }, open, form);
+  }
+  const note = el('textarea', { class: 'place-note', rows: 2, maxlength: 2000, placeholder: 'Your notes: access, parking, what to fly…', 'aria-label': 'Notes on this place' }, place.note || '');
+  note.addEventListener('change', () => {
+    const cur = ratings.places[place.id];
+    if (cur) ratings.setPlace(place.id, { ...cur, note: note.value.trim() });
+  });
+  return el('div', { class: 'place-bits' }, note,
+    el('div', { class: 'row' },
+      SANDBOXED ? null : el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${ll[1]},${ll[0]}`, target: '_blank', rel: 'noopener' }, 'Directions'),
+      el('button', { class: 'linklike', onclick: () => {
+        const n = prompt('Rename this place', place.name);
+        const cur = ratings.places[place.id];
+        if (n?.trim() && cur) {
+          ratings.setPlace(place.id, { ...cur, name: n.trim() });
+          drawPlaces();
+          renderList();
+          showCheck({ lng, lat }, map.project(ll), { ...cur, id: place.id, name: n.trim() });
+        }
+      } }, 'Rename'),
+      el('button', { class: 'linklike del', onclick: () => {
+        if (!confirm(`Delete “${place.name}” from your places?`)) return;
+        ratings.setPlace(place.id, null);
+        drawPlaces();
+        renderList();
+        closeCheck();
+      } }, 'Delete')));
+}
+
+function drawPlaces() {
+  if (!map) return;
+  state.placeMarkers.forEach((m) => m.remove());
+  state.placeMarkers = ratings.placeList().filter((p) => Array.isArray(p.ll)).map((p) => {
+    const node = el('div', { class: 'mk', title: p.name }, el('div', { class: 'place-pin' }, '📍'));
+    node.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!state.checking) openPlace(p);
+    });
+    return new maplibregl.Marker({ element: node, anchor: 'bottom' }).setLngLat(p.ll).addTo(map);
+  });
+}
+
+function openPlace(p) {
+  const cur = { id: p.id, ...ratings.places[p.id] };
+  if (!cur.ll) return;
+  if (PHONE.matches && state.sheet !== 'peek') setSheet('peek');
+  map.flyTo({ center: cur.ll, zoom: Math.max(map.getZoom(), 15), essential: true, duration: 900, padding: { top: 0, bottom: 0, left: 0, right: 0 } });
+  map.once('moveend', () => {
+    const [lng, lat] = cur.ll;
+    showCheck({ lng, lat }, map.project(cur.ll), cur);
+  });
 }
 
 function closeCheck() {
@@ -1429,6 +1532,7 @@ function wireUI() {
       state.a3only = !state.a3only;
       savePrefs();
     } else if (f === 'saved') state.saved = !state.saved;
+    else if (f === 'starred') state.starred = !state.starred;
     else if (f === 'bandos') state.bandoList = !state.bandoList;
     else if (f.startsWith('kind:')) state.kind = state.kind === f.slice(5) ? null : f.slice(5);
     renderList();
