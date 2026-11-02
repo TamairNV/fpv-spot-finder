@@ -2,7 +2,7 @@
 // the wind and the light, and the score breakdown.
 import { el, metres, compass, scoreColour, SANDBOXED } from './util.js';
 import { goldenSun, sunBox, weatherBox } from './conditions.js';
-import { flightBox, fetchModel } from './server.js';
+import { flightBox, fetchModel, spotReviews, signedInAs, openAccount, canAccount } from './server.js';
 
 const NICE = {
   gaps: 'Gaps', lone: 'Lone trees', edges: 'Tree lines / edges', space: 'Open space', mix: 'Obstacle mix',
@@ -134,7 +134,7 @@ function takeoffBox(p) {
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
 }
 
-export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, nearBandos, onRate, onLike, onBack, onNote, onBando }) {
+export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, nearBandos, onRate, onLike, onBack, onNote, onBando, onSave }) {
   const p = spot.properties;
   const [lon, lat] = spot.geometry.coordinates;
   let rating = ratings.get(profile, p.id);
@@ -196,13 +196,25 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       el('span', { class: 'ico' }, '👍'), el('span', {}, 'Good'));
     const down = el('button', { class: `act down${rating < 0 ? ' on' : ''}`, 'aria-pressed': String(rating < 0), onclick: () => rate(-1) },
       el('span', { class: 'ico' }, '👎'), el('span', {}, 'Not for me'));
-    kids.push(el('div', { class: 'actions' }, up, down,
+    let saved = ratings.isSaved(profile, p.id);
+    const star = el('button', { class: `act save${saved ? ' on' : ''}`, 'aria-pressed': String(saved), title: 'Keep it in your saved spots',
+      onclick: () => {
+        saved = !saved;
+        ratings.setSaved(profile, p.id, saved, { title: p.title, ll: [lon, lat] });
+        star.classList.toggle('on', saved);
+        star.setAttribute('aria-pressed', String(saved));
+        star.firstChild.textContent = saved ? '★' : '☆';
+        star.lastChild.textContent = saved ? 'Saved' : 'Save';
+        onSave?.(saved);
+      } },
+    el('span', { class: 'ico' }, saved ? '★' : '☆'), el('span', {}, saved ? 'Saved' : 'Save'));
+    kids.push(el('div', { class: 'actions' }, star, up, down,
       el('button', { class: 'act', onclick: onLike, title: 'List the spots most like this one' },
         el('span', { class: 'ico' }, '≈'), el('span', {}, 'Similar')),
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
         el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
       SANDBOXED ? null : share));
-    kids.push(notesBox(p, ratings, onNote), flightBox(spot, profile, onNote));
+    kids.push(reviewBox(p, profile, ratings, [lon, lat], onNote), notesBox(p, ratings, onNote), flightBox(spot, profile, onNote));
   }
 
   const p3dHost = el('div');
@@ -272,6 +284,66 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
     if (!gone) note(`3D view unavailable (${e.message || e}).`);
   });
   return { dispose: () => { gone = true; preview?.dispose(); } };
+}
+
+// Stars out of 5 and a few words: yours (kept like your notes, and public under your username when
+// you're signed in), and what other pilots gave it.
+export function starsText(v) {
+  const n = Math.round(v);
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+function reviewBox(p, profile, ratings, ll, onChange) {
+  const box = el('div', { class: 'box review' });
+  const mine = () => ratings.review(profile, p.id);
+  let stars = mine()?.stars || 0;
+  const text = el('textarea', { class: 'review-text', rows: 2, maxlength: 2000, placeholder: 'What’s it like to fly? (optional)', 'aria-label': 'Your review' }, mine()?.text || '');
+  const keep = () => {
+    ratings.setReview(profile, p.id, stars ? { stars, text: text.value.trim() } : null, { title: p.title, ll });
+    onChange?.();
+  };
+  const picker = el('div', { class: 'stars-pick', role: 'radiogroup', 'aria-label': 'Your rating' });
+  const paint = (hover = 0) => [...picker.children].forEach((b, i) => {
+    b.classList.toggle('on', i < (hover || stars));
+    b.setAttribute('aria-checked', String(i + 1 === stars));
+  });
+  for (let i = 1; i <= 5; i++) {
+    picker.append(el('button', {
+      type: 'button', role: 'radio', 'aria-label': `${i} star${i > 1 ? 's' : ''}`, title: ['Not worth it', 'Meh', 'OK', 'Good', 'Brilliant'][i - 1],
+      onclick: () => {
+        stars = stars === i ? 0 : i;  // tap your rating again to take it back
+        paint();
+        text.hidden = !stars;
+        keep();
+      },
+      onmouseenter: () => paint(i), onmouseleave: () => paint(),
+    }, '★'));
+  }
+  paint();
+  text.hidden = !stars;
+  let timer;
+  text.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(keep, 600); });
+  text.addEventListener('change', () => { clearTimeout(timer); keep(); });
+  const user = signedInAs();
+  const others = el('div', { class: 'reviews' });
+  box.append(
+    el('div', { class: 'review-head' }, el('h4', {}, 'Your rating'), picker),
+    text,
+    user ? el('p', { class: 'muted small' }, `Shows to other pilots as ${user}.`)
+      : canAccount() ? el('p', { class: 'muted small' }, el('button', { class: 'linklike', onclick: openAccount }, 'Sign in'),
+        ' to share your rating with other pilots. Until then it stays with you.') : null,
+    others);
+  spotReviews(profile, p.id)?.then((r) => {
+    if (!r?.n) return;
+    const list = r.reviews.filter((x) => x.user !== user);
+    others.replaceChildren(
+      el('div', { class: 'review-avg' }, el('span', { class: 'stars' }, starsText(r.avg)), ` ${r.avg} from ${r.n} pilot${r.n > 1 ? 's' : ''}`),
+      list.length ? el('ol', { class: 'review-list' }, list.slice(0, 20).map((x) => el('li', {},
+        el('div', {}, el('b', {}, x.user), ' ', el('span', { class: 'stars small' }, starsText(x.stars)),
+          el('span', { class: 'muted small' }, ` · ${new Date(x.t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`)),
+        x.text ? el('div', { class: 'small' }, x.text) : null))) : null);
+  }).catch(() => {});
+  return box;
 }
 
 // Your own notes on the place, kept on this device and in the ratings download.

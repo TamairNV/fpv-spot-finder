@@ -18,3 +18,6 @@ data/static/
 # so the app works straight after cloning.
 .DS_Store
 logs/
+
+# server secrets
+deploy/.env

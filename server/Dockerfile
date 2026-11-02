@@ -10,6 +10,7 @@ COPY spotfinder /app/repo/spotfinder
 RUN pip install --no-cache-dir -r server-requirements.txt -e /app/repo
 COPY config /app/repo/config
 COPY server/spotter_api ./spotter_api
+COPY server/sitestats ./sitestats
 # the pipeline's downloads, caches and per-region features live in the data volume
 ENV SPOTTER_DATA=/data SPOTFINDER_DATA=/data/pipeline TZ=Europe/London PYTHONUNBUFFERED=1
 VOLUME /data
