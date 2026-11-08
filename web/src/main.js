@@ -224,6 +224,7 @@ async function boot() {
     },
     pageHost,
   }).then((s) => {
+    $('#tab-account').hidden = !s;
     // a link straight to #/account or #/flights waits for the server
     if (s && /^#\/(account|flights)/.test(location.hash)) route();
     server = s;
@@ -306,7 +307,8 @@ async function loadRegions() {
 
 function sheetHeights() {
   const vh = window.innerHeight;
-  return { peek: Math.round(Math.min(170, vh * 0.3)), half: Math.round(vh * 0.5), full: vh - 58 };
+  const tab = PHONE.matches ? 56 : 0;  // the phone's tab bar sits under the sheet
+  return { peek: Math.round(Math.min(170, vh * 0.3)), half: Math.round(vh * 0.5) - tab, full: vh - 58 - tab };
 }
 
 function applySheet(px) {
@@ -1601,6 +1603,17 @@ function wireUI() {
   $('#btn-about').addEventListener('click', () => navigate('#/about'));
   $('#btn-saved').addEventListener('click', () => (location.hash === '#/saved' ? pageBack() : navigate('#/saved')));
   $('#btn-theme').addEventListener('click', toggleTheme);
+  $('#tabbar').addEventListener('click', (e) => {
+    const t = e.target.closest('button')?.dataset.tab;
+    if (!t) return;
+    if (t === 'map') {
+      if (!$('#page').hidden) {
+        closePage();
+        setHash('', false);
+      }
+    } else if (t === 'account') openAccount();
+    else if (location.hash !== '#/' + t) navigate('#/' + t);
+  });
   $('#btn-check').addEventListener('click', () => setChecking(!state.checking));
   $('#check-done').addEventListener('click', () => setChecking(false));
   window.addEventListener('keydown', (e) => {
@@ -1669,6 +1682,7 @@ function closePage() {
   $('#page').hidden = true;
   $('#page-body').classList.remove('prose');
   document.title = 'FPV Spot Finder';
+  setTab('map');
   map?.resize();
 }
 
@@ -1680,8 +1694,14 @@ function showPage() {
   $('#page-body').classList.remove('prose');
 }
 
+function setTab(t) {
+  $$('#tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+}
+
 function route() {
   const h = location.hash;
+  const top = h.startsWith('#/') ? h.slice(2).split('/')[0] : 'map';
+  setTab({ saved: 'saved', about: 'about', account: 'account', flights: 'account' }[top] || 'map');
   if (!h.startsWith('#/')) {
     closePage();
     if (h.length > 1) openFromHash();
@@ -1888,6 +1908,7 @@ function savedChanged() {
 function updateSavedCount() {
   const n = Object.keys(ratings.saved).length + ratings.placeList().length;
   $('#saved-count').textContent = n ? String(n) : '';
+  $('#tab-saved-count').textContent = n ? String(n) : '';
 }
 
 // Everything you've saved, across the drones: favourites first as big cards, then want to go, been here
@@ -1993,6 +2014,7 @@ const pageHost = {
       } catch { /* some embeds refuse history changes */ }
     }
     showPage();
+    setTab('account');
     const h2 = nodes[0]?.tagName === 'H2' ? nodes.shift() : null;
     const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the map', title: 'Back to the map', onclick: pageBack });
     back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';

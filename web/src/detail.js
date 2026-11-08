@@ -14,6 +14,22 @@ const NICE = {
   permission: 'Owner permission (minus)',
 };
 
+// action button icons (they take the button's colour, unlike emoji)
+const ACT_ICONS = {
+  share: '<path d="M14 4h6v6h-2V7.4l-7.3 7.3-1.4-1.4L16.6 6H14V4ZM5 6h6v2H6v10h10v-5h2v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/>',
+  up: '<path d="M2 21h4V9H2v12Zm20-11a2 2 0 0 0-2-2h-6.3l1-4.6v-.3c0-.4-.2-.8-.4-1.1L13.2 1 6.6 7.6c-.4.4-.6.9-.6 1.4v10a2 2 0 0 0 2 2h9c.8 0 1.5-.5 1.8-1.2l3-7.1c.1-.2.2-.5.2-.7v-2Z"/>',
+  down: '<path d="M22 3h-4v12h4V3ZM2 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3c0 .4.2.8.4 1.1l1.1 1 6.6-6.6c.4-.4.6-.9.6-1.4V5a2 2 0 0 0-2-2H7c-.8 0-1.5.5-1.8 1.2l-3 7.1c-.1.2-.2.5-.2.7v2Z"/>',
+  similar: '<path d="M7 4a5 5 0 1 0 0 10A5 5 0 0 0 7 4Zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm10 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z"/>',
+  go: '<path d="M21.7 11.3 12.7 2.3a1 1 0 0 0-1.4 0l-9 9a1 1 0 0 0 0 1.4l9 9a1 1 0 0 0 1.4 0l9-9a1 1 0 0 0 0-1.4ZM14 14.5V12h-4v3H8v-4a1 1 0 0 1 1-1h5V7.5l3.5 3.5-3.5 3.5Z"/>',
+  street: '<path d="M12 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm-2 7h4a2 2 0 0 1 2 2v5h-2v6h-4v-6H8v-5a2 2 0 0 1 2-2Z"/>',
+  osm: '<path d="M15 4 9 2 3 4v18l6-2 6 2 6-2V2l-6 2Zm-1 15.4-4-1.3V4.6l4 1.3v13.5Z"/>',
+};
+const ico = (k) => {
+  const span = el('span', { class: 'ico' });
+  span.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ACT_ICONS[k]}</svg>`;
+  return span;
+};
+
 const BACK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';
 const STEP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z"/></svg>';
 
@@ -184,7 +200,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
           }
         } catch { /* share sheet closed */ }
       },
-    }, el('span', { class: 'ico' }, '↗'), el('span', {}, 'Share'));
+    }, ico('share'), el('span', {}, 'Share'));
     const dest = p.takeoff ? `${p.takeoff.lat},${p.takeoff.lon}` : `${lat},${lon}`;
     const rate = (v) => {
       rating = rating === v ? 0 : v;
@@ -195,15 +211,15 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       onRate(rating);
     };
     const up = el('button', { class: `act up${rating > 0 ? ' on' : ''}`, 'aria-pressed': String(rating > 0), onclick: () => rate(1) },
-      el('span', { class: 'ico' }, '👍'), el('span', {}, 'Good'));
+      ico('up'), el('span', {}, 'Good'));
     const down = el('button', { class: `act down${rating < 0 ? ' on' : ''}`, 'aria-pressed': String(rating < 0), onclick: () => rate(-1) },
-      el('span', { class: 'ico' }, '👎'), el('span', {}, 'Not for me'));
+      ico('down'), el('span', {}, 'Not for me'));
     kids.push(saveControls(ratings, profile, p.id, { title: p.title, ll: [lon, lat] }, onSave));
     kids.push(el('div', { class: 'actions' }, up, down,
       el('button', { class: 'act', onclick: onLike, title: 'List the spots most like this one' },
-        el('span', { class: 'ico' }, '≈'), el('span', {}, 'Similar')),
+        ico('similar'), el('span', {}, 'Similar')),
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
-        el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
+        ico('go'), el('span', {}, 'Directions')),
       SANDBOXED ? null : share));
   }
   if (compact && onOpen) kids.push(openButton('See everything about this spot', onOpen));
@@ -365,11 +381,11 @@ export function renderBando({ head, body, bando, profile, ratings, base, near, o
 
   // saved bandos sit with your saved spots, under their own key so a drone's list never mistakes one for a spot
   kids.push(saveControls(ratings, 'bando', id, { title, ll: [lon, lat], bando: true }, onSave));
-  const link = (href, ico, text) => el('a', { class: 'act', href, target: '_blank', rel: 'noopener' }, el('span', { class: 'ico' }, ico), el('span', {}, text));
+  const link = (href, icon, text) => el('a', { class: 'act', href, target: '_blank', rel: 'noopener' }, ico(icon), el('span', {}, text));
   kids.push(el('div', { class: 'actions' },
-    link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, '➜', 'Directions'),
-    link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, '◉', 'Street View'),
-    p.osm ? link(p.osm, '⌖', 'OSM') : null));
+    link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, 'go', 'Directions'),
+    link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, 'street', 'Street View'),
+    p.osm ? link(p.osm, 'osm', 'OSM') : null));
 
   kids.push(el('p', {}, BANDO_LONG[p.s](p.h)));
   const p3dHost = el('div');
