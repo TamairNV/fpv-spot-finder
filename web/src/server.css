@@ -20,14 +20,14 @@ dialog.srv-dialog::backdrop { background: rgba(0, 0, 0, .6); }
 dialog.srv-dialog h2 { margin: 0 0 10px; }
 .srv-days { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
 .srv-days li { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); }
-.srv-days li.good { border-color: rgba(74, 222, 128, .45); }
+.srv-days li.good { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .srv-days .d-head { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; font-size: 13px; }
 .srv-days .d-head b { min-width: 92px; }
 .srv-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(18px, 1fr); gap: 2px; margin-top: 6px; }
 .srv-strip i { font-style: normal; text-align: center; font-size: 10px; border-radius: 4px; padding: 2px 0; color: var(--muted); }
-.srv-strip .go { background: rgba(74, 222, 128, .22); color: var(--text); }
-.srv-strip .meh { background: rgba(251, 191, 36, .14); }
-.srv-strip .no { background: rgba(248, 113, 113, .14); }
+.srv-strip .go { background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--text); }
+.srv-strip .meh { background: color-mix(in srgb, var(--part) 14%, transparent); }
+.srv-strip .no { background: color-mix(in srgb, var(--bad) 14%, transparent); }
 .d-spots { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; }
 .d-spots .chip { border: 1px solid var(--line-2); background: var(--panel-3); border-radius: 999px; padding: 2px 9px; font-size: 12px; }
 .d-spots .chip:hover { border-color: var(--muted); }
@@ -65,7 +65,7 @@ dialog.srv-dialog h2 { margin: 0 0 10px; }
   position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 2000;
   background: var(--panel-3); border: 1px solid var(--line-2); border-radius: 10px; padding: 9px 14px; font-size: 13px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
 }
-.srv-row.rr { padding: 7px 10px; border-radius: 10px; background: rgba(255, 196, 0, .07); border: 1px dashed rgba(255, 196, 0, .35); }
+.srv-row.rr { padding: 7px 10px; border-radius: 10px; background: color-mix(in srgb, var(--heat-1) 7%, transparent); border: 1px dashed color-mix(in srgb, var(--heat-1) 35%, transparent); }
 .srv-row.rr.on { border-style: solid; }
 
 /* Accounts */
@@ -108,5 +108,5 @@ dialog.srv-dialog h2 { margin: 0 0 10px; }
 .check-card .place-name { margin-right: 24px; }
 .srv-captcha { min-height: 0; }
 .srv-captcha:not(:empty) { min-height: 65px; }
-.btn.danger { color: var(--bad); border-color: rgba(248, 113, 113, .5); }
+.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
 dialog.srv-dialog.wide { max-width: 860px; }

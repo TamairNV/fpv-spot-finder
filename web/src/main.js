@@ -4,10 +4,11 @@ import './style.css';
 import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save, SANDBOXED } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
 import { Ratings, learnTaste, likeThis } from './ratings.js';
-import { renderSpot, legalBadge, nice, BANDO_STATE, starsText } from './detail.js';
+import { renderSpot, renderBando, bandoId, legalBadge, nice, BANDO_STATE, starsText } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
 import { attachServer, reviewSummary } from './server.js';
+import { theme, toggleTheme, onTheme } from './theme.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -22,10 +23,16 @@ const TOUCH = matchMedia('(hover: none)');
 
 const abs = (path) => new URL(path, location.href).href;
 
-const BASEMAP_URL = 'https://tiles.openfreemap.org/styles/positron';
+// The online basemap matches the light or dark theme.
+const basemapUrl = () => `https://tiles.openfreemap.org/styles/${theme() === 'dark' ? 'dark' : 'positron'}`;
 // The bundled basemap: water, woods, built-up land, main roads and place names from the pipeline.
 // Used offline, when the tile server can't be reached, and in sandboxed hosts.
+const LITE = {
+  light: { bg: '#f2f2ee', built: '#e7e4de', green: '#e0eadb', wood: '#d2e2c8', water: '#c2d8e8', rail: '#a9a9a9', roadCase: '#d3cfc8', road1: '#f7dca6', road2: '#fbefcf', road: '#ffffff' },
+  dark: { bg: '#1a1f22', built: '#23292d', green: '#1e2a22', wood: '#1d2b20', water: '#16303f', rail: '#4a5258', roadCase: '#11161a', road1: '#5a4a2c', road2: '#3d3a30', road: '#353c41' },
+};
 function liteStyle() {
+  const c = LITE[theme()];
   const k = (kind) => ['==', ['get', 'k'], kind];
   const w = (lo, hi) => ['interpolate', ['linear'], ['zoom'], 9, lo, 16, hi];
   return {
@@ -37,21 +44,21 @@ function liteStyle() {
       },
     },
     layers: [
-      { id: 'bg', type: 'background', paint: { 'background-color': '#f2f2ee' } },
-      { id: 'lite-built', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('built'), paint: { 'fill-color': '#e7e4de' } },
-      { id: 'lite-green', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('green'), paint: { 'fill-color': '#e0eadb' } },
-      { id: 'lite-wood', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('wood'), paint: { 'fill-color': '#d2e2c8' } },
-      { id: 'lite-water', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('water'), paint: { 'fill-color': '#c2d8e8' } },
-      { id: 'lite-waterline', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('waterline'), paint: { 'line-color': '#c2d8e8', 'line-width': w(1, 5) } },
-      { id: 'lite-rail', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('rail'), paint: { 'line-color': '#a9a9a9', 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
+      { id: 'bg', type: 'background', paint: { 'background-color': c.bg } },
+      { id: 'lite-built', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('built'), paint: { 'fill-color': c.built } },
+      { id: 'lite-green', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('green'), paint: { 'fill-color': c.green } },
+      { id: 'lite-wood', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('wood'), paint: { 'fill-color': c.wood } },
+      { id: 'lite-water', type: 'fill', source: 'lite', 'source-layer': 'base', filter: k('water'), paint: { 'fill-color': c.water } },
+      { id: 'lite-waterline', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('waterline'), paint: { 'line-color': c.water, 'line-width': w(1, 5) } },
+      { id: 'lite-rail', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('rail'), paint: { 'line-color': c.rail, 'line-width': w(0.8, 2), 'line-dasharray': [3, 2] } },
       {
         id: 'lite-road-case', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#d3cfc8', 'line-width': w(['match', ['get', 'r'], 1, 2.6, 2, 1.8, 1.2], ['match', ['get', 'r'], 1, 10, 2, 8, 6]) },
+        paint: { 'line-color': c.roadCase, 'line-width': w(['match', ['get', 'r'], 1, 2.6, 2, 1.8, 1.2], ['match', ['get', 'r'], 1, 10, 2, 8, 6]) },
       },
       {
         id: 'lite-road', type: 'line', source: 'lite', 'source-layer': 'base', filter: k('road'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
-          'line-color': ['match', ['get', 'r'], 1, '#f7dca6', 2, '#fbefcf', '#ffffff'],
+          'line-color': ['match', ['get', 'r'], 1, c.road1, 2, c.road2, c.road],
           'line-width': w(['match', ['get', 'r'], 1, 1.6, 2, 1, 0.6], ['match', ['get', 'r'], 1, 8, 2, 6, 4.5]),
         },
       },
@@ -382,7 +389,7 @@ function initMap() {
   liteActive = offline;
   map = new maplibregl.Map({
     container: 'map',
-    style: offline ? liteStyle() : BASEMAP_URL,
+    style: offline ? liteStyle() : basemapUrl(),
     center: [lon, lat],
     zoom: PHONE.matches ? 9.4 : 10.2,
     maxZoom: 18.5,
@@ -421,6 +428,7 @@ function initMap() {
     addOverlays();
     updatePlaceLabels();
   });
+  onTheme(() => map.setStyle(liteActive ? liteStyle() : basemapUrl(), { diff: false }));
   map.on('zoom', updatePlaceLabels);
   map.on('zoom', () => {
     if (heatHiLoaded || !heatHiWanted() || !map.getSource('heat')) return;
@@ -575,7 +583,7 @@ function addOverlays() {
   if (state.selected) {
     const f = feature(state.selected);
     if (f) showSelection(f);
-  }
+  } else if (state.bandoSel) showBandoSelection(state.bandoSel);
   if (!state.booted) {
     state.booted = true;
     if (location.hash.length > 1) openFromHash();
@@ -959,6 +967,8 @@ function drawSeeds() {
 
 function openSeed(s) {
   const f = seedSpot(s);
+  closeCheck();
+  state.bandoSel = null;
   state.selected = null;
   markSelected(null);
   map.getSource('sel')?.setData({ type: 'FeatureCollection', features: [] });
@@ -973,6 +983,8 @@ function select(id, fromList, push = true) {
   const f = feature(id);
   if (!f) return;
   const wasOpen = !$('#view-spot').hidden;
+  closeCheck();  // one thing at a time: a new spot replaces whatever was open
+  state.bandoSel = null;
   state.selected = id;
   setHash(`${state.profile}.${id}`, push && !wasOpen);
   markSelected(id);
@@ -1096,6 +1108,7 @@ function showList() {
   state.detail?.dispose();
   state.detail = null;
   state.selected = null;
+  state.bandoSel = null;
   $('#view-spot').hidden = true;
   $('#view-list').hidden = false;
   $('#panel').dataset.view = 'list';
@@ -1126,6 +1139,13 @@ function setHash(h, push) {
 
 function openFromHash() {
   const [profile, id] = location.hash.slice(1).split(/[./]/);
+  if (profile === 'bando' && id && hasBandos()) {
+    loadBandos().then(() => {
+      const f = bandosData.features.find((b) => bandoId(b) === decodeURIComponent(id));
+      if (f) showBandoOnMap(f, false);
+    });
+    return;
+  }
   if (!state.spots[profile]) return;
   if (profile !== state.profile) setProfile(profile);
   if (!id) return;
@@ -1163,13 +1183,24 @@ function onMapClick(e) {
   const hit = map.getLayer('spots-dots') && map.queryRenderedFeatures(e.point, { layers: ['spots-dots'] })[0];
   if (hit) return select(hit.properties.id, false);
   const b = bandoAt(e.point);
-  if (b) showBando(b);
-  else if (bandoOpen) closeCheck();
+  if (b) return showBando(b);
+  // a tap on empty map puts away whatever was open
+  if (!$('#check-card').hidden) closeCheck();
+  else if (!$('#view-spot').hidden) goBack();
+}
+
+// "Can I fly here?" and your own places take over from an open spot or bando, so the panel never
+// shows something other than what you last picked.
+function clearPanel() {
+  if ($('#view-spot').hidden) return;
+  if (!SANDBOXED && history.state?.spot) history.replaceState(null, '', location.pathname + location.search);
+  showList();
 }
 
 // The answer goes in a card under the button (a popup on the map gets cut off on phones),
 // with a dot where you checked.
 function showCheck(lngLat, point, place = null) {
+  clearPanel();
   const { lng, lat } = lngLat;
   const zones = map.getLayer('zones-fill') ? map.queryRenderedFeatures(point, { layers: ['zones-fill'] }).map((z) => z.properties.name) : [];
   const v = verdicts(state.meta, lookup?.at(lng, lat), [...new Set(zones)]);
@@ -1187,7 +1218,6 @@ function showCheck(lngLat, point, place = null) {
       : [el('div', { class: 'muted' }, 'Outside the area this region covers.')]),
   ].filter(Boolean));
   card.hidden = false;
-  bandoOpen = false;
   if (!checkPopup) checkPopup = new maplibregl.Marker({ element: el('div', { class: 'check-dot' }) });
   checkPopup.setLngLat(lngLat).addTo(map);
 }
@@ -1267,7 +1297,6 @@ function openPlace(p) {
 function closeCheck() {
   $('#check-card').hidden = true;
   checkPopup?.remove();
-  bandoOpen = false;
 }
 
 // ---------------------------------------------------------------- bandos
@@ -1275,7 +1304,7 @@ function closeCheck() {
 const BANDO_COLOUR = '#c084fc';
 const hasBandos = () => !!state.meta.sources?.bandos;
 const bandosWanted = () => hasBandos() && (state.bandos || state.bandoList || state.more.bando != null);
-let bandosData = null, bandosLoad = null, bandoOpen = false;
+let bandosData = null, bandosLoad = null;
 
 function loadBandos() {
   bandosLoad ||= fetch(`${BASE}/bandos.geojson`)
@@ -1307,11 +1336,12 @@ function bandosOnMap() {
   return PHONE.matches ? { top: 260, bottom: sheetHeights().half, left: 30, right: 30 } : { top: 60, bottom: 60, left: 60, right: 60 };
 }
 
-function showBandoOnMap(b) {
-  const padding = bandosOnMap();
+function showBandoOnMap(b, push = true) {
+  bandosOnMap();
+  showBando(b, push);
+  const H = sheetHeights();
   map.flyTo({ center: b.geometry.coordinates, zoom: Math.max(map.getZoom(), 15.5), essential: true, duration: 1200,
-    padding: PHONE.matches ? padding : { top: 0, bottom: 0, left: 0, right: 0 } });
-  showBando(b);
+    padding: PHONE.matches ? { top: 40, bottom: H.half, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 } });
 }
 
 function showAllBandos(list) {
@@ -1393,35 +1423,6 @@ function renderBandoHits() {
     })));
 }
 
-// A close-up of the bando in the full-screen 3D view; closing it throws the view away.
-let bando3d = null;
-async function openBando3D(f, btn) {
-  const label = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Loading 3D…';
-  try {
-    const { Preview3D } = await import('./preview3d.js');
-    bando3d?.dispose();
-    const host = el('div', { hidden: true });
-    document.body.append(host);
-    const pv = (bando3d = new Preview3D(host, {
-      spot: { title: f.properties.n || f.properties.k }, preview: { ...f.properties.p, center: f.geometry.coordinates },
-      center: f.geometry.coordinates, profile: state.profile, radiusM: 0,
-      onClose: () => setTimeout(() => {
-        pv.dispose();
-        host.remove();
-        if (bando3d === pv) bando3d = null;
-      }),
-    }));
-    await pv.load(`${BASE}/${f.properties.p.file}`);
-    if (!pv.disposed) pv.toggleFull(true);
-  } catch (e) {
-    btn.after(el('div', { class: 'check-note' }, `3D view unavailable (${e.message || e}).`));
-  }
-  btn.disabled = false;
-  btn.textContent = label;
-}
-
 function bandosNear(c, maxD, n) {
   return (bandosData?.features || [])
     .map((f) => ({ f, d: haversine(c, f.geometry.coordinates) }))
@@ -1445,49 +1446,37 @@ function bandoAt(point) {
   return best;
 }
 
-const BANDO_STATUS = {
-  1: (h) => `Still standing: LiDAR sees something about ${Math.round(h)} m tall here.`,
-  0: () => 'Little left: LiDAR sees nothing much standing, so it may only be a site now.',
-  '-1': () => 'Not checked: no LiDAR here, so it may or may not still be standing.',
-};
+// A bando opens in the panel like a spot does, with its own link (#bando.w123), and the map rings it.
+function showBando(f, push = true) {
+  closeCheck();
+  if ($('#view-spot').hidden) state.listScroll = $('#list-scroll').scrollTop;
+  const wasOpen = !$('#view-spot').hidden;
+  state.detail?.dispose();
+  state.selected = null;
+  state.bandoSel = f;
+  markSelected(null);
+  showBandoSelection(f);
+  setHash(`bando.${bandoId(f)}`, push && !wasOpen);
+  $('#view-list').hidden = true;
+  $('#view-spot').hidden = false;
+  $('#panel').dataset.view = 'spot';
+  const near = state.spots[state.profile].features
+    .map((s) => ({ f: s, d: haversine(f.geometry.coordinates, s.geometry.coordinates) }))
+    .sort((a, b) => a.d - b.d).slice(0, 3);
+  state.detail = renderBando({
+    head: $('#spot-head'), body: $('#detail-body'), bando: f, profile: state.profile, ratings, base: BASE, near,
+    onBack: () => goBack(),
+    onSpot: (s) => select(s.properties.id, true),
+    onSave: () => renderList(),
+  });
+  $('#spot-scroll').scrollTop = 0;
+  if (PHONE.matches) setSheet('half');
+}
 
-function showBando(f) {
-  const p = f.properties;
-  const [lon, lat] = f.geometry.coordinates;
-  let best = null, bestD = Infinity;
-  for (const s of state.spots[state.profile].features) {
-    const d = haversine(f.geometry.coordinates, s.geometry.coordinates);
-    if (d < bestD) [best, bestD] = [s, d];
-  }
-  const who = state.meta.profiles[state.profile].short || state.meta.profiles[state.profile].label;
-  const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener' }, text);
-  const card = $('#check-card');
-  card.replaceChildren(...[
-    el('button', { class: 'x', 'aria-label': 'Close', onclick: closeCheck }, '×'),
-    el('h4', {}, p.n || p.k),
-    el('div', { class: 'bando-status' }, p.n ? el('b', {}, `${p.k}. `) : null, BANDO_STATUS[p.s](p.h)),
-    best ? el('button', {
-      class: 'bando-spot',
-      onclick: () => {
-        closeCheck();
-        select(best.properties.id, false);
-      },
-    },
-    el('span', { class: 'score', style: `--c:${scoreColour(best.properties.score)}` }, best.properties.score),
-    el('span', {}, el('small', {}, `Nearest ${who} spot, ${metres(bestD)} away`), el('br'), best.properties.title)) : null,
-    p.p ? el('button', { class: 'bando-3d', onclick: (e) => openBando3D(f, e.currentTarget) }, '⤢ See it in 3D (LiDAR close-up)') : null,
-    el('div', { class: 'bando-links' },
-      link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, 'Directions'),
-      link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, 'Street View'),
-      p.osm ? link(p.osm, 'OpenStreetMap') : null),
-    el('div', { class: 'check-note' }, p.m
-      ? 'A protected heritage site (a scheduled monument, listed or open to visitors): it has a keeper, so ask before flying and keep clear of people.'
-      : 'Old buildings are usually private and can be unsafe: ask the owner first and keep out of anything unstable.'),
-  ].filter(Boolean));
-  card.hidden = false;
-  bandoOpen = true;
-  if (!checkPopup) checkPopup = new maplibregl.Marker({ element: el('div', { class: 'check-dot' }) });
-  checkPopup.setLngLat(f.geometry.coordinates).addTo(map);
+function showBandoSelection(f) {
+  const r = Math.max(25, Math.sqrt((f.properties.a || 0) / Math.PI) + 15);
+  map?.getSource('sel')?.setData({ type: 'FeatureCollection', features: [
+    { type: 'Feature', geometry: circlePolygon(f.geometry.coordinates, r), properties: { k: 'area' } }] });
 }
 
 // ---------------------------------------------------------------- UI wiring
@@ -1601,6 +1590,7 @@ function wireUI() {
   });
   $$('#layers-pop input').forEach((i) => i.addEventListener('change', applyLayerToggles));
   $('#btn-about').addEventListener('click', openAbout);
+  $('#btn-theme').addEventListener('click', toggleTheme);
   $('#btn-check').addEventListener('click', () => setChecking(!state.checking));
   $('#check-done').addEventListener('click', () => setChecking(false));
   window.addEventListener('keydown', (e) => {
