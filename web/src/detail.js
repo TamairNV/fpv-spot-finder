@@ -286,6 +286,98 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   return { dispose: () => { gone = true; preview?.dispose(); } };
 }
 
+// A bando opens in the same panel as a spot: a header, what's left of it, a 3D close-up, the nearest
+// spots, your notes, the weather and the light. It saves into your saved spots like any other.
+export const bandoId = (f) => {
+  const m = /\/(node|way|relation)\/(\d+)/.exec(f.properties.osm || '');
+  if (m) return `${m[1][0]}${m[2]}`;
+  const [lon, lat] = f.geometry.coordinates;
+  return `${lon.toFixed(5)},${lat.toFixed(5)}`;
+};
+
+const BANDO_LONG = {
+  1: (h) => `Still standing: LiDAR sees something about ${Math.round(h)} m tall here.`,
+  0: () => 'Little left: LiDAR sees nothing much standing, so it may only be a site now.',
+  '-1': () => 'Not checked: no LiDAR here, so it may or may not still be standing.',
+};
+
+export function renderBando({ head, body, bando, profile, ratings, base, near, onBack, onSpot, onSave }) {
+  const p = bando.properties;
+  const [lon, lat] = bando.geometry.coordinates;
+  const id = bandoId(bando);
+  const title = p.n || p.k;
+  const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the list', title: 'Back to the list', onclick: onBack });
+  back.innerHTML = BACK_ICON;
+  head.replaceChildren(back,
+    el('div', { class: 'sh-main' },
+      el('div', { class: 'sh-title', title }, title),
+      el('div', { class: 'sh-sub' }, ['Bando', p.n ? p.k : null, p.b > 1 ? `${p.b} buildings` : null].filter(Boolean).join(' · '))),
+    el('span'),
+    el('div', { class: `sh-bando s${p.s}`, title: BANDO_LONG[p.s](p.h) }, el('i', { class: `bdot s${p.s}` })));
+
+  const kids = [];
+  const state = { 1: ['ok', BANDO_STATE[1](p.h)], 0: ['no', 'Little left'], '-1': ['part', 'Not checked'] }[p.s];
+  kids.push(el('div', { class: 'd-badges' },
+    el('span', { class: `badge ${state[0]} big` }, state[1][0].toUpperCase() + state[1].slice(1)),
+    p.a ? el('span', { class: 'badge plain big' }, `${Math.round(p.a / 10) * 10} m² of roof`) : null,
+    p.m ? el('span', { class: 'badge part big', title: 'A scheduled monument, listed or open to visitors' }, 'Protected site') : null));
+
+  // saved bandos sit with your saved spots, under their own key so a drone's list never mistakes one for a spot
+  let saved = ratings.isSaved('bando', id);
+  const star = el('button', { class: `act save${saved ? ' on' : ''}`, 'aria-pressed': String(saved), title: 'Keep it in your saved spots',
+    onclick: () => {
+      saved = !saved;
+      ratings.setSaved('bando', id, saved, { title, ll: [lon, lat], bando: true });
+      star.classList.toggle('on', saved);
+      star.setAttribute('aria-pressed', String(saved));
+      star.firstChild.textContent = saved ? '★' : '☆';
+      star.lastChild.textContent = saved ? 'Saved' : 'Save';
+      onSave?.(saved);
+    } },
+  el('span', { class: 'ico' }, saved ? '★' : '☆'), el('span', {}, saved ? 'Saved' : 'Save'));
+  const link = (href, ico, text) => el('a', { class: 'act', href, target: '_blank', rel: 'noopener' }, el('span', { class: 'ico' }, ico), el('span', {}, text));
+  kids.push(el('div', { class: 'actions' }, star,
+    link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, '➜', 'Directions'),
+    link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, '◉', 'Street View'),
+    p.osm ? link(p.osm, '⌖', 'OSM') : null));
+
+  kids.push(el('p', {}, BANDO_LONG[p.s](p.h)));
+  const p3dHost = el('div');
+  kids.push(p3dHost);
+
+  if (near?.length) {
+    kids.push(el('div', { class: 'box' }, el('h4', {}, 'Nearest spots'),
+      el('ul', { class: 'bando-near' }, near.map(({ f, d }) => el('li', {},
+        el('button', { class: 'linklike', onclick: () => onSpot(f) }, f.properties.title),
+        el('div', { class: 'muted small' }, `${metres(d)} away · score ${f.properties.score}`))))));
+  }
+  kids.push(notesBox({ id: `bando-${id}`, title }, ratings));
+  kids.push(el('div', { class: 'box' }, el('h4', {}, 'Before you go'),
+    el('p', { class: 'small' }, p.m
+      ? 'A protected heritage site (a scheduled monument, listed or open to visitors): it has a keeper, so ask before flying and keep clear of people.'
+      : 'Old buildings are usually private and can be unsafe: ask the owner first and keep out of anything unstable.')));
+  kids.push(weatherBox(lon, lat, profile));
+  kids.push(sunBox(lon, lat));
+  kids.push(el('div', { class: 'd-foot' }, 'Mapped on OpenStreetMap as derelict or abandoned; heights from EA LiDAR.'));
+  body.replaceChildren(...kids.filter(Boolean));
+
+  let preview = null, gone = false;
+  if (p.p) {
+    p3dHost.append(el('div', { class: 'p3d-wrap' }, el('div', { class: 'p3d' }), el('div', { class: 'p3d-tag' }, 'Loading 3D…')));
+    import('./preview3d.js').then(({ Preview3D }) => {
+      if (gone) return;
+      p3dHost.replaceChildren();
+      preview = new Preview3D(p3dHost, {
+        spot: { title }, preview: { ...p.p, center: [lon, lat] }, center: [lon, lat], profile, radiusM: 0,
+      });
+      return preview.load(`${base}/${p.p.file}`);
+    }).catch((e) => {
+      if (!gone) p3dHost.replaceChildren(el('div', { class: 'muted small', style: 'margin:0 0 12px' }, `3D view unavailable (${e.message || e}).`));
+    });
+  }
+  return { dispose: () => { gone = true; preview?.dispose(); } };
+}
+
 // Stars out of 5 and a few words: yours (kept like your notes, and public under your username when
 // you're signed in), and what other pilots gave it.
 export function starsText(v) {
