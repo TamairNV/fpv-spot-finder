@@ -18,10 +18,10 @@
   --part: #fbbf24;
   --no: #9aa8b4;
   --bad: #f87171;
-  --map-bg: #1a1f22;
-  --map-label: #c9d1d6;
-  --map-label-2: #9aa5ab;
-  --map-halo: #15191c;
+  --map-bg: #e9ebe6;
+  --map-label: #3d454b;
+  --map-label-2: #5f676c;
+  --map-halo: #f4f5f1;
   --shadow: rgba(0, 0, 0, .45);
   --radius: 12px;
   --top-h: 52px;
@@ -156,6 +156,7 @@ svg { fill: currentColor; }
 .sw-frz { background: rgba(220, 38, 38, .25); border: 1.5px dashed #e5383b; }
 .sw-pin { border-radius: 50%; background: #14191d; box-shadow: inset 0 0 0 2.5px var(--heat-2); }
 .sw-bando { border-radius: 50%; background: #c084fc; box-shadow: inset 0 0 0 1px #1b1030; transform: scale(.8); }
+.sw-3d { background: linear-gradient(160deg, #e6e3dc 0 45%, #bdb7ab 45%); box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
 
 /* ---------------------------------------------------------------- map */
 #map { grid-column: 2; grid-row: 2; position: relative; min-height: 0; background: var(--map-bg); }

@@ -26,6 +26,7 @@ for (const f of readdirSync(join(dir, 'data'))) if (f !== REGION) rmSync(join(di
 const rd = join(dir, 'data', REGION);
 for (const f of readdirSync(rd)) {
   if (f.endsWith('.gpx') || f === 'offline.json') rmSync(join(rd, f));
+  if (f === 'buildings') rmSync(join(rd, f), { recursive: true }); // 3D buildings: too many files, and no .pbf there
 }
 
 // A spot past the cut shows no thumbnail or 3D view here, rather than a broken one.

@@ -106,6 +106,19 @@
     "bandos": {
       "standing": 14,
       "unknown": 0
+    },
+    "buildings3d": {
+      "tiles": 731,
+      "bytes": 7236178,
+      "zoom": 14,
+      "bounds": [
+        -1.92477,
+        54.79728,
+        -1.31694,
+        55.15945
+      ],
+      "count": 489969,
+      "lidar_share": 0.954
     }
   },
   "profiles": {
