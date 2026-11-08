@@ -9,6 +9,7 @@
 // last-edit-wins, so two phones can't trample each other. Star reviews from accounts are public.
 import qrcode from 'qrcode-generator';
 import { $, el, store, save, SANDBOXED } from './util.js';
+import { theme } from './theme.js';
 import './server.css';
 
 const KEY = 'fpvspots:server-key';
@@ -65,7 +66,8 @@ async function idbDo(mode, fn) {
 }
 
 class Server {
-  constructor({ ratings, region, meta, coords, getProfile, onChange, openSpot }) {
+  constructor({ ratings, region, meta, coords, getProfile, onChange, openSpot, pageHost }) {
+    this.pageHost = pageHost || null;  // account and flights show as pages of the app when it gives us one
     Object.assign(this, { ratings, region, meta, coords, getProfile, onChange, openSpot });
     const k = (s) => `fpvspots:${region}:${s}`;
     this.keys = { outbox: k('outbox'), rev: k('rev'), flights: k('flights'), photos: k('photos'), at: k('synced-at') };
@@ -446,7 +448,7 @@ class Server {
             : el('span', { class: 'muted' }, 'no good window')),
         d.strip.length ? el('div', { class: 'srv-strip' }, d.strip.map((h) => el('i', { class: h.cls, title: `${h.h}:00 · gusts ${h.gust} mph · rain ${h.rain}%` }, h.h))) : null,
         fc.mine && d.spots.length ? el('div', { class: 'd-spots' }, d.spots.map((s) => el('button', {
-          class: 'chip', onclick: () => { this.dialog.close(); this.openSpot(s.drone || this.getProfile(), s.id); },
+          class: 'chip', onclick: () => { this.closeView(); this.openSpot(s.drone || this.getProfile(), s.id); },
         }, s.title)), d.n_spots > d.spots.length ? el('span', { class: 'muted small' }, ` +${d.n_spots - d.spots.length} more`) : null) : null))));
       body.push(el('p', { class: 'muted small' }, `From Open-Meteo, updated ${fc.updated.slice(11)}. Limits are a judgement call; check on the day.`));
     }
@@ -544,7 +546,7 @@ class Server {
             el('p', { class: 'muted small' }, 'Nothing there? Check spam. Signing in sends the link again.')]);
         } else {
           await this.login(name.value.trim(), pw.value);
-          this.dialog.close();
+          this.closeView();
         }
       } catch (ex) {
         err.textContent = ex.message;
@@ -593,7 +595,7 @@ class Server {
     const node = el('div', { class: 'srv-captcha' });
     let id = null, tok = null;
     loadTurnstile().then((ts) => {
-      id = ts.render(node, { sitekey: site, theme: 'dark', callback: (t) => { tok = t; }, 'expired-callback': () => { tok = null; } });
+      id = ts.render(node, { sitekey: site, theme: theme(), callback: (t) => { tok = t; }, 'expired-callback': () => { tok = null; } });
     }).catch(() => node.replaceChildren(el('p', { class: 'muted small' }, 'The are-you-human check couldn’t load: try again in a bit.')));
     return { node, token: () => tok, reset: () => { tok = null; if (id != null) window.turnstile?.reset(id); } };
   }
@@ -629,7 +631,7 @@ class Server {
         const res = await call('account/reset', { method: 'POST', body: { token, password: pw.value }, auth: false });
         this.signedIn(res);
         await this.sync();
-        this.dialog.close();
+        this.closeView();
         this.toast(`Password changed: you’re signed in as ${res.username}, and every other device is signed out.`);
       } catch (ex) {
         err.textContent = ex.message;
@@ -680,7 +682,7 @@ class Server {
         if (/^fpvspots:[^:]+:(ratings|notes|saved|places|reviews|flights|photos|outbox|mine)$/.test(k)) localStorage.removeItem(k);
       }
     }
-    this.dialog?.close();
+    this.closeView();
     this.renderAccountBtn();
     this.changed();
     if (!gone) this.toast(wipe ? 'Signed out, and this device is cleared.' : 'Signed out. Your stuff is still on this device.');
@@ -708,7 +710,7 @@ class Server {
         await call('account/password', { method: 'POST', body: { old: old.value, new: neu.value } });
         err.textContent = '';
         this.toast('Password changed. Other devices need to sign in again.');
-        this.dialog.close();
+        this.closeView();
       } catch (ex) {
         err.textContent = ex.message;
       }
@@ -805,7 +807,7 @@ class Server {
       forgetRevs();  // every region re-sends what it has the next time it's opened
       this.queueEverything();
       await this.sync();
-      this.dialog?.close();
+      this.closeView();
       this.loadForecast();
       const m = await call('me').catch(() => ({}));
       if (m.username) save(USER, m.username);
@@ -826,7 +828,7 @@ class Server {
       body.push(el('p', {}, 'Open a spot and press “Log a flight” after you’ve flown it: the date, a note, and photos from your phone. They sync to your other devices, and the forecast keeps an eye on the spots you’ve flown.'));
     } else {
       body.push(el('ol', { class: 'srv-flights' }, flights.map((f) => el('li', {},
-        el('button', { class: 'linklike', onclick: () => { this.dialog.close(); this.openSpot(f.drone, f.spot); } }, f.title || f.spot),
+        el('button', { class: 'linklike', onclick: () => { this.closeView(); this.openSpot(f.drone, f.spot); } }, f.title || f.spot),
         el('span', { class: 'muted' }, ` · ${dayName(f.date)}${f.drone ? ` · ${this.meta.profiles[f.drone]?.short || f.drone}` : ''}`),
         f.note ? el('div', { class: 'small' }, f.note) : null,
         this.thumbs(f.id, false)))));
@@ -849,15 +851,27 @@ class Server {
 
   // ---- shared bits
 
+  // Account and flights are pages of the app (#/account, #/flights); the forecast and stats stay dialogs.
   showDialog(view, body) {
+    if (this.pageHost && PAGE_VIEWS.has(view)) {
+      if (this.dialog?.open) this.dialog.close();
+      this.pageView = view;
+      return this.pageHost.show(view, body.filter(Boolean));
+    }
     if (!this.dialog) {
       this.dialog = el('dialog', { class: 'srv-dialog' });
       document.body.append(this.dialog);
-      this.dialog.addEventListener('click', (e) => { if (e.target === this.dialog) this.dialog.close(); });
+      this.dialog.addEventListener('click', (e) => { if (e.target === this.dialog) this.closeView(); });
     }
     this.dialog.dataset.view = view;
     this.dialog.replaceChildren(el('form', { method: 'dialog' }, el('button', { class: 'dlg-close', 'aria-label': 'Close' }, '×')), ...body.filter(Boolean));
     if (!this.dialog.open) this.dialog.showModal();
+  }
+
+  closeView() {
+    if (this.pageView && this.pageHost?.isOpen(this.pageView)) this.pageHost.close();
+    this.pageView = null;
+    this.dialog?.close();
   }
 
   toast(text) {
@@ -866,6 +880,8 @@ class Server {
     setTimeout(() => t.remove(), 4000);
   }
 }
+
+const PAGE_VIEWS = new Set(['account', 'flights']);
 
 let tsLoad = null;
 function loadTurnstile() {
@@ -975,7 +991,9 @@ export function reviewSummary(profile) {
 }
 
 export const signedInAs = () => (S ? store(USER, null) : null);
-export const openAccount = () => S?.openAccount();
+export const openAccount = (mode) => S?.openAccount(mode);
+export const openFlights = () => S?.openFlights();
+export const hasServer = () => !!S;
 export const canAccount = () => !!S?.health?.features?.includes('accounts');
 
 // A spot's 3D model and line, built by the server the first time anyone opens it. null without a server.
