@@ -1071,6 +1071,12 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
     meta["bandos"] = bando_mod.write(region, out, lambda x, y, path: write_preview(
         reader, dtm, region, x, y, path, BANDO_PREVIEW_M, BANDO_PREVIEW_RES, decks))
 
+    # 3D buildings are built on their own (python -m spotfinder.buildings3d <region>); keep them listed
+    from .buildings3d import info as buildings3d_info
+
+    if (b3d := buildings3d_info(region)) and (out / "buildings").exists():
+        meta["buildings3d"] = b3d
+
     for key, res in results.items():
         profile = scoring.PROFILES[key]
         heat_corners = _heat_png(region, res["heat"], res["eligible"], out / f"heat_{key}.png")

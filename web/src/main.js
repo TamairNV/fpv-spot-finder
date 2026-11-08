@@ -8,7 +8,7 @@ import { renderSpot, renderBando, bandoId, legalBadge, nice, BANDO_STATE, starsT
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
 import { attachServer, reviewSummary, canAccount, signedInAs, openAccount, openFlights, hasServer } from './server.js';
-import { theme, toggleTheme, onTheme, themePref, setTheme } from './theme.js';
+import { toggleTheme, themePref, setTheme } from './theme.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -23,16 +23,16 @@ const TOUCH = matchMedia('(hover: none)');
 
 const abs = (path) => new URL(path, location.href).href;
 
-// The online basemap matches the light or dark theme.
-const basemapUrl = () => `https://tiles.openfreemap.org/styles/${theme() === 'dark' ? 'dark' : 'positron'}`;
+// The basemap stays light in both themes: the dark one paints buildings near-black, which hides them
+// and reads as clutter (Tamair, 8 Nov). Only the panels and pages follow the theme.
+const basemapUrl = () => 'https://tiles.openfreemap.org/styles/positron';
 // The bundled basemap: water, woods, built-up land, main roads and place names from the pipeline.
 // Used offline, when the tile server can't be reached, and in sandboxed hosts.
 const LITE = {
   light: { bg: '#f2f2ee', built: '#e7e4de', green: '#e0eadb', wood: '#d2e2c8', water: '#c2d8e8', rail: '#a9a9a9', roadCase: '#d3cfc8', road1: '#f7dca6', road2: '#fbefcf', road: '#ffffff' },
-  dark: { bg: '#1a1f22', built: '#23292d', green: '#1e2a22', wood: '#1d2b20', water: '#16303f', rail: '#4a5258', roadCase: '#11161a', road1: '#5a4a2c', road2: '#3d3a30', road: '#353c41' },
 };
 function liteStyle() {
-  const c = LITE[theme()];
+  const c = LITE.light;
   const k = (kind) => ['==', ['get', 'k'], kind];
   const w = (lo, hi) => ['interpolate', ['linear'], ['zoom'], 9, lo, 16, hi];
   return {
@@ -98,6 +98,7 @@ const state = {
   more: {},
   moreOpen: false,
   bandos: false,
+  b3d: true, // 3D buildings when zoomed in
   selected: null,
   detail: null,
   pins: [],
@@ -434,7 +435,6 @@ function initMap() {
     addOverlays();
     updatePlaceLabels();
   });
-  onTheme(() => map.setStyle(liteActive ? liteStyle() : basemapUrl(), { diff: false }));
   map.on('zoom', updatePlaceLabels);
   map.on('zoom', () => {
     if (heatHiLoaded || !heatHiWanted() || !map.getSource('heat')) return;
@@ -525,6 +525,24 @@ function addOverlays() {
     id: 'zones-line', type: 'line', source: 'zones',
     paint: { 'line-color': ['match', ['get', 'kind'], 'Danger area', '#ff9f1c', '#e5383b'], 'line-width': 1.5, 'line-dasharray': [3, 2] },
   });
+  // Every building raised to its LiDAR height, from street level up (spotfinder/buildings3d.py).
+  if (has3D()) {
+    map.addSource('b3d', {
+      type: 'vector', tiles: [`${abs(`${BASE}/buildings/`)}{z}/{x}/{y}.pbf`], minzoom: B3D_ZOOM, maxzoom: B3D_ZOOM,
+      bounds: regionBounds(), attribution: 'Buildings © Overture Maps, heights © Environment Agency',
+    });
+    map.addLayer({
+      id: 'b3d', type: 'fill-extrusion', source: 'b3d', 'source-layer': 'b', minzoom: B3D_FROM,
+      layout: { visibility: state.b3d ? 'visible' : 'none' },
+      paint: {
+        'fill-extrusion-color': ['interpolate', ['linear'], ['get', 'h'], 3, '#dedbd4', 12, '#cfcac0', 30, '#bdb7ab'],
+        // grow out of the ground as you zoom in, rather than popping up
+        'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], B3D_FROM, 0, B3D_FROM + 0.6, ['get', 'h']],
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0.88,
+      },
+    }, before);
+  }
   // Mapped bandos: a solid dot where LiDAR still sees something standing, a ring where little is left.
   if (hasBandos()) {
     map.addSource('bandos', { type: 'geojson', data: bandosData || { type: 'FeatureCollection', features: [] } });
@@ -620,6 +638,16 @@ function applyLayerToggles() {
   vis('zones-line', $('#lyr-zones').checked);
   vis('spots-dots', $('#lyr-spots').checked);
   vis('sat', state.base === 'satellite');
+  if (has3D()) {
+    state.b3d = $('#lyr-3d').checked;
+    vis('b3d', state.b3d);
+    // the basemap's flat buildings hand over to the 3D ones, so they don't show through the walls
+    for (const l of map.getStyle()?.layers || []) {
+      if (l['source-layer'] === 'building' && l.source !== 'b3d') map.setLayerZoomRange(l.id, l.minzoom ?? 0, state.b3d ? B3D_FROM : 24);
+    }
+    savePrefs();
+  }
+  $('#lyr-3d-row').hidden = !has3D();
   state.pins.forEach((p) => (p.getElement().style.display = $('#lyr-spots').checked ? '' : 'none'));
   $('#lyr-legal-row').hidden = !isA3();
   $('#lyr-bandos-row').hidden = !hasBandos();
@@ -649,7 +677,7 @@ function setProfile(key) {
 }
 
 function savePrefs() {
-  save(PREFS_KEY, { profile: state.profile, sort: state.sort === 'near' ? 'score' : state.sort, base: state.base, a3only: state.a3only, bandos: state.bandos });
+  save(PREFS_KEY, { profile: state.profile, sort: state.sort === 'near' ? 'score' : state.sort, base: state.base, a3only: state.a3only, bandos: state.bandos, b3d: state.b3d });
 }
 
 // ---------------------------------------------------------------- list
@@ -1313,6 +1341,9 @@ function closeCheck() {
 
 const BANDO_COLOUR = '#c084fc';
 const hasBandos = () => !!state.meta.sources?.bandos;
+// A sandboxed host can't serve the .pbf tiles, and they're too many files to pack.
+const has3D = () => !SANDBOXED && !!state.meta.sources?.buildings3d;
+const B3D_ZOOM = 14, B3D_FROM = 14.5;
 const bandosWanted = () => hasBandos() && (state.bandos || state.bandoList || state.more.bando != null);
 let bandosData = null, bandosLoad = null;
 
@@ -1595,6 +1626,11 @@ function wireUI() {
     }
   });
   $('#lyr-bandos').checked = !!state.bandos;
+  $('#lyr-3d').checked = state.b3d !== false;
+  $('#lyr-3d').addEventListener('change', (e) => {
+    // turning them on near street level: tilt the map so the heights show
+    if (e.target.checked && map.getZoom() >= B3D_FROM && map.getPitch() < 20) map.easeTo({ pitch: 50, duration: 600 });
+  });
   $('#lyr-bandos').addEventListener('change', (e) => {
     state.bandos = e.target.checked;
     savePrefs();
@@ -1828,6 +1864,7 @@ function aboutHtml() {
     <li><b>Shots</b> (5" cine): a spot named after a lighthouse, castle, monument or ruin, or by a sea stack, gets an orbit round it, and a bridge or viaduct a pass along it at deck height, and cliffs a pass along them level with the top, kept off houses and roads and clear of anything in the way, with where the golden-hour sun lights it from.</li>
     <li><b>Your taste</b>: each square is compared with your favourite spots (the ★ ones), and with your 👍 / 👎 ratings in “My taste”.</li>
     <li><b>Parks</b>: every public park or common of 4 ha or more gets a spot at its best place, even if it doesn't make the top 250. Tap “Parks” above the list to see them.</li>
+    <li><b>3D buildings</b>: zoom in to street level and tilt the map (right-drag, or two fingers on a phone) to see every building at the height the EA LiDAR measured it. Where the LiDAR missed a roof (or the building is newer), the height is an estimate from its floors and size. Turn them off under Layers.</li>
     <li><b>Bandos</b>: derelict, abandoned and disused buildings mapped on OpenStreetMap, still standing at least 4 m tall in the LiDAR. Ruins in parks, monuments, old pit sites and capped shafts aren't bandos, so they're left out. Tap the “Bandos” chip to list them biggest first, tap one for its card and a 3D close-up, or use Filters › Bando within for spots near one.</li>
   </ul>
   <h3>Places worth a look, not permission</h3>
