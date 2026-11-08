@@ -9,14 +9,23 @@ import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
 import { attachServer, reviewSummary, canAccount, signedInAs, openAccount, openFlights, hasServer } from './server.js';
 import { toggleTheme, themePref, setTheme } from './theme.js';
+import { National, asGeojson, FULL_ZOOM } from './national.js';
 
 const params = new URLSearchParams(location.search);
-const REGION = params.get('region') || 'newcastle';
 const DATA = `${import.meta.env.BASE_URL}data`;
-// your own ranking of the region, made on the server from your ratings ("Re-rank with my ratings")
-const MINE_KEY = `fpvspots:${REGION}:mine`;
-const MINE = SANDBOXED ? null : store(MINE_KEY, null);
-const BASE = MINE ? `${import.meta.env.BASE_URL}${MINE}` : `${DATA}/${REGION}`;
+// The region the list, ratings and overlays are for. The map follows you from one to the next
+// (national.js), so this changes without a reload; ?region= in the address says where to start.
+const LAST_REGION = 'fpvspots:region';
+let REGION, MINE_KEY, MINE, BASE;
+function setRegionVars(key) {
+  REGION = key;
+  // your own ranking of the region, made on the server from your ratings ("Re-rank with my ratings")
+  MINE_KEY = `fpvspots:${key}:mine`;
+  MINE = SANDBOXED ? null : store(MINE_KEY, null);
+  BASE = MINE ? `${import.meta.env.BASE_URL}${MINE}` : `${DATA}/${key}`;
+}
+setRegionVars(params.get('region') || (SANDBOXED ? null : store(LAST_REGION, null)) || 'newcastle');
+let national = null;  // every region, once regions.json is in
 const PREFS_KEY = 'fpvspots:prefs';
 const PHONE = matchMedia('(max-width: 820px)');
 const TOUCH = matchMedia('(hover: none)');
@@ -174,35 +183,63 @@ const moreActive = () => moreOn().length;
 
 // ---------------------------------------------------------------- boot
 
-async function boot() {
+// One region's meta and spots, without touching the app's state (so a failed switch changes nothing).
+async function fetchRegion() {
   // The last-used drone's spots download alongside meta.json rather than after it.
   const early = fetch(`${BASE}/spots_${state.profile}.geojson`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  const metaRes = await fetch(`${BASE}/meta.json`);
-  if (!metaRes.ok && MINE) { // your ranking's gone (switched back on another device): use the standard one
+  const metaRes = await fetch(`${BASE}/meta.json`).catch(() => null);
+  if (!metaRes?.ok && MINE) { // your ranking's gone (switched back on another device): use the standard one
     save(MINE_KEY, null);
-    location.reload();
-    return;
+    setRegionVars(REGION);
+    return fetchRegion();
   }
-  if (!metaRes.ok) {
+  if (!metaRes?.ok) return null;
+  const meta = await metaRes.json();
+  const keys = Object.keys(meta.profiles);
+  const loaded = await Promise.all(keys.map(async (k) => (k === state.profile && await early)
+    || fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
+  const spots = {};
+  keys.forEach((k, i) => {
+    loaded[i].features.forEach((f) => { f.properties.a3 = f.properties.legal?.a3_clear_pct ?? 0; });
+    spots[k] = loaded[i];
+  });
+  return { meta, spots };
+}
+
+function useRegion({ meta, spots }) {
+  state.meta = meta;
+  state.spots = spots;
+  ratings = new Ratings(REGION);
+  $('#region-name').textContent = national?.regions[national.index.get(REGION)]?.name || meta.region.name;
+  if (!state.spots[state.profile]) state.profile = profiles()[0];
+  buildProfileSwitch();
+  lookup = new LegalLookup(state.meta);
+  lookup.load(`${BASE}/legal_lookup.png`).catch(() => {});
+  if (!SANDBOXED) {
+    save(LAST_REGION, REGION);
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set('region', REGION);
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    } catch {
+      /* some embeds refuse history changes */
+    }
+  }
+}
+
+async function boot() {
+  if (!SANDBOXED) await loadRegions();
+  let got = await fetchRegion();
+  if (!got && national && REGION !== 'newcastle' && !params.get('region')) {
+    setRegionVars('newcastle');  // the last region you were in has gone
+    got = await fetchRegion();
+  }
+  if (!got) {
     document.body.innerHTML = `<div style="padding:40px;color:#eee;font:16px system-ui">No data for “${esc(REGION)}” yet.
       Run <code>python -m spotfinder run --region ${esc(REGION)}</code> first.</div>`;
     return;
   }
-  state.meta = await metaRes.json();
-  ratings = new Ratings(REGION);
-  $('#region-name').textContent = state.meta.region.name;
-  const keys = profiles();
-  const loaded = await Promise.all(keys.map(async (k) => (k === state.profile && await early)
-    || fetch(`${BASE}/spots_${k}.geojson`).then((r) => r.json())));
-  keys.forEach((k, i) => {
-    loaded[i].features.forEach((f) => { f.properties.a3 = f.properties.legal?.a3_clear_pct ?? 0; });
-    state.spots[k] = loaded[i];
-  });
-  if (!state.spots[state.profile]) state.profile = keys[0];
-  buildProfileSwitch();
-
-  lookup = new LegalLookup(state.meta);
-  lookup.load(`${BASE}/legal_lookup.png`).catch(() => {});
+  useRegion(got);
 
   applySheet();
   initMap();
@@ -212,7 +249,6 @@ async function boot() {
   updateSavedCount();
   renderNow();
   syncControls();
-  if (!SANDBOXED) loadRegions();
   setTimeout(() => loadDetails(state.profile), 300);
   attachServer({
     ratings, region: REGION, meta: state.meta,
@@ -283,25 +319,103 @@ function buildProfileSwitch() {
   $$('#profile-switch button').forEach((b) => b.addEventListener('click', () => setProfile(b.dataset.profile)));
 }
 
-// Other regions, when the pipeline has made more than one.
+// Other regions, when the pipeline has made more than one: they all go on the one map.
 async function loadRegions() {
   try {
     const res = await fetch(`${DATA}/regions.json`);
     if (!res.ok) return;
     const regions = await res.json();
     if (!Array.isArray(regions) || regions.length < 2) return;
-    const sel = el('select', { 'aria-label': 'Region' },
-      regions.map((g) => el('option', { value: g.key, selected: g.key === REGION }, g.name)));
-    sel.addEventListener('change', () => {
-      const u = new URL(location.href);
-      u.searchParams.set('region', sel.value);
-      u.hash = '';
-      location.href = u.href;
-    });
-    $('#region-name').replaceChildren(sel);
+    national = new National(DATA, regions);
+    if (!national.index.has(REGION) && !params.get('region')) setRegionVars(regions[0].key);
   } catch {
     /* one region only */
   }
+}
+
+// ---------------------------------------------------------------- one map, many regions
+
+// The map's middle picks the active region once you're zoomed in enough to be looking at a place.
+const FOLLOW_ZOOM = 9;
+let switching = null;
+
+function followRegion() {
+  if (!national || switching || state.checking || map.getZoom() < FOLLOW_ZOOM) return;
+  if (!$('#view-spot').hidden) return;  // don't swap the list out from under an open spot
+  const c = map.getCenter();
+  const r = national.regionAt(c.lng, c.lat);
+  if (r && r.key !== REGION) switchRegion(r.key);
+}
+
+// Swap the active region in place: the map keeps its view, everything region-shaped is rebuilt.
+function switchRegion(key) {
+  if (key === REGION) return Promise.resolve(true);
+  if (switching) return switching.then(() => switchRegion(key));
+  const was = REGION;
+  switching = (async () => {
+    setRegionVars(key);
+    const got = await fetchRegion();
+    if (!got) {
+      setRegionVars(was);
+      return false;
+    }
+    closeCheck();
+    if (!$('#view-spot').hidden) showList();
+    state.selected = null;
+    state.bandoSel = null;
+    state.like = null;
+    for (const k of Object.keys(kindCache)) delete kindCache[k];
+    for (const k of Object.keys(detailsLoad)) delete detailsLoad[k];
+    detailsDone.clear();
+    bandosData = null;
+    bandosLoad = null;
+    liteTileSet = null;
+    useRegion(got);
+    for (const m of MORE) if (state.more[m.key] != null && !m.opts().includes(state.more[m.key])) delete state.more[m.key];
+    // the bundled basemap is the region's own tiles; diff: false so style.load fires and the overlays go back
+    if (liteActive) map.setStyle(liteStyle(), { diff: false });
+    else {
+      removeOverlays();
+      addOverlays();
+    }
+    placeLabels.forEach((p) => p.marker.remove());
+    placeLabels = [];
+    loadPlaceLabels();
+    renderList();
+    updateSavedCount();
+    renderNow();
+    syncControls();
+    setTimeout(() => loadDetails(state.profile), 300);
+    await server?.retarget({ ratings, region: REGION, meta: state.meta });
+    if (server) renderList();
+    updateOthers();
+    return true;
+  })().finally(() => { switching = null; });
+  return switching;
+}
+
+const REGION_LAYERS = ['sat', 'heatlo', 'heat', 'legal', 'zones-fill', 'zones-line', 'b3d', 'bandos-site', 'bandos-dots',
+  'sel-area', 'sel-halo', 'sel-line', 'sel-path', 'sel-pts', 'spots-dots'];
+const REGION_SOURCES = ['heatlo', 'heat', 'legal', 'zones', 'b3d', 'bandos', 'sel', 'spots'];
+function removeOverlays() {
+  for (const id of REGION_LAYERS) if (map.getLayer(id)) map.removeLayer(id);
+  for (const id of REGION_SOURCES) if (map.getSource(id)) map.removeSource(id);
+}
+
+// Every other region's spots, as dots: tap one to go there.
+let othersSeq = 0;
+async function updateOthers() {
+  if (!national || !map?.getSource('others')) return;
+  const seq = ++othersSeq;
+  const b = map.getBounds();
+  const rows = await national.others(REGION, state.profile, [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], map.getZoom());
+  if (seq !== othersSeq || !map.getSource('others')) return;
+  map.getSource('others').setData(asGeojson(rows));
+}
+
+async function openOther(p) {
+  if (!(await switchRegion(p.region))) return;
+  if (feature(p.id)) select(p.id, false);
 }
 
 // ---------------------------------------------------------------- bottom sheet (phones)
@@ -442,6 +556,10 @@ function initMap() {
     map.getSource('heat').updateImage({ url: `${BASE}/heat_${state.profile}.png`, coordinates: state.meta.region.heat_corners });
   });
   map.on('click', onMapClick);
+  map.on('moveend', () => {
+    followRegion();
+    updateOthers();
+  });
   map.on('contextmenu', (e) => {
     e.preventDefault();
     showCheck(e.lngLat, e.point);
@@ -560,10 +678,7 @@ function addOverlays() {
         'circle-stroke-color': '#1b1030', 'circle-stroke-width': 1,
       },
     });
-    for (const id of ['bandos-site', 'bandos-dots']) {
-      map.on('mouseenter', id, () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
-    }
+    for (const id of ['bandos-site', 'bandos-dots']) pointerOn(id);
   }
   map.addSource('sel', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'sel-area', type: 'fill', source: 'sel', filter: ['==', ['get', 'k'], 'area'], paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.1 } });
@@ -584,6 +699,22 @@ function addOverlays() {
       'circle-stroke-width': ['match', ['get', 'k'], 'takeoff', 2.5, 1],
     },
   });
+  // The other regions' spots sit under this region's, a little smaller (national.js).
+  if (national && !map.getSource('others')) {
+    map.addSource('others', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'others-dots', type: 'circle', source: 'others',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 1.4, 8, 2, 12, 3.5, 15, 6],
+        'circle-color': ['interpolate', ['linear'], ['get', 'score'], 65, '#ffc400', 80, '#ff7030', 95, '#d6246e'],
+        'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.7, 12, 0.9],
+        'circle-stroke-color': '#14191d', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 6, 0.4, 12, 1],
+      },
+    });
+    pointerOn('others-dots');
+    hoverTip('others-dots', (p) => `<b>${esc(p.title)}</b> · ${p.score}`);
+    updateOthers();
+  }
   map.addSource('spots', { type: 'geojson', data: { type: 'FeatureCollection', features: state.visible || [] } });
   map.addLayer({
     id: 'spots-dots', type: 'circle', source: 'spots',
@@ -594,8 +725,7 @@ function addOverlays() {
       'circle-stroke-color': '#14191d', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 12, 1.2],
     },
   });
-  map.on('mouseenter', 'spots-dots', () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', 'spots-dots', () => { map.getCanvas().style.cursor = ''; });
+  pointerOn('spots-dots');
   hoverTip('spots-dots', (p) => `<b>${esc(p.title)}</b> · ${p.score}`);
   for (const id of ['bandos-site', 'bandos-dots']) {
     hoverTip(id, (p) => `<b>${esc(p.n || p.k)}</b><br>${p.n ? `${esc(p.k)} · ` : ''}${BANDO_STATE[p.s](p.h)}${p.m ? ' · protected site' : ''}`);
@@ -616,10 +746,21 @@ function addOverlays() {
   $('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
 }
 
+// Layer handlers outlive the layer (they're keyed by its id), so each is added once, however often
+// the overlays are rebuilt for a new basemap or region.
+const wired = new Set();
+function pointerOn(id) {
+  if (wired.has(`ptr:${id}`)) return;
+  wired.add(`ptr:${id}`);
+  map.on('mouseenter', id, () => { if (!state.checking) map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
+}
+
 // With a mouse, hovering a dot names it.
 let hoverPop = null;
 function hoverTip(layer, html) {
-  if (TOUCH.matches || !map.getLayer(layer)) return;
+  if (TOUCH.matches || !map.getLayer(layer) || wired.has(`tip:${layer}`)) return;
+  wired.add(`tip:${layer}`);
   map.on('mousemove', layer, (e) => {
     const f = e.features?.[0];
     if (!f || state.checking) return;
@@ -637,6 +778,7 @@ function applyLayerToggles() {
   vis('zones-fill', $('#lyr-zones').checked);
   vis('zones-line', $('#lyr-zones').checked);
   vis('spots-dots', $('#lyr-spots').checked);
+  vis('others-dots', $('#lyr-spots').checked);
   vis('sat', state.base === 'satellite');
   if (has3D()) {
     state.b3d = $('#lyr-3d').checked;
@@ -673,6 +815,7 @@ function setProfile(key) {
   renderList();
   renderNow();
   drawSeeds();
+  updateOthers();
   server?.profileChanged();
 }
 
@@ -1220,6 +1363,8 @@ function onMapClick(e) {
   }
   const hit = map.getLayer('spots-dots') && map.queryRenderedFeatures(e.point, { layers: ['spots-dots'] })[0];
   if (hit) return select(hit.properties.id, false);
+  const other = map.getLayer('others-dots') && map.queryRenderedFeatures(e.point, { layers: ['others-dots'] })[0];
+  if (other) return openOther(other.properties);
   const b = bandoAt(e.point);
   if (b) return showBando(b);
   // a tap on empty map puts away whatever was open

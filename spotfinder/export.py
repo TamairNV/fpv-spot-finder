@@ -1046,7 +1046,63 @@ def write_regions_index() -> list[dict]:
     tmp = WEB_DATA_DIR / f"regions.json.{os.getpid()}"  # parallel queue jobs each rewrite it
     tmp.write_text(json.dumps(out))
     tmp.replace(WEB_DATA_DIR / "regions.json")
+    write_national(out)
     return out
+
+
+NATIONAL_TOP = 60  # spots per region and drone in the zoomed-out, whole-country layer
+
+
+def owner_of(regions: list[dict], lon: float, lat: float) -> int | None:
+    """Index of the region a point belongs to on the one big map: the one whose centre is nearest, of
+    those whose box holds it. Hand-made regions overlap the grid and each other, so without this a spot
+    in an overlap would show twice. web/src/national.js does the same sum."""
+    best, best_d = None, math.inf
+    k = math.cos(math.radians(lat))
+    for i, r in enumerate(regions):
+        w, s, e, n = r["bbox"]
+        if not (w <= lon <= e and s <= lat <= n):
+            continue
+        d = ((lon - r["center"][0]) * k) ** 2 + (lat - r["center"][1]) ** 2
+        if d < best_d:
+            best, best_d = i, d
+    return best
+
+
+def write_national(regions: list[dict]) -> None:
+    """web/public/data/national_<drone>.json: the best NATIONAL_TOP spots of every region, each in the
+    region that owns its ground, for the map when it's zoomed out across the country:
+    {"regions": [keys], "spots": [[lon, lat, score, region index, id, title], ...]}."""
+    by_profile: dict[str, list] = {}
+    for i, r in enumerate(regions):
+        meta_path = WEB_DATA_DIR / r["key"] / "meta.json"
+        try:
+            profiles = list(json.loads(meta_path.read_text()).get("profiles", {}))
+        except (OSError, ValueError):
+            continue
+        for prof in profiles:
+            path = WEB_DATA_DIR / r["key"] / f"spots_{prof}.geojson"
+            try:
+                feats = json.loads(path.read_text())["features"]
+            except (OSError, ValueError, KeyError):
+                continue
+            feats.sort(key=lambda f: f["properties"].get("rank", 1e9))
+            rows = by_profile.setdefault(prof, [])
+            n = 0
+            for f in feats:
+                lon, lat = f["geometry"]["coordinates"][:2]
+                if owner_of(regions, lon, lat) != i:
+                    continue
+                p = f["properties"]
+                rows.append([round(lon, 5), round(lat, 5), p.get("score", 0), i, p["id"], p.get("title", "")])
+                n += 1
+                if n >= NATIONAL_TOP:
+                    break
+    keys = [r["key"] for r in regions]
+    for prof, rows in by_profile.items():
+        tmp = WEB_DATA_DIR / f"national_{prof}.json.{os.getpid()}"
+        tmp.write_text(json.dumps({"regions": keys, "spots": rows}, separators=(",", ":")))
+        tmp.replace(WEB_DATA_DIR / f"national_{prof}.json")
 
 
 def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 100_000,
