@@ -848,3 +848,16 @@ def test_tree_in_a_loose_clump_is_not_an_orbit():
     ohm[600:606, 314:320] = 2  # just a low bush: still a fine orbit
     _, _, lone = features.analyse(make_tile(ohm), margin=m, size=1000)
     assert len(lone) == 1
+
+
+def test_owner_of_picks_nearest_centre_of_boxes_holding_the_point():
+    from spotfinder.export import owner_of
+
+    regions = [
+        {"key": "a", "bbox": [0, 0, 2, 2], "center": [1, 1]},
+        {"key": "b", "bbox": [1.5, 0, 3.5, 2], "center": [2.5, 1]},
+    ]
+    assert owner_of(regions, 0.5, 1) == 0
+    assert owner_of(regions, 1.9, 1) == 1  # in both boxes, nearer b's middle
+    assert owner_of(regions, 3, 1) == 1
+    assert owner_of(regions, 5, 1) is None

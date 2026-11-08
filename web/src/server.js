@@ -84,6 +84,31 @@ class Server {
     this.queueEverything(store(this.keys.rev, null) == null ? 0 : store(this.keys.at, 0));
   }
 
+  // On the one big map the app follows you from region to region without a reload: finish what's in
+  // flight for the old region (its outbox stays saved under its own keys), then pick up the new one's.
+  async retarget({ ratings, region, meta }) {
+    if (region === this.region) return;
+    clearTimeout(this.soon);
+    clearTimeout(this.rrTimer);
+    this.rrWatching = false;
+    for (let i = 0; (this.busy || this.sending) && i < 100; i++) await new Promise((r) => setTimeout(r, 100));
+    Object.assign(this, { ratings, region, meta });
+    const k = (s) => `fpvspots:${region}:${s}`;
+    this.keys = { outbox: k('outbox'), rev: k('rev'), flights: k('flights'), photos: k('photos'), at: k('synced-at') };
+    this.outbox = store(this.keys.outbox, {});
+    this.flights = store(this.keys.flights, {});
+    this.photos = store(this.keys.photos, {});
+    this.reviewCache = new Map();
+    this.summary = {};
+    this.rerank = null;
+    this.forecast = null;
+    this.wrapRatings();
+    this.queueEverything(store(this.keys.rev, null) == null ? 0 : store(this.keys.at, 0));
+    this.renderBar();
+    this.loadForecast();
+    this.sync();
+  }
+
   // ---- sync
 
   wrapRatings() {
@@ -1044,5 +1069,6 @@ export async function attachServer(opts) {
   setInterval(kick, 120000);
   return {
     profileChanged: () => { S.renderBar(); S.loadForecast(); },
+    retarget: (o) => S.retarget(o),
   };
 }
