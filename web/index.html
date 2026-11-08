@@ -23,6 +23,10 @@
         <button data-profile="cine85" role="tab"><span class="long">85 mm cine</span><span class="short">85 mm</span></button>
       </div>
       <div class="top-actions">
+        <button id="btn-saved" class="tb-btn" title="Your saved spots: favourites, want to go, been here">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.2 0 3.6 1.2 4.3 2.4h2c.7-1.2 2.1-2.4 4.3-2.4 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21Z"/></svg>
+          <span class="lbl">Saved</span><span class="count" id="saved-count"></span>
+        </button>
         <button id="btn-layers" class="tb-btn" aria-haspopup="true" aria-expanded="false" title="Map layers">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5Zm-7.6 8.8L2 13l10 5 10-5-2.4-1.2L12 15.6l-7.6-3.8Zm0 4.4L2 17.4l10 5 10-5-2.4-1.2L12 20l-7.6-3.8Z"/></svg>
           <span class="lbl">Layers</span>
@@ -103,6 +107,14 @@
         <div class="scroll" id="spot-scroll"><div id="detail-body"></div></div>
       </section>
     </aside>
+
+    <!-- a page of its own over the map: a spot, a bando, How it works (#/spot/…, #/bando/…, #/about) -->
+    <section id="page" aria-live="polite" hidden>
+      <div class="page-inner">
+        <div id="page-head" class="spot-head page-head"></div>
+        <div id="page-body" class="page-body"></div>
+      </div>
+    </section>
 
     <dialog id="about">
       <form method="dialog"><button class="dlg-close" aria-label="Close">×</button></form>

@@ -1,6 +1,7 @@
 // The spot card: a sticky header (back, name, score), then can you fly it, what's there, a 3D look,
 // the wind and the light, and the score breakdown.
 import { el, metres, compass, scoreColour, SANDBOXED } from './util.js';
+import { savedList } from './ratings.js';
 import { goldenSun, sunBox, weatherBox } from './conditions.js';
 import { flightBox, fetchModel, spotReviews, signedInAs, openAccount, canAccount } from './server.js';
 
@@ -134,7 +135,8 @@ function takeoffBox(p) {
       el('a', { href: `https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lon}`, target: '_blank', rel: 'noopener' }, 'Directions to the take-off')));
 }
 
-export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, nearBandos, onRate, onLike, onBack, onNote, onBando, onSave }) {
+// compact: the map panel's short version (the look, the line and why), with a button to the spot's own page.
+export function renderSpot({ head, body, spot, meta, profile, ratings, base, isSeed = false, total, nav, nearBandos, onRate, onLike, onBack, onNote, onBando, onSave, compact = false, onOpen, backLabel = 'Back to the list' }) {
   const p = spot.properties;
   const [lon, lat] = spot.geometry.coordinates;
   let rating = ratings.get(profile, p.id);
@@ -142,7 +144,7 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   const a3 = /A3/.test(category || '');
 
   // ---- header
-  const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the list', title: 'Back to the list', onclick: onBack });
+  const back = el('button', { class: 'icon-btn', 'aria-label': backLabel, title: backLabel, onclick: onBack });
   back.innerHTML = BACK_ICON;
   const score = p.score ?? null;
   // previous / next spot in the list as it's sorted and filtered now
@@ -196,33 +198,28 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       el('span', { class: 'ico' }, '👍'), el('span', {}, 'Good'));
     const down = el('button', { class: `act down${rating < 0 ? ' on' : ''}`, 'aria-pressed': String(rating < 0), onclick: () => rate(-1) },
       el('span', { class: 'ico' }, '👎'), el('span', {}, 'Not for me'));
-    let saved = ratings.isSaved(profile, p.id);
-    const star = el('button', { class: `act save${saved ? ' on' : ''}`, 'aria-pressed': String(saved), title: 'Keep it in your saved spots',
-      onclick: () => {
-        saved = !saved;
-        ratings.setSaved(profile, p.id, saved, { title: p.title, ll: [lon, lat] });
-        star.classList.toggle('on', saved);
-        star.setAttribute('aria-pressed', String(saved));
-        star.firstChild.textContent = saved ? '★' : '☆';
-        star.lastChild.textContent = saved ? 'Saved' : 'Save';
-        onSave?.(saved);
-      } },
-    el('span', { class: 'ico' }, saved ? '★' : '☆'), el('span', {}, saved ? 'Saved' : 'Save'));
-    kids.push(el('div', { class: 'actions' }, star, up, down,
+    kids.push(saveControls(ratings, profile, p.id, { title: p.title, ll: [lon, lat] }, onSave));
+    kids.push(el('div', { class: 'actions' }, up, down,
       el('button', { class: 'act', onclick: onLike, title: 'List the spots most like this one' },
         el('span', { class: 'ico' }, '≈'), el('span', {}, 'Similar')),
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
         el('span', { class: 'ico' }, '➜'), el('span', {}, 'Directions')),
       SANDBOXED ? null : share));
-    kids.push(reviewBox(p, profile, ratings, [lon, lat], onNote), notesBox(p, ratings, onNote), flightBox(spot, profile, onNote));
   }
+  if (compact && onOpen) kids.push(openButton('See everything about this spot', onOpen));
 
   const p3dHost = el('div');
   let lineHost = lineBox(p) || el('div');
   kids.push(p3dHost, lineHost, shotBox(p, lon, lat));
+  // on the spot's own page: your rating, notes and flights come right after the look at it
+  if (!compact && !isSeed) kids.push(reviewBox(p, profile, ratings, [lon, lat], onNote), notesBox(p, ratings, onNote), flightBox(spot, profile, onNote));
 
   const why = whyList(p);
   if (why) kids.push(el('div', { class: 'muted small' }, 'Why it stands out'), why);
+  if (compact) {
+    body.replaceChildren(...kids.filter(Boolean));
+    return load3D();
+  }
   if (p.stats) kids.push(tiles(p.stats, a3));
   kids.push(bandoBox(nearBandos, onBando, meta.profiles[profile].radius_m || 0));
 
@@ -248,9 +245,11 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   kids.push(el('div', { class: 'd-foot' }, `Heights from ${src}.`));
 
   body.replaceChildren(...kids.filter(Boolean));
+  return load3D();
 
   // The 3D view (and three.js with it) loads only when a spot is opened. The best spots come with
   // their model; for the rest the server (when there is one) builds it on request.
+  function load3D() {
   let preview = null;
   let gone = false;
   const note = (text) => p3dHost.replaceChildren(el('div', { class: 'muted small', style: 'margin:0 0 12px' }, text));
@@ -284,6 +283,48 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
     if (!gone) note(`3D view unavailable (${e.message || e}).`);
   });
   return { dispose: () => { gone = true; preview?.dispose(); } };
+  }
+}
+
+const ICON = {
+  want: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>',
+  been: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 16.2-4.2-4.2-1.4 1.4 5.6 5.6 11-11-1.4-1.4z"/></svg>',
+  fav: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.2 0 3.6 1.2 4.3 2.4h2c.7-1.2 2.1-2.4 4.3-2.4 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21Z"/></svg>',
+};
+export const savedIcon = (k) => ICON[k];
+
+// Want to go, then Been here once you've flown it, and Favourite on its own. Your saved stuff lives on
+// the Saved page; these three put things there.
+export function saveControls(ratings, key, id, extra, onChange) {
+  const btn = (k, label, title) => {
+    const b = el('button', { class: `sv sv-${k}`, title, 'aria-pressed': 'false' }, el('span', { class: 'sv-ico' }), el('span', {}, label));
+    b.firstChild.innerHTML = ICON[k];
+    return b;
+  };
+  const want = btn('want', 'Want to go', 'Put it on your Want to go list');
+  const been = btn('been', 'Been here', 'You\'ve flown it: moves it to Been here');
+  const fav = btn('fav', 'Favourite', 'One of your favourites');
+  const paint = () => {
+    const item = ratings.savedItem(key, id);
+    const list = savedList(item);
+    want.setAttribute('aria-pressed', String(list === 'want'));
+    been.setAttribute('aria-pressed', String(list === 'been'));
+    fav.setAttribute('aria-pressed', String(!!item?.fav));
+  };
+  const set = (change) => {
+    ratings.setSavedState(key, id, change, extra);
+    paint();
+    onChange?.();
+  };
+  want.onclick = () => set({ list: savedList(ratings.savedItem(key, id)) === 'want' ? null : 'want' });
+  been.onclick = () => set({ list: savedList(ratings.savedItem(key, id)) === 'been' ? null : 'been' });
+  fav.onclick = () => set({ fav: !ratings.savedItem(key, id)?.fav });
+  paint();
+  return el('div', { class: 'save-row' }, el('div', { class: 'sv-seg' }, want, been), fav);
+}
+
+function openButton(text, onclick) {
+  return el('button', { class: 'btn-open', onclick }, el('span', {}, text), el('span', { class: 'arr', 'aria-hidden': 'true' }, '→'));
 }
 
 // A bando opens in the same panel as a spot: a header, what's left of it, a 3D close-up, the nearest
@@ -301,12 +342,12 @@ const BANDO_LONG = {
   '-1': () => 'Not checked: no LiDAR here, so it may or may not still be standing.',
 };
 
-export function renderBando({ head, body, bando, profile, ratings, base, near, onBack, onSpot, onSave }) {
+export function renderBando({ head, body, bando, profile, ratings, base, near, onBack, onSpot, onSave, compact = false, onOpen, backLabel = 'Back to the list' }) {
   const p = bando.properties;
   const [lon, lat] = bando.geometry.coordinates;
   const id = bandoId(bando);
   const title = p.n || p.k;
-  const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the list', title: 'Back to the list', onclick: onBack });
+  const back = el('button', { class: 'icon-btn', 'aria-label': backLabel, title: backLabel, onclick: onBack });
   back.innerHTML = BACK_ICON;
   head.replaceChildren(back,
     el('div', { class: 'sh-main' },
@@ -323,20 +364,9 @@ export function renderBando({ head, body, bando, profile, ratings, base, near, o
     p.m ? el('span', { class: 'badge part big', title: 'A scheduled monument, listed or open to visitors' }, 'Protected site') : null));
 
   // saved bandos sit with your saved spots, under their own key so a drone's list never mistakes one for a spot
-  let saved = ratings.isSaved('bando', id);
-  const star = el('button', { class: `act save${saved ? ' on' : ''}`, 'aria-pressed': String(saved), title: 'Keep it in your saved spots',
-    onclick: () => {
-      saved = !saved;
-      ratings.setSaved('bando', id, saved, { title, ll: [lon, lat], bando: true });
-      star.classList.toggle('on', saved);
-      star.setAttribute('aria-pressed', String(saved));
-      star.firstChild.textContent = saved ? '★' : '☆';
-      star.lastChild.textContent = saved ? 'Saved' : 'Save';
-      onSave?.(saved);
-    } },
-  el('span', { class: 'ico' }, saved ? '★' : '☆'), el('span', {}, saved ? 'Saved' : 'Save'));
+  kids.push(saveControls(ratings, 'bando', id, { title, ll: [lon, lat], bando: true }, onSave));
   const link = (href, ico, text) => el('a', { class: 'act', href, target: '_blank', rel: 'noopener' }, el('span', { class: 'ico' }, ico), el('span', {}, text));
-  kids.push(el('div', { class: 'actions' }, star,
+  kids.push(el('div', { class: 'actions' },
     link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, '➜', 'Directions'),
     link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, '◉', 'Street View'),
     p.osm ? link(p.osm, '⌖', 'OSM') : null));
@@ -351,13 +381,13 @@ export function renderBando({ head, body, bando, profile, ratings, base, near, o
         el('button', { class: 'linklike', onclick: () => onSpot(f) }, f.properties.title),
         el('div', { class: 'muted small' }, `${metres(d)} away · score ${f.properties.score}`))))));
   }
-  kids.push(notesBox({ id: `bando-${id}`, title }, ratings));
-  kids.push(el('div', { class: 'box' }, el('h4', {}, 'Before you go'),
+  if (compact && onOpen) kids.push(openButton('See everything about this bando', onOpen));
+  if (!compact) kids.push(notesBox({ id: `bando-${id}`, title }, ratings));
+  if (!compact) kids.push(el('div', { class: 'box' }, el('h4', {}, 'Before you go'),
     el('p', { class: 'small' }, p.m
       ? 'A protected heritage site (a scheduled monument, listed or open to visitors): it has a keeper, so ask before flying and keep clear of people.'
       : 'Old buildings are usually private and can be unsafe: ask the owner first and keep out of anything unstable.')));
-  kids.push(weatherBox(lon, lat, profile));
-  kids.push(sunBox(lon, lat));
+  if (!compact) kids.push(weatherBox(lon, lat, profile), sunBox(lon, lat));
   kids.push(el('div', { class: 'd-foot' }, 'Mapped on OpenStreetMap as derelict or abandoned; heights from EA LiDAR.'));
   body.replaceChildren(...kids.filter(Boolean));
 
@@ -423,7 +453,7 @@ function reviewBox(p, profile, ratings, ll, onChange) {
     text,
     user ? el('p', { class: 'muted small' }, `Shows to other pilots as ${user}.`)
       : canAccount() ? el('p', { class: 'muted small' }, el('button', { class: 'linklike', onclick: openAccount }, 'Sign in'),
-        ' to share your rating with other pilots. Until then it stays with you.') : null,
+        ' to share your rating with other pilots. Until then it stays with you.') : '',
     others);
   spotReviews(profile, p.id)?.then((r) => {
     if (!r?.n) return;

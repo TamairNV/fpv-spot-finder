@@ -1,6 +1,8 @@
 // Your thumbs up/down, kept in this browser, and a tiny model that learns from them.
 import { save, store } from './util.js';
 
+export const savedList = (item) => (!item ? null : item.list !== undefined ? item.list : item.fav ? null : 'want');
+
 export class Ratings {
   constructor(regionKey) {
     this.key = `fpvspots:${regionKey}:ratings`;
@@ -26,6 +28,23 @@ export class Ratings {
     if (!on) delete this.saved[k];
     else this.saved[k] = { t: Date.now(), ...extra };
     save(this.savedKey, this.saved);
+  }
+
+  // A saved entry is on one list, "want" (want to go) or "been" (been here), and can be a favourite as
+  // well, or only a favourite. Entries saved before the lists existed count as "want".
+  savedItem(profile, id) {
+    return this.saved[`${profile}/${id}`] || null;
+  }
+
+  setSavedState(profile, id, change, extra = {}) {
+    const item = this.savedItem(profile, id);
+    const cur = item || {};
+    const next = { ...cur, ...extra, list: savedList(item), fav: !!cur.fav, ...change };
+    if (change.list === 'been' && cur.list !== 'been') next.been_t = Date.now();
+    delete next.t;
+    if (!next.list && !next.fav) this.setSaved(profile, id, false);
+    else this.setSaved(profile, id, true, next);
+    return this.savedItem(profile, id);
   }
 
   savedFor(profile) {
