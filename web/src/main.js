@@ -7,8 +7,8 @@ import { Ratings, learnTaste, likeThis, savedList } from './ratings.js';
 import { renderSpot, renderBando, bandoId, legalBadge, nice, BANDO_STATE, starsText, savedIcon } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
-import { attachServer, reviewSummary, canAccount, signedInAs, openAccount } from './server.js';
-import { theme, toggleTheme, onTheme } from './theme.js';
+import { attachServer, reviewSummary, canAccount, signedInAs, openAccount, openFlights, hasServer } from './server.js';
+import { theme, toggleTheme, onTheme, themePref, setTheme } from './theme.js';
 
 const params = new URLSearchParams(location.search);
 const REGION = params.get('region') || 'newcastle';
@@ -222,7 +222,10 @@ async function boot() {
       if (profile && profile !== state.profile) setProfile(profile);
       select(id, true);
     },
+    pageHost,
   }).then((s) => {
+    // a link straight to #/account or #/flights waits for the server
+    if (s && /^#\/(account|flights)/.test(location.hash)) route();
     server = s;
     if (s) renderList();
   });
@@ -1689,6 +1692,9 @@ function route() {
   if (kind === 'bando') return bandoPage(a);
   if (kind === 'about') return aboutPage();
   if (kind === 'saved') return savedPage();
+  // no server (yet): leave the map up; attachServer routes again once it's there
+  if (kind === 'account') return hasServer() ? openAccount(a) : closePage();
+  if (kind === 'flights') return hasServer() ? openFlights() : closePage();
   navigate('', true);
 }
 
@@ -1966,4 +1972,65 @@ function signedOutBanner() {
   return el('div', { class: 'saved-banner' },
     el('span', {}, 'These are kept on this device. Sign in to keep them on your phone and computer too.'),
     el('button', { class: 'btn', onclick: () => openAccount() }, 'Sign in'));
+}
+
+// ---------------------------------------------------------------- account and flights as pages
+
+// The server module hands its account, sign-in and flight-log views here, so they're pages
+// (#/account, #/flights) with Back, not boxes over the map.
+const pageHost = {
+  isOpen: (view) => !$('#page').hidden && location.hash.startsWith(`#/${view}`),
+  close: () => {
+    closePage();
+    setHash('', false);
+  },
+  show(view, nodes) {
+    const target = `#/${view}`;
+    if (!location.hash.startsWith(target)) {
+      const depth = history.state?.depth || 0;
+      try {
+        history.pushState({ page: true, depth: depth + 1 }, '', location.pathname + location.search + target);
+      } catch { /* some embeds refuse history changes */ }
+    }
+    showPage();
+    const h2 = nodes[0]?.tagName === 'H2' ? nodes.shift() : null;
+    const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the map', title: 'Back to the map', onclick: pageBack });
+    back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';
+    const title = h2?.textContent.replace(/^👤\s*/, '') || (view === 'flights' ? 'Your flights' : 'Account');
+    const signedIn = view === 'account' && signedInAs();
+    $('#page-head').replaceChildren(back, el('div', { class: 'sh-main' }, el('div', { class: 'sh-title' }, title),
+      el('div', { class: 'sh-sub' }, signedIn ? 'Your account' : view === 'flights' ? 'Where and when you\'ve flown' : 'Keep your saved spots on every device')));
+    const body = $('#page-body');
+    body.classList.add('prose', 'acct-page');
+    const card = el('div', { class: `acct-card${signedIn || view === 'flights' ? ' wide' : ''}` }, ...nodes);
+    body.replaceChildren(...[
+      signedIn ? yourStuff() : null,
+      card,
+      view === 'account' ? appearanceBox() : null,
+    ].filter(Boolean));
+    document.title = `${title} · FPV Spot Finder`;
+    card.querySelector('input')?.focus({ preventScroll: true });
+  },
+};
+
+// at the top of the account page: what you've got, each a way in
+function yourStuff() {
+  const saved = Object.values(ratings.saved);
+  const n = (k) => saved.filter((it) => (k === 'fav' ? it.fav : savedList(it) === k)).length;
+  const tile = (k, num, label, go) => {
+    const b = el('button', { class: `stuff ${k}`, onclick: go }, iconSpan(k), el('b', {}, num), el('span', {}, label));
+    return b;
+  };
+  return el('div', { class: 'stuff-row' },
+    tile('fav', n('fav'), 'favourites', () => navigate('#/saved')),
+    tile('want', n('want'), 'want to go', () => navigate('#/saved')),
+    tile('been', n('been'), 'been here', () => navigate('#/saved')),
+    el('button', { class: 'stuff flights', onclick: () => navigate('#/flights') }, el('span', { class: 'sv-ico' }, '✈'), el('b', {}, 'Flight log'), el('span', {}, 'your flights')));
+}
+
+function appearanceBox() {
+  const pref = themePref();
+  const seg = el('div', { class: 'seg small' }, [['system', 'Match my device'], ['light', 'Light'], ['dark', 'Dark']].map(([k, label]) =>
+    el('button', { class: pref === k ? 'on' : '', onclick: () => { setTheme(k); route(); } }, label)));
+  return el('div', { class: 'box' }, el('h4', {}, 'Appearance'), seg);
 }
