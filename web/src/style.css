@@ -576,3 +576,32 @@ dialog#about li { margin: 4px 0; }
 /* a bando's header: its dot where a spot has its score */
 .sh-bando { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); border: 1px solid var(--line-2); flex: none; }
 .sh-bando .bdot { width: 16px; height: 16px; }
+
+/* ---------------------------------------------------------------- pages over the map */
+#page {
+  grid-column: 1 / -1; grid-row: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--bg); z-index: 15; position: relative;
+}
+.page-inner { max-width: 1080px; margin: 0 auto; padding: 0 20px 48px; }
+.page-head { position: sticky; top: 0; z-index: 2; background: var(--bg); margin: 0 -20px 6px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.page-head .sh-title { font-size: 20px; }
+/* boxes flow into two columns on a wide screen */
+.page-body { columns: 2 440px; column-gap: 20px; }
+.page-body > * { break-inside: avoid; }
+.page-body > .d-badges, .page-body > .actions { column-span: all; }
+.page-body .p3d-wrap { margin-top: 0; }
+.page-body.prose { columns: auto; max-width: 720px; }
+.page-body.prose h2 { margin: 18px 0 10px; }
+.page-body.prose li { margin: 4px 0; }
+.btn-open {
+  display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 0 0 14px;
+  padding: 11px 14px; border-radius: 10px; border: 0; background: var(--accent); color: var(--accent-ink);
+  font-weight: 650; font-size: 14px;
+}
+.btn-open:hover { filter: brightness(1.08); }
+.btn-open .arr { font-size: 17px; }
+@media (max-width: 820px) {
+  #page { position: fixed; top: var(--top-h); left: 0; right: 0; bottom: 0; z-index: 19; padding-bottom: env(safe-area-inset-bottom); }
+  .page-inner { padding: 0 14px 40px; }
+  .page-head { margin: 0 -14px 6px; padding: 10px 14px; }
+}

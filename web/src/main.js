@@ -586,7 +586,7 @@ function addOverlays() {
   } else if (state.bandoSel) showBandoSelection(state.bandoSel);
   if (!state.booted) {
     state.booted = true;
-    if (location.hash.length > 1) openFromHash();
+    if (location.hash.length > 1) route();
   }
   // Start with the attribution folded away; the (i) button opens it.
   $('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
@@ -868,7 +868,7 @@ function renderFoot() {
   $('#list-foot').replaceChildren(...[
     SANDBOXED ? null : el('a', { href: `${BASE}/spots_${state.profile}.gpx`, download: `fpv-spots-${REGION}-${state.profile}.gpx` }, 'Spots as GPX'),
     el('button', { class: 'linklike', onclick: exportRatings }, SANDBOXED ? 'Copy my ratings and notes' : 'Download my ratings and notes'),
-    el('button', { class: 'linklike', onclick: openAbout }, 'How it works'),
+    el('button', { class: 'linklike', onclick: () => navigate('#/about') }, 'How it works'),
   ].filter(Boolean));
 }
 
@@ -1076,6 +1076,7 @@ function showSpot(f, isSeed) {
   state.detail = renderSpot({
     head: $('#spot-head'), body: $('#detail-body'),
     spot: f, meta: state.meta, profile: state.profile, ratings, base: BASE, isSeed,
+    compact: !isSeed, onOpen: () => navigate(`#/spot/${state.profile}/${f.properties.id}`),
     total: state.spots[state.profile].features.length,
     nav: i < 0 ? null : { prev: stepTo(i - 1), next: stepTo(i + 1) },
     onRate: (v) => {
@@ -1141,14 +1142,15 @@ function openFromHash() {
   const [profile, id] = location.hash.slice(1).split(/[./]/);
   if (profile === 'bando' && id && hasBandos()) {
     loadBandos().then(() => {
-      const f = bandosData.features.find((b) => bandoId(b) === decodeURIComponent(id));
-      if (f) showBandoOnMap(f, false);
+      const f = findBando(id);
+      if (f && state.bandoSel !== f) showBandoOnMap(f, false);
     });
     return;
   }
   if (!state.spots[profile]) return;
   if (profile !== state.profile) setProfile(profile);
   if (!id) return;
+  if (state.selected === id && !$('#view-spot').hidden) return;
   if (feature(id)) select(id, true, false);
   else {
     // an old link: the spot isn't in this ranking any more
@@ -1161,6 +1163,8 @@ function openFromHash() {
 
 window.addEventListener('popstate', () => {
   if (!state.meta) return;
+  if (location.hash.startsWith('#/')) return route();
+  closePage();
   if (location.hash.length > 1) openFromHash();
   else if (!$('#view-spot').hidden) showList();
 });
@@ -1468,6 +1472,7 @@ function showBando(f, push = true) {
     onBack: () => goBack(),
     onSpot: (s) => select(s.properties.id, true),
     onSave: () => renderList(),
+    compact: true, onOpen: () => navigate(`#/bando/${bandoId(f)}`),
   });
   $('#spot-scroll').scrollTop = 0;
   if (PHONE.matches) setSheet('half');
@@ -1589,12 +1594,17 @@ function wireUI() {
     savePrefs();
   });
   $$('#layers-pop input').forEach((i) => i.addEventListener('change', applyLayerToggles));
-  $('#btn-about').addEventListener('click', openAbout);
+  $('#btn-about').addEventListener('click', () => navigate('#/about'));
   $('#btn-theme').addEventListener('click', toggleTheme);
   $('#btn-check').addEventListener('click', () => setChecking(!state.checking));
   $('#check-done').addEventListener('click', () => setChecking(false));
   window.addEventListener('keydown', (e) => {
-    if (document.querySelector('.p3d-wrap.full') || $('#about').open) return;
+    if (document.querySelector('.p3d-wrap.full') || $('#about').open || document.querySelector('dialog[open]')) return;
+    if (e.key === 'Escape' && !$('#page').hidden) {
+      if (e.target.matches?.('textarea, input')) return e.target.blur();
+      return pageBack();
+    }
+    if (!$('#page').hidden) return;
     if (e.key === 'Escape') {
       if (e.target.matches?.('textarea, input')) return e.target.blur();
       if (state.checking) setChecking(false);
@@ -1617,11 +1627,134 @@ function wireUI() {
   });
 }
 
-function openAbout() {
-  $('#about-body').innerHTML = aboutHtml();
-  $('#about-body [data-export]')?.addEventListener('click', exportRatings);
-  $('#about-body [data-import]')?.addEventListener('change', importRatings);
-  $('#about').showModal();
+// ---------------------------------------------------------------- pages
+// Pages sit over the map, which stays loaded underneath so going back is instant:
+// #/spot/<drone>/<id>, #/bando/<id>, #/about. Map links (#freestyle5.<id>, #bando.<id>) stay as they were.
+
+function navigate(h, replace = false) {
+  const url = location.pathname + location.search + h;
+  try {
+    // depth counts the pages opened from inside the app, so Back knows whether there's one to go back to
+    const depth = history.state?.depth || 0;
+    if (replace || SANDBOXED) history.replaceState({ page: true, depth }, '', url);
+    else history.pushState({ page: true, depth: depth + 1 }, '', url);
+  } catch { /* some embeds refuse history changes */ }
+  route();
+}
+
+// Back from a page: to where you came from, or (opened from a link) to the map with it selected.
+function pageBack() {
+  if (!SANDBOXED && history.state?.depth > 0) return history.back();
+  const [kind, a, b] = location.hash.slice(2).split('/');
+  closePage();
+  if (kind === 'spot' && feature(b)) {
+    if (a !== state.profile) setProfile(a);
+    setHash(`${a}.${b}`, false);
+    select(b, true, false);
+  } else if (kind === 'bando') {
+    const f = findBando(a);
+    setHash('', false);
+    if (f) showBandoOnMap(f, false);
+  } else setHash('', false);
+}
+
+function closePage() {
+  state.page?.dispose?.();
+  state.page = null;
+  $('#page').hidden = true;
+  $('#page-body').classList.remove('prose');
+  document.title = 'FPV Spot Finder';
+  map?.resize();
+}
+
+function showPage() {
+  state.page?.dispose?.();
+  state.page = null;
+  $('#page').hidden = false;
+  $('#page').scrollTop = 0;
+  $('#page-body').classList.remove('prose');
+}
+
+function route() {
+  const h = location.hash;
+  if (!h.startsWith('#/')) {
+    closePage();
+    if (h.length > 1) openFromHash();
+    return;
+  }
+  const [kind, a, b] = h.slice(2).split('/').map(decodeURIComponent);
+  if (kind === 'spot') return spotPage(a, b);
+  if (kind === 'bando') return bandoPage(a);
+  if (kind === 'about') return aboutPage();
+  navigate('', true);
+}
+
+async function spotPage(profile, id) {
+  if (!state.spots[profile]) return navigate('', true);
+  if (profile !== state.profile) setProfile(profile);
+  await loadDetails(profile);
+  const f = feature(id);
+  if (!f) return navigate('', true);
+  showPage();
+  const head = $('#page-head'), body = $('#page-body');
+  state.page = renderSpot({
+    head, body, spot: f, meta: state.meta, profile, ratings, base: BASE,
+    total: state.spots[profile].features.length,
+    backLabel: 'Back to the map', onBack: pageBack,
+    onRate: (v) => {
+      ratings.set(profile, id, v, { title: f.properties.title });
+      renderList();
+    },
+    onLike: () => {
+      closePage();
+      setHash('', false);
+      state.like = id;
+      showList();
+      renderList();
+      syncControls();
+    },
+    onNote: () => renderList(),
+    onSave: () => renderList(),
+    nearBandos: hasBandos() ? () => loadBandos().then(() => bandosNear(f.geometry.coordinates, 1000, 4)) : null,
+    onBando: (b) => navigate(`#/bando/${bandoId(b)}`),
+  });
+  document.title = `${f.properties.title} · FPV Spot Finder`;
+}
+
+function findBando(id) {
+  return bandosData?.features.find((b) => bandoId(b) === id) || null;
+}
+
+async function bandoPage(id) {
+  if (!hasBandos()) return navigate('', true);
+  await loadBandos();
+  const f = findBando(id);
+  if (!f) return navigate('', true);
+  showPage();
+  const near = state.spots[state.profile].features
+    .map((s) => ({ f: s, d: haversine(f.geometry.coordinates, s.geometry.coordinates) }))
+    .sort((x, y) => x.d - y.d).slice(0, 3);
+  state.page = renderBando({
+    head: $('#page-head'), body: $('#page-body'), bando: f, profile: state.profile, ratings, base: BASE, near,
+    backLabel: 'Back to the map', onBack: pageBack,
+    onSpot: (s) => navigate(`#/spot/${state.profile}/${s.properties.id}`),
+    onSave: () => renderList(),
+  });
+  document.title = `${f.properties.n || f.properties.k} · FPV Spot Finder`;
+}
+
+function aboutPage() {
+  showPage();
+  const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the map', title: 'Back to the map', onclick: pageBack });
+  back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';
+  $('#page-head').replaceChildren(back, el('div', { class: 'sh-main' }, el('div', { class: 'sh-title' }, 'How it works'),
+    el('div', { class: 'sh-sub' }, 'Where the spots come from, and what they can and can\'t tell you')));
+  const body = $('#page-body');
+  body.classList.add('prose');
+  body.innerHTML = aboutHtml().replace('<h2>How it works</h2>', '');
+  body.querySelector('[data-export]')?.addEventListener('click', exportRatings);
+  body.querySelector('[data-import]')?.addEventListener('change', importRatings);
+  document.title = 'How it works · FPV Spot Finder';
 }
 
 function exportRatings(e) {
