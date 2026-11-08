@@ -1,6 +1,7 @@
 // The spot card: a sticky header (back, name, score), then can you fly it, what's there, a 3D look,
 // the wind and the light, and the score breakdown.
 import { el, metres, compass, scoreColour, SANDBOXED } from './util.js';
+import { savedList } from './ratings.js';
 import { goldenSun, sunBox, weatherBox } from './conditions.js';
 import { flightBox, fetchModel, spotReviews, signedInAs, openAccount, canAccount } from './server.js';
 
@@ -197,19 +198,8 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
       el('span', { class: 'ico' }, '👍'), el('span', {}, 'Good'));
     const down = el('button', { class: `act down${rating < 0 ? ' on' : ''}`, 'aria-pressed': String(rating < 0), onclick: () => rate(-1) },
       el('span', { class: 'ico' }, '👎'), el('span', {}, 'Not for me'));
-    let saved = ratings.isSaved(profile, p.id);
-    const star = el('button', { class: `act save${saved ? ' on' : ''}`, 'aria-pressed': String(saved), title: 'Keep it in your saved spots',
-      onclick: () => {
-        saved = !saved;
-        ratings.setSaved(profile, p.id, saved, { title: p.title, ll: [lon, lat] });
-        star.classList.toggle('on', saved);
-        star.setAttribute('aria-pressed', String(saved));
-        star.firstChild.textContent = saved ? '★' : '☆';
-        star.lastChild.textContent = saved ? 'Saved' : 'Save';
-        onSave?.(saved);
-      } },
-    el('span', { class: 'ico' }, saved ? '★' : '☆'), el('span', {}, saved ? 'Saved' : 'Save'));
-    kids.push(el('div', { class: 'actions' }, star, up, down,
+    kids.push(saveControls(ratings, profile, p.id, { title: p.title, ll: [lon, lat] }, onSave));
+    kids.push(el('div', { class: 'actions' }, up, down,
       el('button', { class: 'act', onclick: onLike, title: 'List the spots most like this one' },
         el('span', { class: 'ico' }, '≈'), el('span', {}, 'Similar')),
       el('a', { class: 'act', href: `https://www.google.com/maps/dir/?api=1&destination=${dest}`, target: '_blank', rel: 'noopener' },
@@ -296,6 +286,43 @@ export function renderSpot({ head, body, spot, meta, profile, ratings, base, isS
   }
 }
 
+const ICON = {
+  want: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>',
+  been: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 16.2-4.2-4.2-1.4 1.4 5.6 5.6 11-11-1.4-1.4z"/></svg>',
+  fav: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.2 0 3.6 1.2 4.3 2.4h2c.7-1.2 2.1-2.4 4.3-2.4 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21Z"/></svg>',
+};
+export const savedIcon = (k) => ICON[k];
+
+// Want to go, then Been here once you've flown it, and Favourite on its own. Your saved stuff lives on
+// the Saved page; these three put things there.
+export function saveControls(ratings, key, id, extra, onChange) {
+  const btn = (k, label, title) => {
+    const b = el('button', { class: `sv sv-${k}`, title, 'aria-pressed': 'false' }, el('span', { class: 'sv-ico' }), el('span', {}, label));
+    b.firstChild.innerHTML = ICON[k];
+    return b;
+  };
+  const want = btn('want', 'Want to go', 'Put it on your Want to go list');
+  const been = btn('been', 'Been here', 'You\'ve flown it: moves it to Been here');
+  const fav = btn('fav', 'Favourite', 'One of your favourites');
+  const paint = () => {
+    const item = ratings.savedItem(key, id);
+    const list = savedList(item);
+    want.setAttribute('aria-pressed', String(list === 'want'));
+    been.setAttribute('aria-pressed', String(list === 'been'));
+    fav.setAttribute('aria-pressed', String(!!item?.fav));
+  };
+  const set = (change) => {
+    ratings.setSavedState(key, id, change, extra);
+    paint();
+    onChange?.();
+  };
+  want.onclick = () => set({ list: savedList(ratings.savedItem(key, id)) === 'want' ? null : 'want' });
+  been.onclick = () => set({ list: savedList(ratings.savedItem(key, id)) === 'been' ? null : 'been' });
+  fav.onclick = () => set({ fav: !ratings.savedItem(key, id)?.fav });
+  paint();
+  return el('div', { class: 'save-row' }, el('div', { class: 'sv-seg' }, want, been), fav);
+}
+
 function openButton(text, onclick) {
   return el('button', { class: 'btn-open', onclick }, el('span', {}, text), el('span', { class: 'arr', 'aria-hidden': 'true' }, '→'));
 }
@@ -337,20 +364,9 @@ export function renderBando({ head, body, bando, profile, ratings, base, near, o
     p.m ? el('span', { class: 'badge part big', title: 'A scheduled monument, listed or open to visitors' }, 'Protected site') : null));
 
   // saved bandos sit with your saved spots, under their own key so a drone's list never mistakes one for a spot
-  let saved = ratings.isSaved('bando', id);
-  const star = el('button', { class: `act save${saved ? ' on' : ''}`, 'aria-pressed': String(saved), title: 'Keep it in your saved spots',
-    onclick: () => {
-      saved = !saved;
-      ratings.setSaved('bando', id, saved, { title, ll: [lon, lat], bando: true });
-      star.classList.toggle('on', saved);
-      star.setAttribute('aria-pressed', String(saved));
-      star.firstChild.textContent = saved ? '★' : '☆';
-      star.lastChild.textContent = saved ? 'Saved' : 'Save';
-      onSave?.(saved);
-    } },
-  el('span', { class: 'ico' }, saved ? '★' : '☆'), el('span', {}, saved ? 'Saved' : 'Save'));
+  kids.push(saveControls(ratings, 'bando', id, { title, ll: [lon, lat], bando: true }, onSave));
   const link = (href, ico, text) => el('a', { class: 'act', href, target: '_blank', rel: 'noopener' }, el('span', { class: 'ico' }, ico), el('span', {}, text));
-  kids.push(el('div', { class: 'actions' }, star,
+  kids.push(el('div', { class: 'actions' },
     link(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`, '➜', 'Directions'),
     link(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`, '◉', 'Street View'),
     p.osm ? link(p.osm, '⌖', 'OSM') : null));

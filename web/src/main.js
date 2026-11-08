@@ -3,11 +3,11 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import './style.css';
 import { $, $$, el, esc, circlePolygon, scoreColour, haversine, metres, store, save, SANDBOXED } from './util.js';
 import { LegalLookup, verdicts } from './legal.js';
-import { Ratings, learnTaste, likeThis } from './ratings.js';
-import { renderSpot, renderBando, bandoId, legalBadge, nice, BANDO_STATE, starsText } from './detail.js';
+import { Ratings, learnTaste, likeThis, savedList } from './ratings.js';
+import { renderSpot, renderBando, bandoId, legalBadge, nice, BANDO_STATE, starsText, savedIcon } from './detail.js';
 import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
-import { attachServer, reviewSummary } from './server.js';
+import { attachServer, reviewSummary, canAccount, signedInAs, openAccount } from './server.js';
 import { theme, toggleTheme, onTheme } from './theme.js';
 
 const params = new URLSearchParams(location.search);
@@ -208,6 +208,7 @@ async function boot() {
   wireUI();
   wireSheet();
   renderList();
+  updateSavedCount();
   renderNow();
   syncControls();
   if (!SANDBOXED) loadRegions();
@@ -737,7 +738,7 @@ function spotRow(f, i) {
     thumbBox(p.preview, el('i', {}, i + 1)),
     el('div', {},
       el('div', { class: 'spot-name' }, p.title,
-        ratings.isSaved(state.profile, p.id) ? el('span', { class: 'is-saved', title: 'Saved' }, '★') : null,
+        ...savedMarks(ratings.savedItem(state.profile, p.id)),
         r > 0 ? el('span', { class: 'rated-up', title: 'You rated it good' }, '▲') : null,
         ratings.note(p.id) ? el('span', { class: 'has-note', title: ratings.note(p.id) }, '📝') : null),
       el('div', { class: 'spot-sub' }, sub),
@@ -773,7 +774,7 @@ function renderFilters() {
   box.replaceChildren(...[
     more,
     isA3() ? chip('a3', state.a3only, 'Only spots that are mostly 150 m clear of houses and parks', 'A3-clear only') : null,
-    nStarred ? chip('starred', state.starred, 'Spots you saved, and your own places', '★ Saved', nStarred) : null,
+    nStarred ? chip('starred', state.starred, 'Only your saved spots and places (all of them are on the Saved page)', 'Saved', nStarred) : null,
     saved ? chip('saved', state.saved, 'Spots you rated 👍', 'Your 👍', saved) : null,
     hasBandos() ? chip('bandos', state.bandoList, 'List the derelict buildings themselves', 'Bandos', bandoCount()) : null,
     ...kindsFor(state.profile).map(([k, n]) => chip(`kind:${k}`, state.kind === k, `Spots with ${KINDS[k].toLowerCase()}`, KINDS[k], n)),
@@ -835,7 +836,7 @@ function renderList() {
   empty.hidden = list.length > 0;
   if (!list.length) {
     empty.replaceChildren(state.query ? `No spots match “${state.query}”.`
-      : state.starred && !moreActive() && !state.kind ? 'No saved spots for this drone yet: open one and press ☆ Save.' : 'No spots with these filters.',
+      : state.starred && !moreActive() && !state.kind ? 'No saved spots for this drone yet: open one and press Want to go, Been here or Favourite.' : 'No spots with these filters.',
       el('br'), el('button', { class: 'linklike', onclick: clearFilters }, 'Clear filters'));
   }
   const total = state.spots[state.profile].features.length;
@@ -880,7 +881,7 @@ function drawPins() {
   (state.order || []).slice(0, 40).forEach((f, i) => {
     const p = f.properties;
     const node = el('div', { class: `mk${state.selected === p.id ? ' on' : ''}`, title: p.title, 'data-id': p.id },
-      el('div', { class: 'pin', style: `--c:${scoreColour(p.score)}` }, i + 1));
+      el('div', { class: 'pin', style: `--c:${scoreColour(p.score)}` }, i + 1), pinMark(ratings.savedItem(state.profile, p.id)));
     node.addEventListener('click', (e) => {
       e.stopPropagation();
       if (state.checking) return;
@@ -1092,7 +1093,7 @@ function showSpot(f, isSeed) {
     },
     onBack: () => goBack(),
     onNote: () => renderList(),
-    onSave: () => renderList(),
+    onSave: savedChanged,
     nearBandos: hasBandos() ? () => loadBandos().then(() => bandosNear(f.geometry.coordinates, 1000, 4)) : null,
     onBando: showBandoOnMap,
   });
@@ -1471,7 +1472,7 @@ function showBando(f, push = true) {
     head: $('#spot-head'), body: $('#detail-body'), bando: f, profile: state.profile, ratings, base: BASE, near,
     onBack: () => goBack(),
     onSpot: (s) => select(s.properties.id, true),
-    onSave: () => renderList(),
+    onSave: savedChanged,
     compact: true, onOpen: () => navigate(`#/bando/${bandoId(f)}`),
   });
   $('#spot-scroll').scrollTop = 0;
@@ -1595,6 +1596,7 @@ function wireUI() {
   });
   $$('#layers-pop input').forEach((i) => i.addEventListener('change', applyLayerToggles));
   $('#btn-about').addEventListener('click', () => navigate('#/about'));
+  $('#btn-saved').addEventListener('click', () => (location.hash === '#/saved' ? pageBack() : navigate('#/saved')));
   $('#btn-theme').addEventListener('click', toggleTheme);
   $('#btn-check').addEventListener('click', () => setChecking(!state.checking));
   $('#check-done').addEventListener('click', () => setChecking(false));
@@ -1686,6 +1688,7 @@ function route() {
   if (kind === 'spot') return spotPage(a, b);
   if (kind === 'bando') return bandoPage(a);
   if (kind === 'about') return aboutPage();
+  if (kind === 'saved') return savedPage();
   navigate('', true);
 }
 
@@ -1714,7 +1717,7 @@ async function spotPage(profile, id) {
       syncControls();
     },
     onNote: () => renderList(),
-    onSave: () => renderList(),
+    onSave: savedChanged,
     nearBandos: hasBandos() ? () => loadBandos().then(() => bandosNear(f.geometry.coordinates, 1000, 4)) : null,
     onBando: (b) => navigate(`#/bando/${bandoId(b)}`),
   });
@@ -1738,7 +1741,7 @@ async function bandoPage(id) {
     head: $('#page-head'), body: $('#page-body'), bando: f, profile: state.profile, ratings, base: BASE, near,
     backLabel: 'Back to the map', onBack: pageBack,
     onSpot: (s) => navigate(`#/spot/${state.profile}/${s.properties.id}`),
-    onSave: () => renderList(),
+    onSave: savedChanged,
   });
   document.title = `${f.properties.n || f.properties.k} · FPV Spot Finder`;
 }
@@ -1846,4 +1849,121 @@ if ('serviceWorker' in navigator && import.meta.env.PROD && !SANDBOXED) {
       urls: performance.getEntriesByType('resource').map((r) => r.name).filter((u) => u.includes('/assets/')),
     }))
     .catch(() => {});
+}
+
+// ---------------------------------------------------------------- saved: favourites, want to go, been here
+
+function savedMarks(item) {
+  if (!item) return [];
+  const mk = (k, title) => {
+    const m = el('span', { class: `svmark ${k}`, title });
+    m.innerHTML = savedIcon(k);
+    return m;
+  };
+  const list = savedList(item);
+  return [item.fav ? mk('fav', 'A favourite') : null, list === 'want' ? mk('want', 'Want to go') : null, list === 'been' ? mk('been', 'Been here') : null].filter(Boolean);
+}
+
+function pinMark(item) {
+  if (!item) return null;
+  const k = item.fav ? 'fav' : savedList(item);
+  if (!k) return null;
+  const m = el('span', { class: `pin-fav ${k}` });
+  m.innerHTML = savedIcon(k);
+  return m;
+}
+
+function savedChanged() {
+  renderList();
+  updateSavedCount();
+  if (location.hash === '#/saved') savedPage(true);
+}
+
+function updateSavedCount() {
+  const n = Object.keys(ratings.saved).length + ratings.placeList().length;
+  $('#saved-count').textContent = n ? String(n) : '';
+}
+
+// Everything you've saved, across the drones: favourites first as big cards, then want to go, been here
+// and your own places. A card opens the spot's or bando's page.
+async function savedPage(keepScroll = false) {
+  const scroll = $('#page').scrollTop;
+  if (hasBandos() && Object.keys(ratings.saved).some((k) => k.startsWith('bando/'))) await loadBandos();
+  showPage();
+  if (keepScroll) $('#page').scrollTop = scroll;
+  const back = el('button', { class: 'icon-btn', 'aria-label': 'Back to the map', title: 'Back to the map', onclick: pageBack });
+  back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>';
+  const entries = Object.entries(ratings.saved).map(([k, item]) => savedEntry(k, item)).filter(Boolean);
+  const drones = [...new Set(entries.map((e) => e.key))];
+  const filter = state.savedFilter && drones.includes(state.savedFilter) ? state.savedFilter : null;
+  const shown = entries.filter((e) => !filter || e.key === filter).sort((a, b) => (b.item.t || 0) - (a.item.t || 0));
+  const favs = shown.filter((e) => e.item.fav), want = shown.filter((e) => e.list === 'want'), been = shown.filter((e) => e.list === 'been');
+  $('#page-head').replaceChildren(back, el('div', { class: 'sh-main' }, el('div', { class: 'sh-title' }, 'Saved'),
+    el('div', { class: 'sh-sub' }, `${favs.length} favourite${favs.length === 1 ? '' : 's'} · ${want.length} want to go · ${been.length} been here`)));
+  const body = $('#page-body');
+  body.classList.add('prose', 'saved-page');
+  const section = (k, title, hint, list, big, empty) => [
+    el('h2', { class: k }, iconSpan(k), title, el('small', {}, hint)),
+    list.length ? el('div', { class: `cards${big ? ' big' : ''}` }, list.map(savedCard)) : el('div', { class: 'saved-empty' }, empty),
+  ];
+  const places = filter ? [] : ratings.placeList();
+  const label = (k) => (k === 'bando' ? 'Bandos' : state.meta.profiles[k]?.short || state.meta.profiles[k]?.label || k);
+  body.replaceChildren(...[
+    signedOutBanner(),
+    drones.length > 1 ? el('div', { class: 'saved-filter seg small' },
+      [null, ...drones].map((k) => el('button', { class: k === filter ? 'on' : '', onclick: () => { state.savedFilter = k; savedPage(); } }, k ? label(k) : 'All'))) : null,
+    ...section('fav', 'Favourites', 'the ones you love', favs, true, 'No favourites yet. Press the heart on a spot or bando you love.'),
+    ...section('want', 'Want to go', 'your list to try', want, false, 'Nothing here yet. Press Want to go on any spot or bando to keep it here.'),
+    ...section('been', 'Been here', 'flown it', been, false, 'Once you\'ve flown somewhere, press Been here and it moves here.'),
+    places.length ? el('h2', {}, 'Your places', el('small', {}, 'points you saved off the map')) : null,
+    places.length ? el('div', { class: 'cards' }, places.map((pl) => el('button', { class: 'card', onclick: () => { closePage(); setHash('', false); openPlace(pl); } },
+      el('div', { class: 'cimg' }, '📍'),
+      el('div', { class: 'cbody' }, el('div', { class: 'ctitle' }, pl.name),
+        el('div', { class: 'csub' }, [pl.note, state.me && pl.ll ? metres(haversine(state.me, pl.ll)) : null].filter(Boolean).join(' · ') || 'Your place'))))) : null,
+  ].filter(Boolean));
+  watchThumbs($('#page'), body);
+  document.title = 'Saved · FPV Spot Finder';
+}
+
+function iconSpan(k) {
+  const s = el('span', { class: 'sv-ico' });
+  s.innerHTML = savedIcon(k);
+  return s;
+}
+
+function savedEntry(k, item) {
+  const i = k.indexOf('/');
+  const key = k.slice(0, i), id = k.slice(i + 1);
+  const list = savedList(item);
+  if (key === 'bando') {
+    const f = findBando(id);
+    return { k, key, id, item, list, f, title: item.title || f?.properties.n || f?.properties.k || 'Bando', kind: 'Bando',
+      open: () => navigate(`#/bando/${id}`), preview: f?.properties.p, ll: item.ll || f?.geometry.coordinates };
+  }
+  const prof = state.meta.profiles[key];
+  if (!prof) return null;
+  const f = state.spots[key]?.features.find((g) => g.properties.id === id);
+  return { k, key, id, item, list, f, title: item.title || f?.properties.title || id, kind: prof.short || prof.label,
+    score: f?.properties.score, open: () => navigate(`#/spot/${key}/${id}`), preview: f?.properties.preview, ll: item.ll || f?.geometry.coordinates };
+}
+
+function savedCard(e) {
+  const when = e.list === 'been' && e.item.been_t ? `flown ${new Date(e.item.been_t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : null;
+  const sub = [state.me && e.ll ? `${metres(haversine(state.me, e.ll))} away` : null, e.f?.properties.locality, when,
+    e.f ? null : 'not in the latest ranking'].filter(Boolean).join(' · ');
+  return el('button', { class: 'card', onclick: e.f ? e.open : null, disabled: !e.f, title: e.f ? `Open ${e.title}` : '' },
+    el('div', { class: 'cimg' },
+      e.preview ? el('img', { alt: '', 'data-thumb': `${BASE}/${e.preview.file}`, decoding: 'async' }) : iconSpan(e.item.fav ? 'fav' : e.list || 'want'),
+      el('span', { class: 'ckind' }, e.kind),
+      e.score != null ? el('span', { class: 'cscore', style: `--c:${scoreColour(e.score)}` }, e.score) : null),
+    el('div', { class: 'cbody' },
+      el('div', { class: 'ctitle' }, e.title, ...savedMarks(e.item)),
+      sub ? el('div', { class: 'csub' }, sub) : null));
+}
+
+function signedOutBanner() {
+  if (SANDBOXED || !canAccount() || signedInAs()) return null;
+  return el('div', { class: 'saved-banner' },
+    el('span', {}, 'These are kept on this device. Sign in to keep them on your phone and computer too.'),
+    el('button', { class: 'btn', onclick: () => openAccount() }, 'Sign in'));
 }

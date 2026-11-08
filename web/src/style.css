@@ -605,3 +605,61 @@ dialog#about li { margin: 4px 0; }
   .page-inner { padding: 0 14px 40px; }
   .page-head { margin: 0 -14px 6px; padding: 10px 14px; }
 }
+
+/* ---------------------------------------------------------------- saving: want to go → been here, and favourites */
+:root { --want: #5cc8ff; --been: #4ade80; --fav: #ff5a8a; }
+:root[data-theme="light"] { --want: #0a74b0; --been: #15803d; --fav: #e11d61; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --want: #0a74b0; --been: #15803d; --fav: #e11d61; } }
+.save-row { display: flex; gap: 8px; margin: 0 0 10px; }
+.sv-seg { display: flex; flex: 2; border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
+.sv-seg .sv { flex: 1; border: 0; border-radius: 0; }
+.sv-seg .sv + .sv { border-left: 1px solid var(--line-2); }
+.sv {
+  display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 8px;
+  background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 13px; white-space: nowrap;
+}
+.save-row > .sv { flex: 1; border: 1px solid var(--line-2); border-radius: 10px; }
+.sv-ico { display: inline-flex; }
+.sv-ico svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.sv-been .sv-ico svg { fill: currentColor; stroke: none; }
+.sv:hover { color: var(--text); }
+.sv[aria-pressed="true"] .sv-ico svg { fill: currentColor; }
+.sv-want[aria-pressed="true"] { color: var(--want); background: color-mix(in srgb, var(--want) 14%, var(--panel-2)); }
+.sv-been[aria-pressed="true"] { color: var(--been); background: color-mix(in srgb, var(--been) 14%, var(--panel-2)); }
+.sv-fav[aria-pressed="true"] { color: var(--fav); background: color-mix(in srgb, var(--fav) 14%, var(--panel-2)); border-color: color-mix(in srgb, var(--fav) 50%, transparent); }
+.page-body > .save-row { column-span: all; max-width: 560px; }
+
+/* little marks on list rows and pins */
+.svmark { display: inline-flex; margin-left: 5px; vertical-align: -2px; }
+.svmark svg { width: 13px; height: 13px; fill: currentColor; }
+.svmark.want { color: var(--want); } .svmark.been { color: var(--been); } .svmark.fav { color: var(--fav); }
+.mk .pin-fav { position: absolute; top: -7px; right: -7px; width: 15px; height: 15px; border-radius: 50%; background: var(--fav); display: grid; place-items: center; box-shadow: 0 0 0 2px #fff; }
+.mk .pin-fav svg { width: 9px; height: 9px; fill: #fff; }
+.mk .pin-fav.want { background: var(--want); } .mk .pin-fav.been { background: var(--been); }
+
+/* the Saved page */
+.tb-btn .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--fav); color: #fff; font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+.tb-btn .count:empty { display: none; }
+.page-body.saved-page { columns: auto; max-width: none; }
+.saved-page h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; margin: 22px 0 10px; }
+.saved-page h2 .sv-ico svg { width: 18px; height: 18px; fill: currentColor; }
+.saved-page h2 small { color: var(--muted); font-weight: 500; font-size: 13px; }
+.saved-page h2.fav { color: var(--fav); } .saved-page h2.want { color: var(--want); } .saved-page h2.been { color: var(--been); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.cards.big { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.card {
+  display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text);
+}
+.card:hover { border-color: var(--line-2); box-shadow: 0 4px 16px var(--shadow); }
+.card .cimg { aspect-ratio: 16 / 9; background: var(--panel-3) center / cover no-repeat; position: relative; display: grid; place-items: center; color: var(--faint); font-size: 26px; }
+.cards:not(.big) .card .cimg { aspect-ratio: 3 / 1; }
+.card .cimg img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+.card .cbody { padding: 10px 12px 12px; display: grid; gap: 3px; }
+.card .ctitle { font-weight: 650; }
+.card .csub { color: var(--muted); font-size: 12.5px; }
+.card .cscore { position: absolute; top: 8px; right: 8px; min-width: 30px; height: 24px; padding: 0 7px; border-radius: 12px; background: rgba(13, 17, 20, .8); color: #fff; font-weight: 700; font-size: 12.5px; display: grid; place-items: center; box-shadow: inset 0 0 0 2px var(--c, transparent); }
+.card .ckind { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 10px; background: rgba(13, 17, 20, .8); color: #fff; font-size: 11.5px; font-weight: 600; }
+.saved-empty { color: var(--muted); padding: 14px 16px; border: 1px dashed var(--line-2); border-radius: var(--radius); }
+.saved-banner { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); margin: 14px 0 0; }
+.saved-filter { display: inline-flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 0; }
