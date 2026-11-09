@@ -189,7 +189,7 @@ def find(region: Region) -> gpd.GeoDataFrame:
     """Every bando in the region: osm_id, tags, footprint geometry and standing height (m, NaN = no LiDAR)."""
     o = osm.extract(region)
     areas, nodes = o["areas"], o["nodes"]
-    cand = pd.concat([f[f["tags"].map(lambda t: is_bando(t) and not heritage(t))] for f in (areas, nodes)],
+    cand = pd.concat([f[f["tags"].map(lambda t: is_bando(t) and not heritage(t)).astype(bool)] for f in (areas, nodes)],
                      ignore_index=True)
     cand = gpd.GeoDataFrame(cand, geometry="geometry", crs=areas.crs)
     pts = cand.geom_type == "Point"

@@ -62,7 +62,7 @@ def tile_url(layer: str, x0: int, y0: int) -> str:
             f"&CoverageId={cov}&format=image/tiff&subset=E({x0},{x0 + TILE})&subset=N({y0},{y0 + TILE})")
 
 
-def _get(session: requests.Session, url: str, tries: int = 4) -> np.ndarray | None:
+def _get(session: requests.Session, url: str, tries: int = 8) -> np.ndarray | None:
     """One coverage as a 1000x1000 float32 array (NaN = no data); None if the square is empty.
 
     The EA server answers HTTP 500 for squares with no data at all (offshore, for one), so a 500
@@ -87,7 +87,7 @@ def _get(session: requests.Session, url: str, tries: int = 4) -> np.ndarray | No
         except (requests.RequestException, rasterio.errors.RasterioIOError) as e:
             status = None
             log.debug("retry %s: %s", url, e)
-        time.sleep(2 ** attempt)
+        time.sleep(min(2 ** attempt, 60))
     if status == 500:
         log.debug("treating persistent HTTP 500 as an empty square: %s", url)
         return None

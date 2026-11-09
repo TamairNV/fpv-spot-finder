@@ -266,27 +266,27 @@ class Namer:
     def __init__(self, region: Region):
         o = osm.extract(region)
         a, n, ln = o["areas"], o["nodes"], o["lines"]
-        named = lambda g: g[g["tags"].map(proper)]
+        named = lambda g: g[g["tags"].map(proper).astype(bool)]
         good_area = named(a)[named(a)["tags"].map(lambda t: (any(k in t for k in (
             "leisure", "natural", "historic", "water", "place", "military", "tourism"))
             or t.get("landuse") in {"forest", "meadow", "recreation_ground", "quarry", "brownfield", "reservoir"})
             and t.get("tourism") not in NOT_A_PLACE and t.get("leisure") not in NOT_A_PLACE
-            and t.get("location") != "indoor")]  # (a club's hot tub was naming a whoop spot)
+            and t.get("location") != "indoor").astype(bool)]  # (a club's hot tub was naming a whoop spot)
         good_area = good_area[good_area.geometry.area < 5e6]
         self.areas = good_area.reset_index(drop=True)
         self.area_tree = STRtree(self.areas.geometry.values)
         pts = named(n)
-        self.places = n[n["tags"].map(is_place)].reset_index(drop=True)
+        self.places = n[n["tags"].map(is_place).astype(bool)].reset_index(drop=True)
         self.place_tree = STRtree(self.places.geometry.values)
-        river = a[a["tags"].map(lambda t: t.get("water") == "river" or t.get("waterway") == "riverbank")]
+        river = a[a["tags"].map(lambda t: t.get("water") == "river" or t.get("waterway") == "riverbank").astype(bool)]
         wide = shapely.get_parts(river.geometry.buffer(-WIDE_RIVER_M / 2).values)
         self.river_tree = STRtree(wide[~shapely.is_empty(wide)])
         # (memorial points are mostly plaques)
         feats = pts[pts["tags"].map(lambda t: any(k in t for k in ("natural", "historic", "tourism", "man_made"))
-                                    and t.get("tourism") not in NOT_A_PLACE and t.get("historic") != "memorial")]
+                                    and t.get("tourism") not in NOT_A_PLACE and t.get("historic") != "memorial").astype(bool)]
         # (a railway or road over a bridge carries the line's or road's name: "Near Metro" says nothing)
         rivers = named(ln)[named(ln)["tags"].map(lambda t: t.get("waterway") in {"river", "canal"} or (
-            "bridge" in t and bool(osm.BRIDGE_NAME.search(osm.bridge_name(t)))))]
+            "bridge" in t and bool(osm.BRIDGE_NAME.search(osm.bridge_name(t))))).astype(bool)]
         self.feats = pd.concat([feats, rivers]).reset_index(drop=True)
         self.feat_tree = STRtree(self.feats.geometry.values)
         # A named viaduct, bridge, lighthouse or monument right at the spot is what you'd call it: the Nine
@@ -296,8 +296,8 @@ class Namer:
                                 and (t.get("bridge:name") or not (t.get("railway") or t.get("highway"))
                                      or osm.BRIDGE_NAME.search(t.get("name") or "")))
                                or t.get("man_made") in {"lighthouse", "windmill"} or t.get("historic") in {"monument", "castle"})
-        self.sights = pd.concat([g[g["tags"].map(sight)] for g in (named(ln), named(a), pts)]).reset_index(drop=True)
-        bridge_lines = ln[ln["tags"].map(lambda t: bool(t.get("bridge:name")) and sight(t))]
+        self.sights = pd.concat([g[g["tags"].map(sight).astype(bool)] for g in (named(ln), named(a), pts)]).reset_index(drop=True)
+        bridge_lines = ln[ln["tags"].map(lambda t: bool(t.get("bridge:name")) and sight(t)).astype(bool)]
         self.sights = pd.concat([self.sights, bridge_lines]).reset_index(drop=True)
         self.sight_tree = STRtree(self.sights.geometry.values)
         # A listed ruin or priory, or a famous artwork, names a spot that isn't in a named place already: Finchale
@@ -305,14 +305,14 @@ class Namer:
         famous = lambda t: bool(t.get("wikidata") or t.get("heritage") or t.get("listed_status"))
         minor = lambda t: (t.get("historic") in FAMOUS_HISTORIC and famous(t)) or (
             t.get("tourism") == "artwork" and bool(t.get("wikidata")))
-        self.minor_sights = pd.concat([g[g["tags"].map(minor)] for g in (named(a), pts)]).reset_index(drop=True)
+        self.minor_sights = pd.concat([g[g["tags"].map(minor).astype(bool)] for g in (named(a), pts)]).reset_index(drop=True)
         self.minor_tree = STRtree(self.minor_sights.geometry.values)
         # More to film on the coast that doesn't name a spot: a sea stack to orbit (Marsden Rock), cliffs to fly along
         rock = lambda t: t.get("natural") in {"stack", "arch", "bare_rock"}
-        self.rocks = pd.concat([named(a)[named(a)["tags"].map(rock)],
-                                pts[pts["tags"].map(lambda t: t.get("natural") in {"stack", "arch"})]]).reset_index(drop=True)
+        self.rocks = pd.concat([named(a)[named(a)["tags"].map(rock).astype(bool)],
+                                pts[pts["tags"].map(lambda t: t.get("natural") in {"stack", "arch"}).astype(bool)]]).reset_index(drop=True)
         self.rock_tree = STRtree(self.rocks.geometry.values)
-        self.cliffs = ln[ln["tags"].map(lambda t: t.get("natural") == "cliff")].reset_index(drop=True)
+        self.cliffs = ln[ln["tags"].map(lambda t: t.get("natural") == "cliff").astype(bool)].reset_index(drop=True)
         self.cliff_tree = STRtree(self.cliffs.geometry.values)
 
     def rock(self, x: float, y: float):
@@ -408,7 +408,7 @@ class Ground:
         t = a["tags"]
         a = a.assign(kind=np.select(
             [t.map(lambda d: d.get("natural") in context.BEACH_NATURAL) & (a.geometry.area >= context.BEACH_MIN_M2),
-             t.map(lambda d: context.is_public(d) and not osm.is_institution(d)), t.map(context.is_farm)],
+             t.map(lambda d: context.is_public(d) and not osm.is_institution(d)), t.map(context.is_farm).astype(bool)],
             ["beach", "public", "farm"], ""))
         self.areas = a[a["kind"] != ""].reset_index(drop=True)
         self.tree = STRtree(self.areas.geometry.values)
@@ -701,9 +701,9 @@ class Decks:
     def __init__(self, region: Region):
         o = osm.extract(region)
         a, ln = o["areas"], o["lines"]
-        outlines = a[a["tags"].map(lambda t: t.get("man_made") == "bridge")].geometry
+        outlines = a[a["tags"].map(lambda t: t.get("man_made") == "bridge").astype(bool)].geometry
         ways = ln[ln["tags"].map(lambda t: t.get("bridge") not in (None, "no") and (
-            osm.is_viaduct(t) or t.get("highway") not in FOOT_HIGHWAYS))].geometry
+            osm.is_viaduct(t) or t.get("highway") not in FOOT_HIGHWAYS)).astype(bool)].geometry
         self.geoms = np.array([*outlines.values, *ways.buffer(4, cap_style="flat").values], dtype=object)
         self.tree = STRtree(self.geoms)
 

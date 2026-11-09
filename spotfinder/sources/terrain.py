@@ -8,6 +8,7 @@ hundred small GeoTIFFs instead of the national download.
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -33,8 +34,15 @@ def _fetch(tile: mercantile.Tile) -> Path:
     if path.exists():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    r = requests.get(TILE_URL.format(z=tile.z, x=tile.x, y=tile.y), timeout=60)
-    r.raise_for_status()
+    for attempt in range(5):
+        try:
+            r = requests.get(TILE_URL.format(z=tile.z, x=tile.x, y=tile.y), timeout=60)
+            r.raise_for_status()
+            break
+        except requests.RequestException:
+            if attempt == 4:
+                raise
+            time.sleep(2 ** attempt)
     path.write_bytes(r.content)
     return path
 

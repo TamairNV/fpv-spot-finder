@@ -173,7 +173,7 @@ def write_basemap(region: Region) -> dict:
         layers.append(_layer(gpd.GeoDataFrame(geometry=[merged], crs=rail.crs).explode(index_parts=False), "rail", 4))
 
     nodes = osm.extract(region)["nodes"]
-    places = nodes[nodes["tags"].map(lambda t: t.get("place") in PLACES and bool(t.get("name")))]
+    places = nodes[nodes["tags"].map(lambda t: t.get("place") in PLACES and bool(t.get("name"))).astype(bool)]
     places = places[places.geometry.within(clip)].to_crs("EPSG:4326")
     labels = sorted(
         ([t["name"], round(p.x, 5), round(p.y, 5), PLACES[t["place"]]] for t, p in zip(places["tags"], places.geometry)),

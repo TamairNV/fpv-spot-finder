@@ -76,6 +76,8 @@ def gap_quality(region: Region, shape) -> dict[str, np.ndarray]:
     if not path.exists():
         return out
     g = pd.read_parquet(path)
+    if g.empty or "y" not in g:  # a region with no gaps writes a frame without columns
+        return out
     if "through" in g:
         g = g[g["through"]]
     xmin, _, _, ymax = region.bbox

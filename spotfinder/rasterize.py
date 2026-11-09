@@ -188,20 +188,20 @@ def build_land_raster(region: Region, tile_m: int = 2000, refresh: bool = False)
     green = polys[(tag("leisure").isin(GREEN_LEISURE) | tag("landuse").isin(GREEN_LANDUSE)
                    | tag("natural").isin(GREEN_NATURAL)) & (polys.geometry.area >= GREEN_MIN_M2)]
     parking = polys[(tag("amenity") == "parking") | tag("parking").isin(["surface", "multi-storey"])]
-    institutions = polys[polys["tags"].map(osm.is_institution)]
+    institutions = polys[polys["tags"].map(osm.is_institution).astype(bool)]
     # Viaducts: the mapped deck outline where there is one, else the line, 8 m wide. Road viaducts and
     # the Metro (traffic, overhead wires) don't count.
     l = o["lines"]
     vt = l["tags"]
     via = l[vt.map(lambda t: osm.is_viaduct(t) and t.get("highway") not in ROAD_HIGHWAYS
-                   and t.get("railway") not in osm.ACTIVE_RAILWAY)]
-    railways = l[vt.map(osm.is_active_railway)].geometry.buffer(RAIL_CLEAR_M, cap_style="flat")
-    power = l[vt.map(osm.is_power_line)]
+                   and t.get("railway") not in osm.ACTIVE_RAILWAY).astype(bool)]
+    railways = l[vt.map(osm.is_active_railway).astype(bool)].geometry.buffer(RAIL_CLEAR_M, cap_style="flat")
+    power = l[vt.map(osm.is_power_line).astype(bool)]
     pole = power["tags"].map(lambda t: t["power"] == "minor_line").to_numpy(bool)
     pylons = power.geometry.buffer(np.where(pole, POLE_CLEAR_M, PYLON_CLEAR_M), cap_style="flat")
     nodes = o["nodes"]
     play = pd.concat([polys[tag("leisure") == "playground"].geometry.buffer(PLAY_CLEAR_M),
-                      nodes[nodes["tags"].map(lambda t: t.get("leisure") == "playground")].geometry.buffer(PLAY_NODE_M)])
+                      nodes[nodes["tags"].map(lambda t: t.get("leisure") == "playground").astype(bool)].geometry.buffer(PLAY_NODE_M)])
     decks = polys[tag("bridge").isin(["viaduct", "aqueduct"]) & (tag("man_made") == "bridge")]
     # ...nor do the arches of one still carrying trains (Plessey Viaduct is the East Coast Main Line). One that
     # only crosses a railway keeps its other arches; the railway is burned over the spans above the tracks.
