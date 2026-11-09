@@ -9,7 +9,7 @@ import { nowConditions, sunTimes } from './conditions.js';
 import { watchThumbs } from './thumbs.js';
 import { attachServer, reviewSummary, canAccount, signedInAs, openAccount, openFlights, hasServer } from './server.js';
 import { toggleTheme, themePref, setTheme } from './theme.js';
-import { National, asGeojson, FULL_ZOOM } from './national.js';
+import { National, asGeojson, bandosGeojson, FULL_ZOOM } from './national.js';
 
 const params = new URLSearchParams(location.search);
 const DATA = `${import.meta.env.BASE_URL}data`;
@@ -120,7 +120,10 @@ const state = {
   listScroll: 0,
   ...store(PREFS_KEY, {}),
 };
-let map, lookup, ratings, checkPopup;
+let map, lookup, ratings, checkPopup, lookupTimer;
+const lookupReady = (l = lookup) => (l.ready ||= l.load(l.url).catch(() => {
+  l.failed = true;
+}));
 let server = null;  // sync, flight log and forecast, when the app runs with its server
 let liteActive = false;
 let placeLabels = [];
@@ -213,8 +216,13 @@ function useRegion({ meta, spots }) {
   $('#region-name').textContent = national?.regions[national.index.get(REGION)]?.name || meta.region.name;
   if (!state.spots[state.profile]) state.profile = profiles()[0];
   buildProfileSwitch();
+  // The "can I fly here?" lookup is a big image to decode, so it waits until the map has settled on
+  // this region (not while you're panning through it), or until you ask.
   lookup = new LegalLookup(state.meta);
-  lookup.load(`${BASE}/legal_lookup.png`).catch(() => {});
+  lookup.url = `${BASE}/legal_lookup.png`;
+  clearTimeout(lookupTimer);
+  const mine = lookup;
+  lookupTimer = setTimeout(() => (window.requestIdleCallback || setTimeout)(() => lookupReady(mine)), 2500);
   if (!SANDBOXED) {
     save(LAST_REGION, REGION);
     try {
@@ -389,6 +397,7 @@ function switchRegion(key) {
     await server?.retarget({ ratings, region: REGION, meta: state.meta });
     if (server) renderList();
     updateOthers();
+    syncOtherBandos();
     return true;
   })().finally(() => { switching = null; });
   return switching;
@@ -403,14 +412,21 @@ function removeOverlays() {
 }
 
 // Every other region's spots, as dots: tap one to go there.
-let othersSeq = 0;
+let othersSeq = 0, othersKey = null, othersSrc = null;
 async function updateOthers() {
   if (!national || !map?.getSource('others')) return;
-  const seq = ++othersSeq;
   const b = map.getBounds();
-  const rows = await national.others(REGION, state.profile, [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], map.getZoom());
+  const bounds = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+  // most pans keep the same regions in view: then the dots are the same and the map keeps what it has
+  const key = national.viewKey(REGION, state.profile, bounds, map.getZoom());
+  const src = map.getSource('others');
+  if (key === othersKey && src === othersSrc) return;
+  const seq = ++othersSeq;
+  const rows = await national.others(REGION, state.profile, bounds, map.getZoom());
   if (seq !== othersSeq || !map.getSource('others')) return;
   map.getSource('others').setData(asGeojson(rows));
+  othersKey = key;
+  othersSrc = map.getSource('others');
 }
 
 async function openOther(p) {
@@ -556,9 +572,16 @@ function initMap() {
     map.getSource('heat').updateImage({ url: `${BASE}/heat_${state.profile}.png`, coordinates: state.meta.region.heat_corners });
   });
   map.on('click', onMapClick);
+  // Wait for the map to settle before swapping regions or dots, so a drag across the country (lots
+  // of short moves) doesn't rebuild the overlays for every box it passes through.
+  let settle = null;
+  map.on('movestart', () => clearTimeout(settle));
   map.on('moveend', () => {
-    followRegion();
-    updateOthers();
+    clearTimeout(settle);
+    settle = setTimeout(() => {
+      followRegion();
+      updateOthers();
+    }, 350);
   });
   map.on('contextmenu', (e) => {
     e.preventDefault();
@@ -597,7 +620,7 @@ async function loadPlaceLabels() {
     const rows = await fetch(`${BASE}/places.json`).then((r) => r.json());
     placeLabels = rows.map(([name, lon, lat, rank]) => {
       const node = el('div', { class: `place r${rank}` }, name);
-      return { rank, marker: new maplibregl.Marker({ element: node }).setLngLat([lon, lat]).addTo(map) };
+      return { rank, on: false, marker: new maplibregl.Marker({ element: node }).setLngLat([lon, lat]) };
     });
     updatePlaceLabels();
   } catch {
@@ -608,8 +631,14 @@ async function loadPlaceLabels() {
 function updatePlaceLabels() {
   const z = map.getZoom();
   const minZoom = [0, 8.5, 11.5, 13.5];
-  placeLabels.forEach(({ rank, marker }) => {
-    marker.getElement().style.display = liteActive && z >= minZoom[rank] ? '' : 'none';
+  // Only the labels that show are on the map: every marker on it is moved by hand on every frame,
+  // hidden or not, and a region has hundreds.
+  placeLabels.forEach((p) => {
+    const on = liteActive && z >= minZoom[p.rank];
+    if (on === p.on) return;
+    p.on = on;
+    if (on) p.marker.addTo(map);
+    else p.marker.remove();
   });
 }
 
@@ -705,7 +734,8 @@ function addOverlays() {
     map.addLayer({
       id: 'others-dots', type: 'circle', source: 'others',
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 1.4, 8, 2, 12, 3.5, 15, 6],
+        // big enough at country scale to read as "lots here / nothing there"; the best spots a bit bigger
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, ['case', ['>=', ['get', 'score'], 85], 2.8, 1.9], 8, ['case', ['>=', ['get', 'score'], 85], 3.4, 2.4], 12, 3.5, 15, 6],
         'circle-color': ['interpolate', ['linear'], ['get', 'score'], 65, '#ffc400', 80, '#ff7030', 95, '#d6246e'],
         'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.7, 12, 0.9],
         'circle-stroke-color': '#14191d', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 6, 0.4, 12, 1],
@@ -714,6 +744,22 @@ function addOverlays() {
     pointerOn('others-dots');
     hoverTip('others-dots', (p) => `<b>${esc(p.title)}</b> · ${p.score}`);
     updateOthers();
+  }
+  // Every other region's bandos, so they show across the country, not only once you're in a region.
+  // The biggest still-standing ones are drawn larger, so the zoomed-out map says where the good ones are.
+  if (national && !map.getSource('others-bandos')) {
+    map.addSource('others-bandos', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'others-bandos-dots', type: 'circle', source: 'others-bandos', layout: { visibility: 'none', 'circle-sort-key': ['-', 0, ['get', 'rank']] },
+      filter: ['==', ['get', 's'], 1],  // the ones LiDAR still sees standing; the rest show once you're in their region
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'],
+          5, ['case', ['<', ['get', 'rank'], 150], 3.2, 1.8], 9, ['case', ['<', ['get', 'rank'], 150], 4.5, 3], 12, 4.5, 15, 7],
+        'circle-color': BANDO_COLOUR, 'circle-stroke-color': '#1b1030', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 12, 1.2],
+      },
+    });
+    pointerOn('others-bandos-dots');
+    hoverTip('others-bandos-dots', (p) => `<b>${esc(p.n || p.k)}</b><br>${p.n ? `${esc(p.k)} · ` : ''}${BANDO_STATE[p.s]?.(p.h) || ''}`);
   }
   map.addSource('spots', { type: 'geojson', data: { type: 'FeatureCollection', features: state.visible || [] } });
   map.addLayer({
@@ -792,7 +838,7 @@ function applyLayerToggles() {
   $('#lyr-3d-row').hidden = !has3D();
   state.pins.forEach((p) => (p.getElement().style.display = $('#lyr-spots').checked ? '' : 'none'));
   $('#lyr-legal-row').hidden = !isA3();
-  $('#lyr-bandos-row').hidden = !hasBandos();
+  $('#lyr-bandos-row').hidden = !hasBandos() && !national;
   syncBandos();
 }
 
@@ -1365,6 +1411,9 @@ function onMapClick(e) {
   if (hit) return select(hit.properties.id, false);
   const other = map.getLayer('others-dots') && map.queryRenderedFeatures(e.point, { layers: ['others-dots'] })[0];
   if (other) return openOther(other.properties);
+  const ob = map.getLayer('others-bandos-dots') && map.getLayoutProperty('others-bandos-dots', 'visibility') !== 'none'
+    && map.queryRenderedFeatures([[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]], { layers: ['others-bandos-dots'] })[0];
+  if (ob) return openOtherBando(ob.properties);
   const b = bandoAt(e.point);
   if (b) return showBando(b);
   // a tap on empty map puts away whatever was open
@@ -1383,6 +1432,11 @@ function clearPanel() {
 // The answer goes in a card under the button (a popup on the map gets cut off on phones),
 // with a dot where you checked.
 function showCheck(lngLat, point, place = null) {
+  if (lookup && !lookup.px) {  // not read yet: read it, then answer
+    const l = lookup;
+    lookupReady(l).then(() => l === lookup && showCheck(lngLat, point, place));
+    if (!l.failed) return;
+  }
   clearPanel();
   const { lng, lat } = lngLat;
   const zones = map.getLayer('zones-fill') ? map.queryRenderedFeatures(point, { layers: ['zones-fill'] }).map((z) => z.properties.name) : [];
@@ -1507,10 +1561,32 @@ function loadBandos() {
 
 // Shown when ticked in Layers, or while the Bandos chip or the bando filter is on.
 function syncBandos() {
+  syncOtherBandos();
   if (!map?.getLayer('bandos-dots')) return;
   const on = bandosWanted();
   if (on) loadBandos();
   for (const id of ['bandos-site', 'bandos-dots']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+}
+
+// The other regions' bandos go with the Bandos layer (or the Bandos list), whether or not this region has any.
+let otherBandosFor = null, otherBandosSrc = null;
+async function syncOtherBandos() {
+  if (!national || !map?.getLayer('others-bandos-dots')) return;
+  const on = !!(state.bandos || state.bandoList || state.more.bando != null);
+  map.setLayoutProperty('others-bandos-dots', 'visibility', on ? 'visible' : 'none');
+  if (!on || (otherBandosFor === REGION && otherBandosSrc === map.getSource('others-bandos'))) return;
+  const region = REGION, all = await national.loadBandos();
+  if (region !== REGION || !map.getSource('others-bandos')) return;
+  map.getSource('others-bandos').setData(bandosGeojson(all.filter((b) => b.region !== region)));
+  otherBandosFor = region;
+  otherBandosSrc = map.getSource('others-bandos');
+}
+
+async function openOtherBando(p) {
+  if (!(await switchRegion(p.region))) return;
+  await loadBandos();
+  const f = findBando(p.id);
+  if (f) showBandoOnMap(f);
 }
 
 // Asked to see one (or some), so the layer stays on: it's ticked in Layers.

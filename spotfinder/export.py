@@ -1072,7 +1072,8 @@ def owner_of(regions: list[dict], lon: float, lat: float) -> int | None:
 def write_national(regions: list[dict]) -> None:
     """web/public/data/national_<drone>.json: the best NATIONAL_TOP spots of every region, each in the
     region that owns its ground, for the map when it's zoomed out across the country:
-    {"regions": [keys], "spots": [[lon, lat, score, region index, id, title], ...]}."""
+    {"regions": [keys], "spots": [[lon, lat, score, region index, id, title], ...]}. Also each region's
+    dots_<drone>.json: all the spots it owns, [[lon, lat, score, id, title], ...] best first."""
     by_profile: dict[str, list] = {}
     for i, r in enumerate(regions):
         meta_path = WEB_DATA_DIR / r["key"] / "meta.json"
@@ -1088,21 +1089,59 @@ def write_national(regions: list[dict]) -> None:
                 continue
             feats.sort(key=lambda f: f["properties"].get("rank", 1e9))
             rows = by_profile.setdefault(prof, [])
-            n = 0
+            dots = []
             for f in feats:
                 lon, lat = f["geometry"]["coordinates"][:2]
                 if owner_of(regions, lon, lat) != i:
                     continue
                 p = f["properties"]
-                rows.append([round(lon, 5), round(lat, 5), p.get("score", 0), i, p["id"], p.get("title", "")])
-                n += 1
-                if n >= NATIONAL_TOP:
-                    break
+                dots.append([round(lon, 5), round(lat, 5), p.get("score", 0), p["id"], p.get("title", "")])
+            rows.extend([lon, lat, score, i, sid, title] for lon, lat, score, sid, title in dots[:NATIONAL_TOP])
+            # every spot this region owns, as bare dots, for the map once it's zoomed in on a region
+            # that isn't the active one (the full spots file is ~40x bigger and has to be filtered)
+            out = WEB_DATA_DIR / r["key"] / f"dots_{prof}.json"
+            tmp = out.with_name(f"{out.name}.{os.getpid()}")
+            tmp.write_text(json.dumps(dots, separators=(",", ":")))
+            tmp.replace(out)
     keys = [r["key"] for r in regions]
+    write_national_bandos(regions, keys)
     for prof, rows in by_profile.items():
         tmp = WEB_DATA_DIR / f"national_{prof}.json.{os.getpid()}"
         tmp.write_text(json.dumps({"regions": keys, "spots": rows}, separators=(",", ":")))
         tmp.replace(WEB_DATA_DIR / f"national_{prof}.json")
+
+
+def _bando_id(f: dict) -> str:
+    """The id the app gives a bando (web/src/detail.js bandoId): w123 from its OSM link, else its place."""
+    m = re.search(r"/(node|way|relation)/(\d+)", f["properties"].get("osm") or "")
+    if m:
+        return f"{m.group(1)[0]}{m.group(2)}"
+    lon, lat = f["geometry"]["coordinates"][:2]
+    return f"{lon:.5f},{lat:.5f}"
+
+
+def write_national_bandos(regions: list[dict], keys: list[str]) -> None:
+    """web/public/data/national_bandos.json: every region's bandos, each in the region that owns its ground,
+    so the zoomed-out map can show them all, not just the active region's:
+    {"regions": [keys], "bandos": [[lon, lat, region index, state, height, area, name, kind, id], ...]},
+    the ones still standing first and the biggest of those first. There are only a few per region."""
+    rows = []
+    for i, r in enumerate(regions):
+        try:
+            feats = json.loads((WEB_DATA_DIR / r["key"] / "bandos.geojson").read_text())["features"]
+        except (OSError, ValueError, KeyError):
+            continue
+        for f in feats:
+            lon, lat = f["geometry"]["coordinates"][:2]
+            if owner_of(regions, lon, lat) != i:
+                continue
+            p = f["properties"]
+            rows.append([round(lon, 5), round(lat, 5), i, p.get("s", -1), p.get("h"), p.get("a", 0), p.get("n") or "",
+                         p.get("k", ""), _bando_id(f)])
+    rows.sort(key=lambda b: (b[3] != 1, -(b[4] or 0) * (b[5] or 0)))
+    tmp = WEB_DATA_DIR / f"national_bandos.json.{os.getpid()}"
+    tmp.write_text(json.dumps({"regions": keys, "bandos": rows}, separators=(",", ":")))
+    tmp.replace(WEB_DATA_DIR / "national_bandos.json")
 
 
 def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: list[Seed], previews: int = 100_000,
