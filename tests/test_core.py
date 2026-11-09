@@ -861,3 +861,19 @@ def test_owner_of_picks_nearest_centre_of_boxes_holding_the_point():
     assert owner_of(regions, 1.9, 1) == 1  # in both boxes, nearer b's middle
     assert owner_of(regions, 3, 1) == 1
     assert owner_of(regions, 5, 1) is None
+
+
+def test_3d_buildings_stay_listed_when_their_record_is_gone(tmp_path):
+    from types import SimpleNamespace
+
+    from spotfinder import buildings3d
+
+    region = SimpleNamespace(out_dir=tmp_path / "out")
+    tiles = tmp_path / "web" / "buildings"
+    assert buildings3d.info(region, tiles) is None  # nothing built
+    (tiles / "14" / "8100").mkdir(parents=True)
+    (tiles / "14" / "8100" / "5200.pbf").write_bytes(b"x" * 10)
+    assert buildings3d.info(region, tiles) == {"tiles": 1, "bytes": 10, "zoom": buildings3d.ZOOM}
+    region.out_dir.mkdir()
+    (region.out_dir / buildings3d.INFO).write_text('{"tiles": 731}')
+    assert buildings3d.info(region, tiles) == {"tiles": 731}  # the real record wins

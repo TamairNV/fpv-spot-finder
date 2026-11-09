@@ -165,9 +165,19 @@ def write(region: Region) -> dict:
     return info
 
 
-def info(region: Region) -> dict | None:
+def info(region: Region, tiles_dir: Path | None = None) -> dict | None:
+    """What write() recorded about a region's 3D buildings. When that record is gone (data/out moved
+    or rebuilt) but the tiles are still in the web folder, a short one made from the tiles, so a
+    re-export doesn't drop the app's 3D toggle while the buildings are still there."""
     p = region.out_dir / INFO
-    return json.loads(p.read_text()) if p.exists() else None
+    if p.exists():
+        return json.loads(p.read_text())
+    if tiles_dir is None or not tiles_dir.is_dir():
+        return None
+    files = list(tiles_dir.rglob("*.pbf"))
+    if not files:
+        return None
+    return {"tiles": len(files), "bytes": sum(f.stat().st_size for f in files), "zoom": ZOOM}
 
 
 if __name__ == "__main__":

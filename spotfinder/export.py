@@ -1169,7 +1169,7 @@ def write_all(region: Region, cells: dict, results: dict, meta: dict, seeds: lis
     # 3D buildings are built on their own (python -m spotfinder.buildings3d <region>); keep them listed
     from .buildings3d import info as buildings3d_info
 
-    if (b3d := buildings3d_info(region)) and (out / "buildings").exists():
+    if (b3d := buildings3d_info(region, out / "buildings")) and (out / "buildings").exists():
         meta["buildings3d"] = b3d
 
     for key, res in results.items():
