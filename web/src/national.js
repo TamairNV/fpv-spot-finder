@@ -47,6 +47,15 @@ export class National {
     return this.overview[profile];
   }
 
+  // Every region's bandos (national_bandos.json), for the map at any zoom: there are only a few per region.
+  loadBandos() {
+    this.bandos ||= fetch(`${this.data}/national_bandos.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then((d) => (d?.bandos || []).map(([lon, lat, ri, s, h, a, n, k, id], rank) => ({ lon, lat, region: d.regions[ri], s, h, a, n, k, id, rank })));
+    return this.bandos;
+  }
+
   // A region's own spots as dots: dots_<drone>.json (just what a dot needs, already only the spots
   // the region owns), or, for data made before that file existed, its full spots file, filtered here.
   loadFull(key, profile) {
@@ -99,6 +108,14 @@ export class National {
 function dist2([lon, lat], [w, s, e, n]) {
   return (lon - (w + e) / 2) ** 2 + (lat - (s + n) / 2) ** 2;
 }
+
+export const bandosGeojson = (rows) => ({
+  type: 'FeatureCollection',
+  features: rows.map((b) => ({
+    type: 'Feature', geometry: { type: 'Point', coordinates: [b.lon, b.lat] },
+    properties: { id: b.id, region: b.region, s: b.s, h: b.h ?? 0, a: b.a, n: b.n, k: b.k, rank: b.rank },
+  })),
+});
 
 export const asGeojson = (rows) => ({
   type: 'FeatureCollection',
