@@ -120,7 +120,10 @@ const state = {
   listScroll: 0,
   ...store(PREFS_KEY, {}),
 };
-let map, lookup, ratings, checkPopup;
+let map, lookup, ratings, checkPopup, lookupTimer;
+const lookupReady = (l = lookup) => (l.ready ||= l.load(l.url).catch(() => {
+  l.failed = true;
+}));
 let server = null;  // sync, flight log and forecast, when the app runs with its server
 let liteActive = false;
 let placeLabels = [];
@@ -213,8 +216,13 @@ function useRegion({ meta, spots }) {
   $('#region-name').textContent = national?.regions[national.index.get(REGION)]?.name || meta.region.name;
   if (!state.spots[state.profile]) state.profile = profiles()[0];
   buildProfileSwitch();
+  // The "can I fly here?" lookup is a big image to decode, so it waits until the map has settled on
+  // this region (not while you're panning through it), or until you ask.
   lookup = new LegalLookup(state.meta);
-  lookup.load(`${BASE}/legal_lookup.png`).catch(() => {});
+  lookup.url = `${BASE}/legal_lookup.png`;
+  clearTimeout(lookupTimer);
+  const mine = lookup;
+  lookupTimer = setTimeout(() => (window.requestIdleCallback || setTimeout)(() => lookupReady(mine)), 2500);
   if (!SANDBOXED) {
     save(LAST_REGION, REGION);
     try {
@@ -403,14 +411,21 @@ function removeOverlays() {
 }
 
 // Every other region's spots, as dots: tap one to go there.
-let othersSeq = 0;
+let othersSeq = 0, othersKey = null, othersSrc = null;
 async function updateOthers() {
   if (!national || !map?.getSource('others')) return;
-  const seq = ++othersSeq;
   const b = map.getBounds();
-  const rows = await national.others(REGION, state.profile, [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], map.getZoom());
+  const bounds = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+  // most pans keep the same regions in view: then the dots are the same and the map keeps what it has
+  const key = national.viewKey(REGION, state.profile, bounds, map.getZoom());
+  const src = map.getSource('others');
+  if (key === othersKey && src === othersSrc) return;
+  const seq = ++othersSeq;
+  const rows = await national.others(REGION, state.profile, bounds, map.getZoom());
   if (seq !== othersSeq || !map.getSource('others')) return;
   map.getSource('others').setData(asGeojson(rows));
+  othersKey = key;
+  othersSrc = map.getSource('others');
 }
 
 async function openOther(p) {
@@ -556,9 +571,16 @@ function initMap() {
     map.getSource('heat').updateImage({ url: `${BASE}/heat_${state.profile}.png`, coordinates: state.meta.region.heat_corners });
   });
   map.on('click', onMapClick);
+  // Wait for the map to settle before swapping regions or dots, so a drag across the country (lots
+  // of short moves) doesn't rebuild the overlays for every box it passes through.
+  let settle = null;
+  map.on('movestart', () => clearTimeout(settle));
   map.on('moveend', () => {
-    followRegion();
-    updateOthers();
+    clearTimeout(settle);
+    settle = setTimeout(() => {
+      followRegion();
+      updateOthers();
+    }, 350);
   });
   map.on('contextmenu', (e) => {
     e.preventDefault();
@@ -597,7 +619,7 @@ async function loadPlaceLabels() {
     const rows = await fetch(`${BASE}/places.json`).then((r) => r.json());
     placeLabels = rows.map(([name, lon, lat, rank]) => {
       const node = el('div', { class: `place r${rank}` }, name);
-      return { rank, marker: new maplibregl.Marker({ element: node }).setLngLat([lon, lat]).addTo(map) };
+      return { rank, on: false, marker: new maplibregl.Marker({ element: node }).setLngLat([lon, lat]) };
     });
     updatePlaceLabels();
   } catch {
@@ -608,8 +630,14 @@ async function loadPlaceLabels() {
 function updatePlaceLabels() {
   const z = map.getZoom();
   const minZoom = [0, 8.5, 11.5, 13.5];
-  placeLabels.forEach(({ rank, marker }) => {
-    marker.getElement().style.display = liteActive && z >= minZoom[rank] ? '' : 'none';
+  // Only the labels that show are on the map: every marker on it is moved by hand on every frame,
+  // hidden or not, and a region has hundreds.
+  placeLabels.forEach((p) => {
+    const on = liteActive && z >= minZoom[p.rank];
+    if (on === p.on) return;
+    p.on = on;
+    if (on) p.marker.addTo(map);
+    else p.marker.remove();
   });
 }
 
@@ -1383,6 +1411,11 @@ function clearPanel() {
 // The answer goes in a card under the button (a popup on the map gets cut off on phones),
 // with a dot where you checked.
 function showCheck(lngLat, point, place = null) {
+  if (lookup && !lookup.px) {  // not read yet: read it, then answer
+    const l = lookup;
+    lookupReady(l).then(() => l === lookup && showCheck(lngLat, point, place));
+    if (!l.failed) return;
+  }
   clearPanel();
   const { lng, lat } = lngLat;
   const zones = map.getLayer('zones-fill') ? map.queryRenderedFeatures(point, { layers: ['zones-fill'] }).map((z) => z.properties.name) : [];
