@@ -115,7 +115,7 @@ def build_vector_rasters(region: Region, tile_m: int = 2000, refresh: bool = Fal
 
     s = overture.load_layer(region, "segments")
     roads = s[(s["subtype"] == "road") & s["class"].isin(ROAD_WIDTH.keys())].copy()
-    roads["geometry"] = roads.geometry.buffer(roads["class"].map(ROAD_WIDTH).to_numpy() / 2, cap_style="flat")
+    roads["geometry"] = roads.geometry.buffer(roads["class"].map(ROAD_WIDTH).to_numpy(dtype=float) / 2, cap_style="flat")
     paths = s[(s["subtype"] == "road") & s["class"].isin(PATH_CLASSES)].copy()
     paths["geometry"] = paths.geometry.buffer(1.0, cap_style="flat")
     rails = s[s["subtype"] == "rail"].copy()

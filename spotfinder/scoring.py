@@ -293,6 +293,8 @@ def similarity(c: dict[str, np.ndarray], p: Profile, groups, valid: np.ndarray) 
         groups = [groups]
     feats = np.stack([c[k] for k in p.style_features], axis=-1)
     v = feats[valid]
+    if not len(v):  # all sea: nothing to compare
+        return None
     med = np.median(v, axis=0)
     iqr = np.subtract(*np.percentile(v, [90, 10], axis=0))
     iqr = np.where(iqr < 1e-6, 1.0, iqr)
