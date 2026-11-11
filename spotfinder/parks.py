@@ -28,7 +28,9 @@ def load(region: Region) -> list[tuple[str, shapely.Geometry]]:
                                 and (t.get("leisure") in PARK_LEISURE or t.get("landuse") == "recreation_ground"
                                      or osm.is_country_park(t))
                                 and t.get("access") not in {"private", "no"})
-    p = areas[is_park]
+    p = areas[is_park.astype(bool)]
+    if p.empty:
+        return []
     out = []
     for name, g in p.groupby(p["tags"].map(lambda t: t["name"])):
         whole = shapely.union_all(g.geometry.values)

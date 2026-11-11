@@ -135,6 +135,7 @@ def write_basemap(region: Region) -> dict:
 
     def inside(g):
         g = g[g.geometry.intersects(clip)].copy()
+        g["geometry"] = shapely.make_valid(g.geometry.values)  # a self-crossing polygon breaks the clip
         g["geometry"] = g.geometry.intersection(clip)
         return g[~g.geometry.is_empty]
 

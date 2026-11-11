@@ -146,7 +146,7 @@ def context_features(region: Region) -> dict[str, np.ndarray]:
     bridge_lines = lines[lines["tags"].map(lambda t: t.get("bridge") in {"viaduct", "aqueduct", "yes", "boardwalk"}).astype(bool)]
     # A bridge worth filming crosses water or is a viaduct; a 60 m flyover across a dual carriageway or a
     # lane over a culvert isn't. Measured on the span LiDAR sees in the air, not the flagged segment.
-    water_union = pd.concat([big_water.geometry, rivers.geometry]).union_all()
+    water_union = shapely.make_valid(pd.concat([big_water.geometry, rivers.geometry]).make_valid().union_all())
     spans = _bridge_spans(region, bridges_seg)
     viaducts = bridge_lines[bridge_lines["tags"].map(osm.is_viaduct).astype(bool)]
     famous_spans = bridge_lines[bridge_lines["tags"].map(osm.famous_bridge).astype(bool)]
